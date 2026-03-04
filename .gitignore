@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+dist/
+build/
+
+# Bundled binaries (WeiDU etc — committed separately or downloaded at setup)
+tools/bin/*
+!tools/bin/.gitkeep
+
+# Game files (never commit copyrighted content)
+*.tlk
+*.key
+*.bif
+*.biff
+reference/
+
+# Editor artifacts
+*.log
+user_settings.json
+*.code-workspace
