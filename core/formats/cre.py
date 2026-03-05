@@ -48,10 +48,9 @@ from dataclasses import dataclass, field
 from enum import IntEnum, IntFlag
 from pathlib import Path
 from typing import Dict, List, Optional, Type, Union
-from core.util.binary import BinaryReader, BinaryWriter, SignatureMismatch
 
-# patched
-# patched2
+from core.util.binary import BinaryReader, BinaryWriter, SignatureMismatch
+from core.util.resref import ResRef
 
 
 # ---------------------------------------------------------------------------

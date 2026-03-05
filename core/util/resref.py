@@ -26,7 +26,7 @@ Usage:
 
 import re
 
-_VALID_PATTERN = re.compile(r'^[A-Z0-9_\-]{0,8}$')
+_VALID_PATTERN = re.compile(r'^[A-Z0-9_\-#]{0,8}$')
 
 MAX_LENGTH = 8
 
@@ -46,7 +46,13 @@ class ResRef:
     __slots__ = ("_value",)
 
     def __init__(self, value: str):
-        normalised = value.strip().upper()
+        # On-disk resrefs are stored in a fixed 8-byte field, null- or
+        # space-padded on the right.  The name ends at the first null or
+        # space, so we truncate there rather than stripping, which would
+        # only remove leading/trailing whitespace and leave embedded spaces
+        # (e.g. 'MONKTU 8') intact to fail validation incorrectly.
+        truncated  = value.split("\x00")[0].split(" ")[0]
+        normalised = truncated.upper()
         if len(normalised) > MAX_LENGTH:
             raise ResRefError(
                 f"ResRef '{value}' is {len(normalised)} characters; maximum is {MAX_LENGTH}"
@@ -54,7 +60,7 @@ class ResRef:
         if normalised and not _VALID_PATTERN.match(normalised):
             raise ResRefError(
                 f"ResRef '{value}' contains invalid characters. "
-                f"Allowed: A-Z, 0-9, underscore, hyphen"
+                f"Allowed: A-Z, 0-9, underscore, hyphen, hash"
             )
         self._value = normalised
 

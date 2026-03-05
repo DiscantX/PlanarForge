@@ -31,10 +31,34 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import IntEnum
 from pathlib import Path
-from typing import Dict, Iterator, List, Optional, Tuple
+from typing import TYPE_CHECKING, Dict, Iterator, List, Optional, Tuple, Union
 
 from core.util.binary import BinaryReader, BinaryWriter, SignatureMismatch
 from core.util.resref import ResRef
+
+if TYPE_CHECKING:
+    # Imported only for type hints; avoids a circular dependency at runtime
+    # since installation.py does not import key_biff.py.
+    from core.installation import GameInstallation
+
+# A game root can be supplied as a plain path or as a GameInstallation object.
+GameRoot = Union[str, Path, "GameInstallation"]
+
+
+def _resolve_game_root(game_root: "GameRoot") -> Path:
+    """
+    Normalise *game_root* to a :class:`Path`.
+
+    Accepts a plain ``str`` or ``Path``, or a ``GameInstallation`` object
+    (in which case its ``install_path`` attribute is used).  This lets
+    callers pass whatever is most convenient without the low-level reader
+    needing to know about the higher-level installation abstraction.
+    """
+    # Check by attribute rather than isinstance to avoid a hard import of
+    # the installation module at runtime (keeps the dependency one-way).
+    if hasattr(game_root, "install_path"):
+        return Path(game_root.install_path)
+    return Path(game_root)
 
 
 # ---------------------------------------------------------------------------
@@ -206,7 +230,7 @@ class KeyFile:
 
         entry = key.find("AR0602", ResType.ARE)
         if entry:
-            raw = key.read_resource(entry, game_root="/path/to/game")
+            raw = key.read_resource(entry, game_root="/path/to/game")  # or a GameInstallation
 
         # All dialogue files:
         for entry in key.find_all(ResType.DLG):
@@ -316,7 +340,7 @@ class KeyFile:
     # Data extraction
     # ------------------------------------------------------------------
 
-    def biff_path(self, entry: ResourceEntry, game_root: str | Path) -> Path:
+    def biff_path(self, entry: ResourceEntry, game_root: GameRoot) -> Path:
         """
         Resolve the on-disk path for the BIFF archive that contains *entry*.
 
@@ -325,9 +349,9 @@ class KeyFile:
         """
         biff     = self._biff_entries[entry.biff_index]
         relative = Path(biff.filename.replace("\\", "/"))
-        return Path(game_root) / relative
+        return _resolve_game_root(game_root) / relative
 
-    def read_resource(self, entry: ResourceEntry, game_root: str | Path) -> bytes:
+    def read_resource(self, entry: ResourceEntry, game_root: GameRoot) -> bytes:
         """
         Extract and return the raw bytes for *entry* from its BIFF archive.
 
@@ -335,7 +359,7 @@ class KeyFile:
         the bytes.  If you need to read many resources from the same archive,
         use :class:`BiffFile` directly to avoid repeated file opens.
 
-            raw = key.read_resource(entry, game_root="/path/to/game")
+            raw = key.read_resource(entry, game_root="/path/to/game")  # or a GameInstallation
         """
         biff_path = self.biff_path(entry, game_root)
         with BiffFile.open(biff_path) as biff:
