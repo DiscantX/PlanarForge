@@ -39,7 +39,7 @@ from core.util.resref import ResRef
 if TYPE_CHECKING:
     # Imported only for type hints; avoids a circular dependency at runtime
     # since installation.py does not import key_biff.py.
-    from core.installation import GameInstallation
+    from game.installation import GameInstallation
 
 # A game root can be supplied as a plain path or as a GameInstallation object.
 GameRoot = Union[str, Path, "GameInstallation"]

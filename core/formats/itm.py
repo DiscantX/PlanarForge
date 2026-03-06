@@ -52,6 +52,7 @@ from typing import List, Optional
 
 from core.util.binary import BinaryReader, BinaryWriter, SignatureMismatch
 from core.util.resref import ResRef
+from core.util.strref import StrRef, StrRefError
 
 
 # ---------------------------------------------------------------------------
@@ -67,7 +68,6 @@ HEADER_SIZE_V11 = 116
 EXT_HEADER_SIZE = 56
 FEATURE_BLOCK_SIZE = 48
 
-STRREF_NONE = 0xFFFFFFFF
 
 
 # ---------------------------------------------------------------------------
@@ -553,8 +553,8 @@ class ItmHeader:
     :class:`ItmFile` on write; you do not need to set them manually.
     """
     # Identity
-    unidentified_name:  int = STRREF_NONE   # StrRef
-    identified_name:    int = STRREF_NONE   # StrRef
+    unidentified_name:  StrRef = StrRef(0xFFFFFFFF)   # StrRef
+    identified_name:    StrRef = StrRef(0xFFFFFFFF)   # StrRef
     replacement_item:   str = ""            # ResRef — item replaced when depleted
     flags:              int = ItemFlag.DROPPABLE
     item_type:          int = ItemType.MISCELLANEOUS
@@ -583,8 +583,8 @@ class ItmHeader:
     lore_required:      int = 0             # uint16 — lore to identify
     ground_icon:        str = ""            # ResRef — dropped-on-ground BAM
     base_weight:        int = 0             # int32  — in tenths of a pound
-    unidentified_desc:  int = STRREF_NONE   # StrRef
-    identified_desc:    int = STRREF_NONE   # StrRef
+    unidentified_desc:  StrRef = StrRef(0xFFFFFFFF)   # StrRef
+    identified_desc:    StrRef = StrRef(0xFFFFFFFF)   # StrRef
     description_icon:   str = ""            # ResRef
     enchantment:        int = 0             # int32  — "+N" enchantment level
 
@@ -604,8 +604,8 @@ class ItmHeader:
 
     @classmethod
     def _read(cls, r: BinaryReader, version: bytes) -> "ItmHeader":
-        unidentified_name   = r.read_uint32()
-        identified_name     = r.read_uint32()
+        unidentified_name   = StrRef(r.read_uint32())
+        identified_name     = StrRef(r.read_uint32())
         replacement_item    = r.read_resref()
         flags               = r.read_uint32()
         item_type           = r.read_uint16()
@@ -630,8 +630,8 @@ class ItmHeader:
         lore_required       = r.read_uint16()
         ground_icon         = r.read_resref()
         base_weight         = r.read_int32()
-        unidentified_desc   = r.read_uint32()
-        identified_desc     = r.read_uint32()
+        unidentified_desc   = StrRef(r.read_uint32())
+        identified_desc     = StrRef(r.read_uint32())
         description_icon    = r.read_resref()
         enchantment         = r.read_int32()
         ext_header_offset   = r.read_uint32()
@@ -668,8 +668,8 @@ class ItmHeader:
         )
 
     def _write(self, w: BinaryWriter, version: bytes) -> None:
-        w.write_uint32(self.unidentified_name)
-        w.write_uint32(self.identified_name)
+        w.write_uint32(int(self.unidentified_name))
+        w.write_uint32(int(self.identified_name))
         w.write_resref(self.replacement_item)
         w.write_uint32(self.flags)
         w.write_uint16(self.item_type)
@@ -695,8 +695,8 @@ class ItmHeader:
         w.write_uint16(self.lore_required)
         w.write_resref(self.ground_icon)
         w.write_int32(self.base_weight)
-        w.write_uint32(self.unidentified_desc)
-        w.write_uint32(self.identified_desc)
+        w.write_uint32(int(self.unidentified_desc))
+        w.write_uint32(int(self.identified_desc))
         w.write_resref(self.description_icon)
         w.write_int32(self.enchantment)
         w.write_uint32(self.ext_header_offset)
@@ -892,8 +892,8 @@ class ItmFile:
             "format":  "itm",
             "version": version_str(self.version),
             "header": {
-                "unidentified_name":    h.unidentified_name,
-                "identified_name":      h.identified_name,
+                "unidentified_name": self.unidentified_name.to_json(),
+                "identified_name": self.identified_name.to_json(),
                 "item_type":            h.item_type,
                 "flags":                h.flags,
                 "usability":            h.usability,
@@ -902,8 +902,8 @@ class ItmFile:
                 "max_stack":            h.max_stack,
                 "lore_required":        h.lore_required,
                 "enchantment":          h.enchantment,
-                "unidentified_desc":    h.unidentified_desc,
-                "identified_desc":      h.identified_desc,
+                "unidentified_desc": self.unidentified_desc.to_json(),
+                "identified_desc": self.identified_desc.to_json(),
                 "equip_feature_index":  h.equip_feature_index,
                 "equip_feature_count":  h.equip_feature_count,
             },
@@ -945,8 +945,8 @@ class ItmFile:
 
         hd = d.get("header", {})
         header = ItmHeader(
-            unidentified_name   = hd.get("unidentified_name",  STRREF_NONE),
-            identified_name     = hd.get("identified_name",    STRREF_NONE),
+            unidentified_name=StrRef.from_json(hd.get("unidentified_name", 0xFFFFFFFF)),
+            identified_name=StrRef.from_json(hd.get("identified_name", 0xFFFFFFFF)),
             replacement_item    = hd.get("replacement_item",   ""),
             flags               = hd.get("flags",              ItemFlag.DROPPABLE),
             item_type           = hd.get("item_type",          ItemType.MISCELLANEOUS),
@@ -971,8 +971,8 @@ class ItmFile:
             lore_required       = hd.get("lore_required",      0),
             ground_icon         = hd.get("ground_icon",        ""),
             base_weight         = hd.get("base_weight",        0),
-            unidentified_desc   = hd.get("unidentified_desc",  STRREF_NONE),
-            identified_desc     = hd.get("identified_desc",    STRREF_NONE),
+            unidentified_desc=StrRef.from_json(hd.get("unidentified_desc", 0xFFFFFFFF)),
+            identified_desc=StrRef.from_json(hd.get("identified_desc", 0xFFFFFFFF)),
             description_icon    = hd.get("description_icon",   ""),
             enchantment         = hd.get("enchantment",        0),
             equip_feature_index = hd.get("equip_feature_index", 0),

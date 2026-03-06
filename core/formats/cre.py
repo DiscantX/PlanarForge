@@ -51,6 +51,10 @@ from typing import Dict, List, Optional, Type, Union
 
 from core.util.binary import BinaryReader, BinaryWriter, SignatureMismatch
 from core.util.resref import ResRef
+from core.util.strref import StrRef, StrRefError
+
+# patched
+# patched2
 
 
 # ---------------------------------------------------------------------------
@@ -76,7 +80,6 @@ EFFECT_V2_SIZE        = 104
 SLOT_COUNT     = 40   # V1 / V9  (BG1/BG2/BGEE: 40 slots per IESDP)
 SLOT_COUNT_V12 = 46   # PST
 
-STRREF_NONE = 0xFFFFFFFF
 
 
 # ---------------------------------------------------------------------------
@@ -574,8 +577,8 @@ class CreHeader:
     the start of the file (including the 8-byte signature/version prefix).
     """
     # -- Identity --
-    name:               int   = STRREF_NONE
-    tooltip:            int   = STRREF_NONE
+    name:               StrRef   = StrRef(0xFFFFFFFF)
+    tooltip:            StrRef   = StrRef(0xFFFFFFFF)
     flags:              int   = CreFlag.NONE
     xp_value:           int   = 0
     xp:                 int   = 0
@@ -724,8 +727,8 @@ class CreHeader:
         Both versions are identical in this region.
         """
         return dict(
-            name                = r.read_uint32(),
-            tooltip             = r.read_uint32(),
+            name                = StrRef(r.read_uint32()),
+            tooltip             = StrRef(r.read_uint32()),
             flags               = r.read_uint32(),
             xp_value            = r.read_uint32(),
             xp                  = r.read_uint32(),
@@ -860,8 +863,8 @@ class CreHeader:
 
     def _write_common_prefix(self, w: BinaryWriter) -> None:
         """Write the 616-byte common prefix shared by V1.0 and V9.0 (0x0008..0x026F)."""
-        w.write_uint32(self.name)
-        w.write_uint32(self.tooltip)
+        w.write_uint32(int(self.name))
+        w.write_uint32(int(self.tooltip))
         w.write_uint32(self.flags)
         w.write_uint32(self.xp_value)
         w.write_uint32(self.xp)
@@ -1140,8 +1143,8 @@ class CreHeaderV12:
     """
 
     # -- Identity --
-    name:               int   = STRREF_NONE
-    tooltip:            int   = STRREF_NONE
+    name:               StrRef   = StrRef(0xFFFFFFFF)
+    tooltip:            StrRef   = StrRef(0xFFFFFFFF)
     flags:              int   = CreFlag.NONE
     xp_value:           int   = 0
     xp:                 int   = 0
@@ -1217,7 +1220,7 @@ class CreHeaderV12:
 
     # -- Tracking --
     tracking:           int   = 0
-    tracking_target:    int   = STRREF_NONE
+    tracking_target:    StrRef = StrRef(0xFFFFFFFF)
 
     # -- PST soundset: 100 bytes (25 × uint32 strrefs) --
     soundset:           bytes = b"\xff" * 100
@@ -1286,8 +1289,8 @@ class CreHeaderV12:
 
     @classmethod
     def _read(cls, r: BinaryReader) -> "CreHeaderV12":
-        name            = r.read_uint32()
-        tooltip         = r.read_uint32()
+        name            = StrRef(r.read_uint32())
+        tooltip         = StrRef(r.read_uint32())
         flags           = r.read_uint32()
         xp_value        = r.read_uint32()
         xp              = r.read_uint32()
@@ -1466,8 +1469,8 @@ class CreHeaderV12:
     # ------------------------------------------------------------------
 
     def _write(self, w: BinaryWriter) -> None:
-        w.write_uint32(self.name)
-        w.write_uint32(self.tooltip)
+        w.write_uint32(int(self.name))
+        w.write_uint32(int(self.tooltip))
         w.write_uint32(self.flags)
         w.write_uint32(self.xp_value)
         w.write_uint32(self.xp)
@@ -1851,7 +1854,7 @@ class CreFile:
     def to_json(self) -> dict:
         h = self.header
         hd: dict = {
-            "name": h.name, "tooltip": h.tooltip, "flags": h.flags,
+            "name": self.name.to_json(), "tooltip": self.tooltip.to_json(), "flags": h.flags,
             "xp_value": h.xp_value, "current_hp": h.current_hp,
             "max_hp": h.max_hp, "animation_id": h.animation_id,
             "race": h.race, "klass": h.klass, "gender": h.gender,
@@ -1922,7 +1925,7 @@ class CreFile:
 
         # Fields shared by both V1.0 and V9.0
         common = dict(
-            name=hd.get("name", STRREF_NONE), tooltip=hd.get("tooltip", STRREF_NONE),
+            name=StrRef.from_json(hd.get("name", 0xFFFFFFFF)), tooltip=StrRef.from_json(hd.get("tooltip", 0xFFFFFFFF)),
             flags=hd.get("flags", 0), xp_value=hd.get("xp_value", 0),
             xp=hd.get("xp", 0), gold=hd.get("gold", 0),
             status_flags=hd.get("status_flags", 0),
@@ -2169,7 +2172,7 @@ class CreFileV12(CreFile):
     def to_json(self) -> dict:
         h = self.header
         hd: dict = {
-            "name": h.name, "tooltip": h.tooltip, "flags": h.flags,
+            "name": self.name.to_json(), "tooltip": self.tooltip.to_json(), "flags": h.flags,
             "xp_value": h.xp_value, "current_hp": h.current_hp,
             "max_hp": h.max_hp, "animation_id": h.animation_id,
             "race": h.race, "klass": h.klass, "gender": h.gender,
@@ -2220,7 +2223,7 @@ class CreFileV12(CreFile):
         overlay_hex   = hd.get("overlay_data", "")
         v12_tail_hex  = hd.get("v12_tail", "")
         header = CreHeaderV12(
-            name=hd.get("name", STRREF_NONE), tooltip=hd.get("tooltip", STRREF_NONE),
+            name=StrRef.from_json(hd.get("name", 0xFFFFFFFF)), tooltip=StrRef.from_json(hd.get("tooltip", 0xFFFFFFFF)),
             flags=hd.get("flags", 0), xp_value=hd.get("xp_value", 0),
             xp=hd.get("xp", 0), gold=hd.get("gold", 0),
             status_flags=hd.get("status_flags", 0),
@@ -2259,7 +2262,7 @@ class CreFileV12(CreFile):
             hammer_prof=hd.get("hammer_prof",0), axe_prof=hd.get("axe_prof",0),
             club_prof=hd.get("club_prof",0), misc_prof=hd.get("misc_prof",0),
             tracking=hd.get("tracking",0),
-            tracking_target=hd.get("tracking_target",STRREF_NONE),
+            tracking_target=StrRef.from_json(hd.get("tracking_target", 0xFFFFFFFF)),
             soundset=bytes.fromhex(soundset_hex) if soundset_hex else b"\xff"*100,
             level_1=hd.get("level_1",0), level_2=hd.get("level_2",0),
             level_3=hd.get("level_3",0), sex=hd.get("sex",Gender.MALE),

@@ -63,6 +63,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from core.util.binary import BinaryReader, BinaryWriter, SignatureMismatch
+from core.util.strref import StrRef, StrRefError
 
 
 # ---------------------------------------------------------------------------
@@ -76,7 +77,6 @@ HEADER_SIZE  = 52        # bytes
 STATE_SIZE       = 16
 TRANSITION_SIZE  = 32
 
-STRREF_NONE  = 0xFFFFFFFF
 NO_INDEX     = 0xFFFFFFFF
 
 
@@ -167,14 +167,14 @@ class State:
     ``get_transitions(dlg)``    — resolved list of :class:`Transition` objects
     ``get_trigger(dlg)``        — raw trigger string or ``None``
     """
-    text_strref:            int = STRREF_NONE   # uint32 — NPC spoken text
+    text_strref:            StrRef = StrRef(0xFFFFFFFF)   # uint32 — NPC spoken text
     first_transition_index: int = 0             # uint32
     transition_count:       int = 0             # uint32
     trigger_index:          int = NO_INDEX      # uint32 — 0xFFFFFFFF = none
 
     @classmethod
     def _read(cls, r: BinaryReader) -> "State":
-        text_strref  = r.read_uint32()
+        text_strref  = StrRef(r.read_uint32())
         first_ti     = r.read_uint32()
         trans_count  = r.read_uint32()
         trig_idx     = r.read_uint32()
@@ -186,7 +186,7 @@ class State:
         )
 
     def _write(self, w: BinaryWriter) -> None:
-        w.write_uint32(self.text_strref)
+        w.write_uint32(int(self.text_strref))
         w.write_uint32(self.first_transition_index)
         w.write_uint32(self.transition_count)
         w.write_uint32(self.trigger_index)
@@ -217,7 +217,7 @@ class State:
     # ------------------------------------------------------------------
 
     def to_json(self) -> dict:
-        d: dict = {"text_strref": self.text_strref,
+        d: dict = {"text_strref": self.text_strref.to_json(),
                    "first_transition_index": self.first_transition_index,
                    "transition_count": self.transition_count}
         if self.trigger_index != NO_INDEX:
@@ -227,7 +227,7 @@ class State:
     @classmethod
     def from_json(cls, d: dict) -> "State":
         return cls(
-            text_strref            = d.get("text_strref", STRREF_NONE),
+            text_strref=StrRef.from_json(hd.get("text_strref", 0xFFFFFFFF)),
             first_transition_index = d.get("first_transition_index", 0),
             transition_count       = d.get("transition_count", 0),
             trigger_index          = d.get("trigger_index", NO_INDEX),
@@ -263,8 +263,8 @@ class Transition:
     ``get_action(dlg)``      — raw action string or ``None``
     """
     flags:            int = TransitionFlag.NONE   # uint32
-    text_strref:      int = STRREF_NONE           # uint32 — player response text
-    journal_strref:   int = STRREF_NONE           # uint32 — journal text
+    text_strref:      StrRef = StrRef(0xFFFFFFFF)           # uint32 — player response text
+    journal_strref:   StrRef = StrRef(0xFFFFFFFF)           # uint32 — journal text
     trigger_index:    int = NO_INDEX              # uint32 — into transition_triggers
     action_index:     int = NO_INDEX              # uint32 — into actions
     next_dlg:         str = ""                    # ResRef — foreign DLG (empty = self)
@@ -273,7 +273,7 @@ class Transition:
     @classmethod
     def _read(cls, r: BinaryReader) -> "Transition":
         flags        = r.read_uint32()
-        text_strref  = r.read_uint32()
+        text_strref  = StrRef(r.read_uint32())
         journal_str  = r.read_uint32()
         trig_idx     = r.read_uint32()
         action_idx   = r.read_uint32()
@@ -288,8 +288,8 @@ class Transition:
 
     def _write(self, w: BinaryWriter) -> None:
         w.write_uint32(self.flags)
-        w.write_uint32(self.text_strref)
-        w.write_uint32(self.journal_strref)
+        w.write_uint32(int(self.text_strref))
+        w.write_uint32(int(self.journal_strref))
         w.write_uint32(self.trigger_index)
         w.write_uint32(self.action_index)
         w.write_resref(self.next_dlg)
@@ -363,7 +363,7 @@ class Transition:
         d: dict = {"flags": self.flags}
         if self.has_text:
             d["text_strref"] = self.text_strref
-        if self.journal_strref != STRREF_NONE:
+        if not self.journal_strref.is_none:
             d["journal_strref"] = self.journal_strref
         if self.has_trigger:
             d["trigger_index"] = self.trigger_index
@@ -379,8 +379,8 @@ class Transition:
     def from_json(cls, d: dict) -> "Transition":
         return cls(
             flags            = d.get("flags", TransitionFlag.NONE),
-            text_strref      = d.get("text_strref", STRREF_NONE),
-            journal_strref   = d.get("journal_strref", STRREF_NONE),
+            text_strref=StrRef.from_json(hd.get("text_strref", 0xFFFFFFFF)),
+            journal_strref=StrRef.from_json(hd.get("journal_strref", 0xFFFFFFFF)),
             trigger_index    = d.get("trigger_index", NO_INDEX),
             action_index     = d.get("action_index", NO_INDEX),
             next_dlg         = d.get("next_dlg", ""),
@@ -898,12 +898,12 @@ class DlgFile:
             print(dlg.dump())
             print(dlg.dump(tlk=my_tlk))
         """
-        def _str(strref: int) -> str:
-            if strref == STRREF_NONE:
+        def _str(strref: StrRef) -> str:
+            if strref.is_none:
                 return "<none>"
             if tlk is not None:
                 try:
-                    return repr(tlk.get(strref).text[:60])
+                    return repr(tlk.get(int(strref)).text[:60])
                 except Exception:
                     pass
             return f"#{strref}"
@@ -976,13 +976,13 @@ class DlgFile:
     def add_transition(
         self,
         from_state_index: int,
-        text_strref:      int = STRREF_NONE,
+        text_strref:      StrRef = StrRef(0xFFFFFFFF),
         next_state_index: int = 0,
         next_dlg:         str = "",
         terminates:       bool = False,
         trigger:          Optional[str] = None,
         action:           Optional[str] = None,
-        journal_strref:   int = STRREF_NONE,
+        journal_strref:   StrRef = StrRef(0xFFFFFFFF),
     ) -> int:
         """
         Append a transition to *from_state_index* and return the
@@ -995,7 +995,7 @@ class DlgFile:
         before moving to the next.
         """
         flags = TransitionFlag.NONE
-        if text_strref != STRREF_NONE:
+        if not text_strref.is_none:
             flags |= TransitionFlag.HAS_TEXT
 
         trig_idx = NO_INDEX

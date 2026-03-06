@@ -59,11 +59,16 @@ infinity_editor/
 │       ├── binary.py            # struct read/write helpers
 │       └── resref.py            # ResRef type (8-char resource names)
 │
+├── core/
+│   └── index.py                 # Resource index — search + resolve
+│
+├── core/index.py                # Resource index — build, search, resolve
+│
 ├── game/                        # Game installation interface
 │   │                            # NOTE: may be renamed/reorganised later
 │   ├── __init__.py
 │   ├── installation.py          # Locate game dir, read CHITIN.KEY
-│   └── string_manager.py        # .tlk lookup with fallback + override (NOT YET IMPLEMENTED)
+│   └── string_manager.py        # .tlk lookup with fallback + override
 │
 ├── ui/                          # All Dear PyGui code (NOT YET IMPLEMENTED)
 │   ├── __init__.py
@@ -132,8 +137,17 @@ game/installation.py      — may import: stdlib only
                           — may NOT import: core/formats/* (avoids circular deps)
                           — NOTE: package name (game/) is provisional and may change
 
+game/string_manager.py    — may import: core/formats/tlk, core/util/strref
+                          — imports core/formats/tlk at call time inside
+                            from_installation() to avoid top-level circular deps
+                          — imports game/installation TYPE_CHECKING only
+
 core/formats/key_biff.py  — imports game/installation TYPE_CHECKING only
                             (for GameRoot type hint — not a runtime import)
+
+core/index.py             — may import: core/formats/*, core/util/*,
+                            game/string_manager, game/installation
+                          — game/* imports are TYPE_CHECKING only
 
 core/project/*            — may import: core/formats/*, core/game/*, core/util/*
                           — may NOT import: ui/*
@@ -170,21 +184,27 @@ typing (`hasattr(game_root, "install_path")`), not via a runtime import.
 - Empty string is a valid ResRef (represents "no resource")
 
 ### core/util/strref.py
-- `StrRef(value: int | str)` — wraps a uint32 TLK index
+- `StrRef(value: int | str)` — wraps a raw uint32 as stored on disk
+- The uint32 encodes two fields (per IESDP):
+  - Top 8 bits: file ID — `0x00` = `dialog.tlk`, `0x01` = `dialogf.tlk`
+  - Low 24 bits: row index within that TLK file
+- `StrRef.from_parts(file_id, tlk_index)` — construct from decoded parts
 - `StrRef.NONE` — sentinel for "no string" (0xFFFFFFFF)
-- `str(ref)` returns the raw index as a decimal string — e.g. `"12345"`
-- `int(ref)` returns the raw index
-- `bool(ref)` is False only for the NONE sentinel
+- `ref.raw` — full uint32 as stored on disk
+- `ref.file_id` — top 8 bits (0 = male/default, 1 = female)
+- `ref.tlk_index` — low 24 bits; the actual row to pass to `tlk.get()`
+- `ref.is_female` — True if file_id == 1 (dialogf.tlk)
 - `ref.is_none` — True if the NONE sentinel
-- `ref.resolve(tlk: TlkFile) -> str` — low-level resolution against a specific TLK;
-  returns `""` for NONE. Prefer `string_manager.resolve(ref)` in editor code.
-- `ref.resolve_with(resolver: Callable[[int], str]) -> str` — resolution via
-  any callable; useful for testing and for wrapping string_manager
-- `ref.to_json() -> int` — serialises as integer (not string)
-- `StrRef.from_json(value: int | str) -> StrRef` — accepts both for robustness
+- `str(ref)` returns the raw uint32 as decimal; `int(ref)` returns the raw uint32
+- `bool(ref)` is False only for the NONE sentinel
+- `ref.resolve(male_tlk, female_tlk=None) -> str` — selects the right TLK
+  based on `is_female`; falls back to male_tlk if female_tlk not provided
+- `ref.resolve_with(resolver: Callable[[int, int], str]) -> str` — resolver
+  receives `(file_id, tlk_index)`; this is the interface string_manager implements
+- `ref.to_json() -> int` — serialises the full raw uint32
+- `StrRef.from_json(value: int | str) -> StrRef`
 - `StrRefError(ValueError)` on invalid input
-- StrRef has no reference to any TLK file — it is a stable, language-agnostic
-  identifier. Resolution context (language, gender) is the caller's concern.
+- No runtime project imports — `TlkFile` is TYPE_CHECKING only
 
 ### core/formats/ — all parsers
 All format modules follow this contract without exception:
@@ -217,6 +237,73 @@ All format modules follow this contract without exception:
   loads on Linux/macOS
 - Steam discovery parses `libraryfolders.vdf` to find all library roots, not
   just the default Steam path
+
+### game/string_manager.py
+- `StringManager(base_male, base_female=None, mod_male=None, mod_female=None)`
+  — direct constructor; takes `TlkFile` objects
+- `StringManager.from_installation(inst, language="en_US")` — locates and
+  loads TLKs from a `GameInstallation`; detects original vs EE layout
+  automatically (EE: `lang/<code>/dialog.tlk`; original: `dialog.tlk` in root)
+- `manager.resolve(ref: StrRef) -> str` — primary resolution method
+- `manager.get(file_id: int, tlk_index: int) -> str` — callable interface
+  for `StrRef.resolve_with(manager.get)`
+- `manager.set_mod_tlk(male_tlk, female_tlk=None)` — load project override layer
+- `manager.clear_mod_tlk()` — remove override, fall back to base game only
+- `manager.has_mod` — True if a mod override is loaded
+- `manager.available_languages(inst) -> List[str]` — EE language codes available
+- Resolution order for female strref: mod_female → mod_male → base_female → base_male
+- Resolution order for male strref:   mod_male → base_male
+- Returns `""` for NONE sentinel or missing indices
+- `TlkFile` contract required: `get(index: int) -> str`, `contains(index: int) -> bool`
+
+### game/string_manager.py
+- `StringManager(base_male, base_female=None, mod_male=None, mod_female=None)`
+  — all args are `TlkFile` objects; only `base_male` is required
+- `StringManager.from_installation(inst, language="en_US") -> StringManager`
+  — detects EE vs original layout by presence of `lang/` directory;
+    `language` is ignored for original games
+- `StringManager.available_languages(inst) -> List[str]`
+  — returns sorted language codes for EE games; empty list for originals
+- `manager.get(file_id, tlk_index) -> str`
+  — primary resolution callable; matches `StrRef.resolve_with()` signature
+  — priority chain: female → `mod_female → mod_male → base_female → base_male`;
+    male → `mod_male → base_male`; skips empty entries and falls through
+- `manager.get_entry(file_id, tlk_index) -> TlkEntry | None`
+  — same chain as get(), returns full TlkEntry (text + sound + flags)
+- `manager.resolve(ref: StrRef) -> str`
+  — convenience wrapper: `ref.resolve_with(manager.get)`
+- `manager.set_mod_tlk(male_tlk, female_tlk=None)` — load mod override layer
+- `manager.clear_mod_tlk()` — remove mod override layer
+- `manager.has_mod_tlk -> bool`
+- Imports: `core/formats/tlk`, `core/util/strref`; `game/installation` TYPE_CHECKING only
+
+### core/index.py
+- `IndexEntry(resref, res_type, display_name, source, data)` — frozen dataclass
+  - `source`: `"biff"`, `"override"`, or `"project"`
+  - `data`: full `to_json()` output for attribute search
+  - `display_name`: pre-resolved human-readable name (empty if resource has no name)
+- `ResourceIndex` — the index itself
+  - `build(key, game_root, string_manager, progress_cb=None)` — build from scratch;
+    indexes CHITIN.KEY (source="biff") then override dir (source="override")
+  - `add_or_update(resref, res_type, source, data, display_name="")` — incremental update
+  - `add_or_update_from_json(resref, res_type, source, data, string_manager)` — resolves
+    display_name from parsed JSON before storing
+  - `remove(resref, res_type, source)` — removes entry; promotes shadow if available
+  - `search(query="", res_type=None, filters=None) -> List[IndexEntry]`
+    - `query`: case-insensitive ResRef prefix OR substring in display_name OR any string
+      value anywhere in `data` (recursive)
+    - `res_type`: filter by ResType
+    - `filters`: `dict[field_name, value | Callable]` — exact match or predicate
+  - `resolve(entry, key, game_root) -> XxxFile | None` — load full parsed resource;
+    dispatches by source (project→from_json, override→file read, biff→CHITIN.KEY)
+  - `count_by_type() -> dict[ResType, int]`
+  - `__len__`, `__iter__`, `__contains__`
+- Source priority: project (2) > override (1) > biff (0)
+  - Lower-priority duplicates stored in shadow; promoted on remove()
+- `_PARSERS` dict — ResType → parser class (shared by build and resolve)
+- `_NAME_EXTRACTORS` dict — ResType → `(parsed, string_manager) -> str`
+- Override dir: `<install_root>/override/` only (type-specific folders
+  Characters/Portrait/Sounds/Scripts are not indexed — see IESDP override docs)
 
 ### core/formats/key_biff.py
 - `KeyFile.open(path)` — parses CHITIN.KEY
@@ -283,7 +370,6 @@ In priority order:
    `core/formats/` to avoid circular imports (it imports from all format
    modules). Decision pending on: what to return for unknown types (raise,
    return raw bytes, or return None).
-4. `core/game/string_manager.py` — TLK lookup with override support
 5. `core/project/` — mod project management layer
 6. UI layer (Dear PyGui)
 
@@ -352,4 +438,64 @@ to any TLK file. `str(ref)` returns the raw index as a decimal string;
 The primary resolution path in the editor is `string_manager.resolve(ref)`,
 which handles language and gender selection. `StrRef` imports `TlkFile` under
 `TYPE_CHECKING` only, keeping it dependency-free at runtime.
+
+**2026-03 — All format files must explicitly import from core.util**
+Every file in `core/formats/` must have explicit imports for every symbol
+it uses from `core/util/`. Do not assume these are available implicitly.
+The standard import block for a format file that uses all three util modules is:
+
+    from core.util.binary import BinaryReader, BinaryWriter, SignatureMismatch
+    from core.util.resref import ResRef
+    from core.util.strref import StrRef, StrRefError
+
+Omit only what the file genuinely does not use. This was a recurring silent
+error: `cre.py` was missing `binary` and `resref` imports across multiple
+sessions because the project owner was correcting it locally without flagging it.
+
+**2026-03 — StrRef encodes file ID in top 8 bits (IESDP ground truth)**
+The IESDP Notes and Conventions page confirms that a strref uint32 encodes
+the TLK file selector in the top 8 bits (0x00 = dialog.tlk, 0x01 =
+dialogf.tlk) and the row index in the low 24 bits. This is not a convention
+imposed by the editor — it is how the IE engine reads strref fields on disk.
+StrRef exposes `file_id`, `tlk_index`, and `is_female` as decoded properties.
+`resolve_with()` now passes `(file_id, tlk_index)` to the resolver callable
+so string_manager can select the right TLK without re-decoding the raw value.
+
+**2026-03 — StringManager layered resolution design**
+Holds up to four TLKs: base_male, base_female, mod_male, mod_female.
+Resolution checks mod layer first, then base layer, with female variants
+checked before male variants at each layer (mirroring engine fallback).
+Override TLKs support the use case of reading both original game strings
+and project-modified strings, with project strings taking priority.
+`from_installation()` auto-detects original (root-level TLK) vs EE
+(lang/<code>/ subdirectory) layout. `TlkFile` is imported at call time
+inside `from_installation()` rather than at module level to avoid
+circular import issues before tlk.py is fully integrated.
+
+**2026-03 — StringManager design: layered resolution with mod override**
+`StringManager` holds up to four TlkFiles (base_male, base_female, mod_male,
+mod_female). Resolution priority for female strrefs: mod_female → mod_male →
+base_female → base_male. For male: mod_male → base_male. Each step is skipped
+if the TLK is not loaded or the index is not present. This mirrors the engine
+fallback behaviour and supports the use case of reading original game strings
+alongside mod-modified strings without merging them.
+
+`from_installation()` detects original vs EE layout by checking for a `lang/`
+subdirectory. The `language` parameter is only used for EE games.
+
+TOH/TOT override file support (IWD/BG2 talk table override format) is deferred.
+
+**2026-03 — ResourceIndex design: JSON-backed, source-layered, shadow store**
+`core/index.py` builds once from CHITIN.KEY + override dir, then is maintained
+incrementally. Each (resref, res_type) key stores the highest-priority source as
+primary; lower-priority duplicates go to a shadow store and are promoted on remove().
+The `data` field holds the full `to_json()` output so search can match any attribute
+(weight, flags, tooltip, etc.) without re-parsing. `_PARSERS` and `_NAME_EXTRACTORS`
+are the single place where ResType → parser/name mappings are defined; resolve() reuses
+_PARSERS rather than having a separate dispatcher. Override directory indexed as
+`<install_root>/override/` only — per IESDP, this covers all general resource types.
+
+**2026-03 — Dependency policy on non-stdlib libraries**
+Standard library preferred. Non-standard libraries permitted case-by-case; must be
+well-maintained. Approved so far: `watchdog` (for core/watcher.py, not yet implemented).
 

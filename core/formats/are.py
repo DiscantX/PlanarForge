@@ -42,6 +42,7 @@ from typing import List, Optional
 
 from core.util.binary import BinaryReader, BinaryWriter, SignatureMismatch
 from core.util.resref import ResRef
+from core.util.strref import StrRef, StrRefError
 
 
 # ---------------------------------------------------------------------------
@@ -57,7 +58,6 @@ VERSION_V91     = b"V9.1"
 HEADER_SIZE_V1  = 0x11C   # 284 bytes
 HEADER_SIZE_V91 = 0x11C   # same base; V9.1 appends extra explored-mask data
 
-STRREF_NONE = 0xFFFFFFFF
 
 
 # ---------------------------------------------------------------------------
@@ -180,7 +180,7 @@ class Actor:
     has_been_spawned: int  = 0             # uint16
     first_letter:    str   = ""            # char[1] — actor variable prefix
     unknown:         int   = 0             # uint8
-    actor_remove:    int   = STRREF_NONE   # uint32 — StrRef condition
+    actor_remove:    StrRef   = StrRef(0xFFFFFFFF)   # uint32 — StrRef condition
     activation_at:   int   = 0             # uint32 — schedule bitmask (BG2)
     activation_day:  int   = 0             # uint32
     cre_resref:      str   = ""            # ResRef — .cre file
@@ -200,7 +200,7 @@ class Actor:
         has_been_spawned = r.read_uint16()
         first_letter     = r.read_bytes(1).decode("latin-1")
         unknown          = r.read_uint8()
-        actor_remove     = r.read_uint32()
+        actor_remove     = StrRef(r.read_uint32())
         activation_at    = r.read_uint32()
         activation_day   = r.read_uint32()
         r.skip(4)  # unknown
@@ -232,7 +232,7 @@ class Actor:
         w.write_uint16(self.has_been_spawned)
         w.write_bytes(self.first_letter.encode("latin-1")[:1].ljust(1, b"\x00"))
         w.write_uint8(self.unknown)
-        w.write_uint32(self.actor_remove)
+        w.write_uint32(int(self.actor_remove))
         w.write_uint32(self.activation_at)
         w.write_uint32(self.activation_day)
         w.write_padding(4)
@@ -327,7 +327,7 @@ class Region:
     destination_area: str = ""   # ResRef — for travel triggers
     destination_entrance: str = ""  # 32-char
     flags:          int   = 0    # uint32
-    info_text:      int   = STRREF_NONE   # StrRef
+    info_text:      StrRef   = StrRef(0xFFFFFFFF)   # StrRef
     trap_detect_dc: int   = 0    # uint16
     trap_disarm_dc: int   = 0    # uint16
     is_trapped:     int   = 0    # uint16
@@ -355,7 +355,7 @@ class Region:
         dest_area     = r.read_resref()
         dest_entrance = r.read_string(32)
         flags         = r.read_uint32()
-        info_text     = r.read_uint32()
+        info_text     = StrRef(r.read_uint32())
         trap_detect   = r.read_uint16()
         trap_disarm   = r.read_uint16()
         is_trapped    = r.read_uint16()
@@ -393,7 +393,7 @@ class Region:
         w.write_resref(self.destination_area)
         w.write_bytes(self.destination_entrance.encode("latin-1")[:32].ljust(32, b"\x00"))
         w.write_uint32(self.flags)
-        w.write_uint32(self.info_text)
+        w.write_uint32(int(self.info_text))
         w.write_uint16(self.trap_detect_dc)
         w.write_uint16(self.trap_disarm_dc)
         w.write_uint16(self.is_trapped)
@@ -413,7 +413,7 @@ class Region:
         if self.destination_area:    d["destination_area"]     = self.destination_area
         if self.destination_entrance: d["destination_entrance"] = self.destination_entrance
         if self.flags:               d["flags"]                = self.flags
-        if self.info_text != STRREF_NONE: d["info_text"]       = self.info_text
+        if not self.info_text.is_none: d["info_text"]       = self.info_text
         if self.is_trapped:          d["is_trapped"]           = self.is_trapped
         if self.key_item:            d["key_item"]             = self.key_item
         if self.region_script:       d["region_script"]        = self.region_script
@@ -427,7 +427,7 @@ class Region:
             flags=d.get("flags",0),
             destination_area=d.get("destination_area",""),
             destination_entrance=d.get("destination_entrance",""),
-            info_text=d.get("info_text", STRREF_NONE),
+            info_text=StrRef.from_json(hd.get("info_text", 0xFFFFFFFF)),
             is_trapped=d.get("is_trapped",0),
             key_item=d.get("key_item",""),
             region_script=d.get("region_script",""),
@@ -665,9 +665,9 @@ class Door:
     lock_difficulty:  int  = 0      # uint32
     open_use_point:   List[int] = field(default_factory=lambda: [0,0])
     close_use_point:  List[int] = field(default_factory=lambda: [0,0])
-    lock_pick_string: int  = STRREF_NONE
+    lock_pick_string: StrRef  = StrRef(0xFFFFFFFF)
     linked_info:      str  = ""     # 32-char
-    name_strref:      int  = STRREF_NONE
+    name_strref:      StrRef  = StrRef(0xFFFFFFFF)
     door_open_anim:   str  = ""     # ResRef
     dialog:           str  = ""     # ResRef
 
@@ -762,9 +762,9 @@ class Door:
         w.write_uint32(self.lock_difficulty)
         for v in self.open_use_point[:2]:  w.write_uint16(v)
         for v in self.close_use_point[:2]: w.write_uint16(v)
-        w.write_uint32(self.lock_pick_string)
+        w.write_uint32(int(self.lock_pick_string))
         w.write_bytes(self.linked_info.encode("latin-1")[:32].ljust(32, b"\x00"))
-        w.write_uint32(self.name_strref)
+        w.write_uint32(int(self.name_strref))
         w.write_resref(self.door_open_anim)
         w.write_resref(self.dialog)
 
@@ -780,7 +780,7 @@ class Door:
         if self.dialog:       d["dialog"]       = self.dialog
         if self.hp:           d["hp"]           = self.hp
         if self.is_trapped:   d["is_trapped"]   = self.is_trapped
-        if self.name_strref != STRREF_NONE: d["name_strref"] = self.name_strref
+        if not self.name_strref.is_none: d["name_strref"] = self.name_strref
         return d
 
     @classmethod
@@ -792,7 +792,7 @@ class Door:
             open_sound=d.get("open_sound",""), close_sound=d.get("close_sound",""),
             dialog=d.get("dialog",""), hp=d.get("hp",0),
             is_trapped=d.get("is_trapped",0),
-            name_strref=d.get("name_strref", STRREF_NONE),
+            name_strref=StrRef.from_json(hd.get("name_strref", 0xFFFFFFFF)),
         )
         door.open_vertices  = [Vertex.from_json(v) for v in d.get("open_vertices",[])]
         door.close_vertices = [Vertex.from_json(v) for v in d.get("close_vertices",[])]
@@ -828,7 +828,7 @@ class Container:
     owner_name:       str   = ""   # 32-char
     key_item:         str   = ""   # ResRef
     break_difficulty: int   = 0
-    lock_pick_string: int   = STRREF_NONE
+    lock_pick_string: StrRef   = StrRef(0xFFFFFFFF)
     unknown:          bytes = b"\x00" * 56
 
     vertices: List[Vertex] = field(default_factory=list)
@@ -897,7 +897,7 @@ class Container:
         w.write_bytes(self.owner_name.encode("latin-1")[:32].ljust(32, b"\x00"))
         w.write_resref(self.key_item)
         w.write_uint32(self.break_difficulty)
-        w.write_uint32(self.lock_pick_string)
+        w.write_uint32(int(self.lock_pick_string))
         w.write_bytes(self.unknown[:56].ljust(56, b"\x00"))
 
     def to_json(self) -> dict:
@@ -908,7 +908,7 @@ class Container:
         if self.script_trap:  d["script_trap"] = self.script_trap
         if self.is_trapped:   d["is_trapped"]  = self.is_trapped
         if self.lock_difficulty: d["lock_difficulty"] = self.lock_difficulty
-        if self.lock_pick_string != STRREF_NONE:
+        if not self.lock_pick_string.is_none:
             d["lock_pick_string"] = self.lock_pick_string
         return d
 
@@ -921,7 +921,7 @@ class Container:
             key_item=d.get("key_item",""), script_trap=d.get("script_trap",""),
             is_trapped=d.get("is_trapped",0),
             lock_difficulty=d.get("lock_difficulty",0),
-            lock_pick_string=d.get("lock_pick_string", STRREF_NONE),
+            lock_pick_string=StrRef.from_json(hd.get("lock_pick_string", 0xFFFFFFFF)),
         )
         c.vertices = [Vertex.from_json(v) for v in d.get("vertices",[])]
         return c
@@ -1020,14 +1020,14 @@ class MapNote:
     """A note visible on the world map / area map."""
     x:         int = 0
     y:         int = 0
-    text:      int = STRREF_NONE   # StrRef
+    text:      StrRef = StrRef(0xFFFFFFFF)   # StrRef
     color:     int = 0             # uint16
 
     @classmethod
     def _read(cls, r: BinaryReader) -> "MapNote":
         x     = r.read_uint16()
         y     = r.read_uint16()
-        text  = r.read_uint32()
+        text  = StrRef(r.read_uint32())
         color = r.read_uint16()
         r.skip(42)
         return cls(x=x, y=y, text=text, color=color)
@@ -1035,19 +1035,19 @@ class MapNote:
     def _write(self, w: BinaryWriter) -> None:
         w.write_uint16(self.x)
         w.write_uint16(self.y)
-        w.write_uint32(self.text)
+        w.write_uint32(int(self.text))
         w.write_uint16(self.color)
         w.write_padding(42)
 
     def to_json(self) -> dict:
-        d: dict = {"x": self.x, "y": self.y, "text": self.text}
+        d: dict = {"x": self.x, "y": self.y, "text": self.text.to_json()}
         if self.color: d["color"] = self.color
         return d
 
     @classmethod
     def from_json(cls, d: dict) -> "MapNote":
         return cls(x=d.get("x",0), y=d.get("y",0),
-                   text=d.get("text", STRREF_NONE), color=d.get("color",0))
+                   text=StrRef.from_json(hd.get("text", 0xFFFFFFFF)), color=d.get("color",0))
 
 
 # ---------------------------------------------------------------------------
@@ -1058,7 +1058,7 @@ class MapNote:
 class RestEncounter:
     """Creatures that may ambush the party when resting in this area."""
     name:            str   = ""
-    encounter_text:  List[int] = field(default_factory=lambda: [STRREF_NONE]*10)
+    encounter_text:  List[StrRef] = field(default_factory=lambda: [StrRef(0xFFFFFFFF)]*10)
     creature_resrefs: List[str] = field(default_factory=lambda: [""] * 10)
     creature_count:  int   = 0
     difficulty:      int   = 0
@@ -1071,7 +1071,7 @@ class RestEncounter:
     @classmethod
     def _read(cls, r: BinaryReader) -> "RestEncounter":
         name       = r.read_string(32)
-        enc_texts  = [r.read_uint32() for _ in range(10)]
+        enc_texts  = [StrRef(r.read_uint32()) for _ in range(10)]
         creatures  = [r.read_resref() for _ in range(10)]
         cre_count  = r.read_uint16()
         difficulty = r.read_uint16()
@@ -1090,8 +1090,8 @@ class RestEncounter:
 
     def _write(self, w: BinaryWriter) -> None:
         w.write_bytes(self.name.encode("latin-1")[:32].ljust(32, b"\x00"))
-        for t in (self.encounter_text + [STRREF_NONE]*10)[:10]:
-            w.write_uint32(t)
+        for t in (self.encounter_text + [StrRef(0xFFFFFFFF)]*10)[:10]:
+            w.write_uint32(int(t))
         for i in range(10):
             w.write_resref(self.creature_resrefs[i] if i < len(self.creature_resrefs) else "")
         w.write_uint16(self.creature_count)

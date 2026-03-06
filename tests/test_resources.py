@@ -5,8 +5,10 @@ from core.formats.cre import CreFile, CreFileV12, SlotIndex, PstSlotIndex
 from core.formats.tlk import TlkFile
 from game.installation import InstallationFinder, GameInstallation
 from core.formats.key_biff import KeyFile, ResType
+from game.string_manager import StringManager
 
 finder = InstallationFinder()
+manager = StringManager.from_installation(finder.find("BG2EE"))
 
 file_objects = {
     "itm": ItmFile,
@@ -52,14 +54,17 @@ def read_resources():
 
 
 def main():
+    install = finder.find("BG2EE")
     chitin_path = finder.find_chitin("BG2EE")
-    print(chitin_path)
-    print(finder.find("BG2EE"))
     chitin = KeyFile.open(chitin_path)
-    entry = chitin.find("AR0602", ResType.ARE)
+    entry = chitin.find("HELM21", ResType.ITM)
     if entry:
-         raw = chitin.read_resource(entry, game_root=finder.find("BG2EE")) 
-         print(raw)   
+        raw = chitin.read_resource(entry, game_root=finder.find("BG2EE")) 
+        item = ItmFile.from_bytes(raw)
+
+        text = item.header.identified_name.resolve_with(manager.get)     # "Leather Armour"
+        
+        print(text)
     
     # read_resources()
     

@@ -55,6 +55,7 @@ from typing import List, Optional
 
 from core.util.binary import BinaryReader, BinaryWriter, SignatureMismatch
 from core.util.resref import ResRef
+from core.util.strref import StrRef, StrRefError
 
 
 # ---------------------------------------------------------------------------
@@ -70,7 +71,6 @@ HEADER_SIZE_V11 = 116
 EXT_HEADER_SIZE = 40
 FEATURE_BLOCK_SIZE = 48
 
-STRREF_NONE = 0xFFFFFFFF
 
 
 # ---------------------------------------------------------------------------
@@ -484,8 +484,8 @@ class SplHeader:
     fields are managed automatically by :class:`SplFile` on write.
     """
     # Identity
-    unidentified_name: int = STRREF_NONE   # StrRef — name before identification
-    identified_name:   int = STRREF_NONE   # StrRef — true spell name
+    unidentified_name: StrRef = StrRef(0xFFFFFFFF)   # StrRef — name before identification
+    identified_name:   StrRef = StrRef(0xFFFFFFFF)   # StrRef — true spell name
     casting_graphics:  str = ""            # ResRef — VEF/VVC casting animation
     flags:             int = SpellFlag.NONE
     spell_type:        int = SpellType.WIZARD
@@ -499,8 +499,8 @@ class SplHeader:
     unknown_2c:        int = 0             # uint32
     unknown_30:        int = 0             # uint32
     spell_level:       int = 0             # uint32 — spell circle (1–9)
-    unidentified_desc: int = STRREF_NONE   # StrRef
-    identified_desc:   int = STRREF_NONE   # StrRef
+    unidentified_desc: StrRef = StrRef(0xFFFFFFFF)   # StrRef
+    identified_desc:   StrRef = StrRef(0xFFFFFFFF)   # StrRef
     memorisation_icon: str = ""            # ResRef — icon in spellbook
     first_level_cond:  int = 0             # uint16 — condition for first casting
     spell_icon:        str = ""            # ResRef — quick-slot icon
@@ -521,8 +521,8 @@ class SplHeader:
 
     @classmethod
     def _read(cls, r: BinaryReader, version: bytes) -> "SplHeader":
-        unidentified_name  = r.read_uint32()
-        identified_name    = r.read_uint32()
+        unidentified_name  = StrRef(r.read_uint32())
+        identified_name    = StrRef(r.read_uint32())
         casting_graphics   = r.read_resref()
         flags              = r.read_uint32()
         spell_type         = r.read_uint16()
@@ -535,8 +535,8 @@ class SplHeader:
         unknown_2c         = r.read_uint32()
         unknown_30         = r.read_uint32()
         spell_level        = r.read_uint32()
-        unidentified_desc  = r.read_uint32()
-        identified_desc    = r.read_uint32()
+        unidentified_desc  = StrRef(r.read_uint32())
+        identified_desc    = StrRef(r.read_uint32())
         memorisation_icon  = r.read_resref()
         first_level_cond   = r.read_uint16()
         spell_icon         = r.read_resref()
@@ -571,8 +571,8 @@ class SplHeader:
         )
 
     def _write(self, w: BinaryWriter, version: bytes) -> None:
-        w.write_uint32(self.unidentified_name)
-        w.write_uint32(self.identified_name)
+        w.write_uint32(int(self.unidentified_name))
+        w.write_uint32(int(self.identified_name))
         w.write_resref(self.casting_graphics)
         w.write_uint32(self.flags)
         w.write_uint16(self.spell_type)
@@ -585,8 +585,8 @@ class SplHeader:
         w.write_uint32(self.unknown_2c)
         w.write_uint32(self.unknown_30)
         w.write_uint32(self.spell_level)
-        w.write_uint32(self.unidentified_desc)
-        w.write_uint32(self.identified_desc)
+        w.write_uint32(int(self.unidentified_desc))
+        w.write_uint32(int(self.identified_desc))
         w.write_resref(self.memorisation_icon)
         w.write_uint16(self.first_level_cond)
         w.write_resref(self.spell_icon)
@@ -766,15 +766,15 @@ class SplFile:
             "format":  "spl",
             "version": _version_str(self.version),
             "header": {
-                "unidentified_name": h.unidentified_name,
-                "identified_name":   h.identified_name,
+                "unidentified_name": self.unidentified_name.to_json(),
+                "identified_name": self.identified_name.to_json(),
                 "spell_type":        h.spell_type,
                 "spell_level":       h.spell_level,
                 "primary_type":      h.primary_type,
                 "flags":             h.flags,
                 "usability":         h.usability,
-                "unidentified_desc": h.unidentified_desc,
-                "identified_desc":   h.identified_desc,
+                "unidentified_desc": self.unidentified_desc.to_json(),
+                "identified_desc": self.identified_desc.to_json(),
             },
         }
         hd = d["header"]
@@ -806,8 +806,8 @@ class SplFile:
 
         hd = d.get("header", {})
         header = SplHeader(
-            unidentified_name  = hd.get("unidentified_name",  STRREF_NONE),
-            identified_name    = hd.get("identified_name",    STRREF_NONE),
+            unidentified_name=StrRef.from_json(hd.get("unidentified_name", 0xFFFFFFFF)),
+            identified_name=StrRef.from_json(hd.get("identified_name", 0xFFFFFFFF)),
             casting_graphics   = hd.get("casting_graphics",   ""),
             flags              = hd.get("flags",              SpellFlag.NONE),
             spell_type         = hd.get("spell_type",         SpellType.WIZARD),
@@ -820,8 +820,8 @@ class SplFile:
             unknown_2c         = hd.get("unknown_2c",         0),
             unknown_30         = hd.get("unknown_30",         0),
             spell_level        = hd.get("spell_level",        0),
-            unidentified_desc  = hd.get("unidentified_desc",  STRREF_NONE),
-            identified_desc    = hd.get("identified_desc",    STRREF_NONE),
+            unidentified_desc=StrRef.from_json(hd.get("unidentified_desc", 0xFFFFFFFF)),
+            identified_desc=StrRef.from_json(hd.get("identified_desc", 0xFFFFFFFF)),
             memorisation_icon  = hd.get("memorisation_icon",  ""),
             first_level_cond   = hd.get("first_level_cond",   0),
             spell_icon         = hd.get("spell_icon",         ""),
