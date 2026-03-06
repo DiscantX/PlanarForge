@@ -48,21 +48,21 @@ infinity_editor/
 │   │   ├── bcs.py               # Compiled script (NOT YET IMPLEMENTED)
 │   │   └── baf.py               # Script source (NOT YET IMPLEMENTED)
 │   │
-│   ├── project/                 # Mod project management (NOT YET IMPLEMENTED)
+│   ├── project/                 # Mod project management
 │   │   ├── __init__.py
 │   │   ├── project.py           # Project open/save/new, dirty tracking
-│   │   ├── mod_structure.py     # WeiDU .tp2 generation
+│   │   ├── strref.py            # ProjectStrRef — three-variant string reference
+│   │   ├── importer.py          # Import resources from game; snapshot strings
+│   │   ├── mod_structure.py     # WeiDU .tp2 + .tra generation
 │   │   └── undo_redo.py         # Command pattern undo/redo stack
+│   │
+│   └── index.py                 # Resource index — build, search, resolve
 │   │
 │   └── util/                    # Shared helpers
 │       ├── __init__.py
 │       ├── binary.py            # struct read/write helpers
-│       └── resref.py            # ResRef type (8-char resource names)
-│
-├── core/
-│   └── index.py                 # Resource index — search + resolve
-│
-├── core/index.py                # Resource index — build, search, resolve
+│       ├── resref.py            # ResRef type (8-char resource names)
+│       └── strref.py            # StrRef type (uint32 TLK reference)
 │
 ├── game/                        # Game installation interface
 │   │                            # NOTE: may be renamed/reorganised later
@@ -118,6 +118,141 @@ infinity_editor/
 
 ---
 
+## Mod project on-disk layout
+
+A mod project is a self-contained directory. The structure is:
+
+```
+<project_root>/
+├── project.json                  # Metadata, game references, export settings
+├── imported/
+│   ├── <game_id>/                # e.g. BG2EE/, BG1EE/  (primary and secondary)
+│   │   ├── itm/
+│   │   │   └── sw1h01.json
+│   │   └── cre/
+│   │       └── guard01.json
+│   └── ...
+├── created/
+│   ├── itm/
+│   │   └── mymods01.json
+│   └── cre/
+│       └── myvillain.json
+└── strings/
+    ├── english/
+    │   └── default.tra           # WeiDU translation file, maintained live
+    ├── french/
+    │   └── default.tra
+    └── ...
+```
+
+**imported/ vs created/:**
+- `imported/` — resources pulled from a game installation. The source game
+  is recorded in the subdirectory name. The same ResRef can exist under
+  multiple game IDs without collision (e.g. BG1EE and BG2EE both have sw1h01).
+  Importing and modifying an existing resource generates a `COPY_EXISTING` +
+  patch block in the WeiDU output.
+- `created/` — user-authored resources with no game original. Generates
+  `ADD_ITEM` / `ADD_CREATURE` etc. in WeiDU output.
+
+**project.json structure:**
+```json
+{
+  "name": "My Total Conversion",
+  "version": "0.1.0",
+  "primary_game": "BG2EE",
+  "secondary_games": ["BG1EE"],
+  "author": "",
+  "description": "",
+  "export": {
+    "tp2_name": "my_mod",
+    "languages": ["en_US", "fr_FR", "de_DE"]
+  }
+}
+```
+`primary_game` and `secondary_games` use `GameInstallation.game_id` values.
+`export.languages` controls which `.tra` files are generated; only languages
+present in at least one resource's strings map are exported.
+
+**strings/ directory:**
+`.tra` files are maintained as a live working copy — updated whenever a
+string is added or modified in any resource, not only at export time. One
+subdirectory per language, matching WeiDU's conventional `.tra` layout.
+The project does NOT maintain its own `dialog.tlk`. New strings become
+`@N` WeiDU string references assigned at install time.
+
+**Projects are self-contained and do not share files.**
+Two projects that import the same resource each have their own copy under
+their own `imported/` directory. The base game installation is shared
+(read-only), but working copies are not.
+
+---
+
+## ProjectStrRef — three-variant string reference
+
+`core/project/strref.py` — distinct from `core/util/strref.py` (which is a
+binary format concern). `ProjectStrRef` is a project data concern.
+
+Three variants, discriminated by which fields are populated:
+
+```python
+@dataclass
+class ProjectStrRef:
+    strref:  int | None        # original game index; None = project-authored
+    strings: dict[str, str]    # language_code → text; empty = live reference
+```
+
+| Variant | `strref` | `strings` | When used |
+|---------|----------|-----------|-----------|
+| Live reference | set | empty | Unmodified import; resolved at display time |
+| Imported snapshot | set | populated | Cross-game import or user-modified string |
+| Project-authored | None | populated | New string with no game original |
+
+**Display:** `resolve(language, string_manager)` — returns inline string if
+available, falls back to `string_manager` for live references.
+
+**Export:** live references emit the raw integer strref (string exists in game
+TLK, no need to ship it); snapshots and authored strings emit `@N` WeiDU
+placeholders (N assigned during export pass from `.tra` file).
+
+**JSON representation:**
+```json
+// Live reference
+{"strref": 15324}
+
+// Imported snapshot
+{"strref": 15324, "strings": {"en_US": "The Sword of Chaos", "fr_FR": "L\'Épée du Chaos"}}
+
+// Project-authored
+{"strings": {"en_US": "My New Item", "fr_FR": "Mon Nouvel Objet"}}
+```
+
+---
+
+## Cross-game imports and multi-language string handling
+
+When importing a resource from any game (primary or secondary):
+
+1. The resource binary is parsed and its JSON representation stored under
+   `imported/<game_id>/<type>/`.
+2. Every StrRef field is resolved against **all available languages** for
+   that game installation. `StringManager.resolve_all_languages(ref, inst)`
+   returns `dict[str, str]`. Only installed languages are captured — if the
+   user only has English installed, only English is in the map.
+3. The resulting `ProjectStrRef` is either:
+   - A **live reference** if the resource comes from the primary game and
+     the string has not been modified.
+   - An **imported snapshot** if the resource comes from a secondary game
+     (its StrRef indices are meaningless in the primary game's TLK) or if
+     the user has modified the string.
+4. At export time, snapshots and authored strings are written to `.tra` files
+   (one per language). Live references are emitted as raw integer strrefs.
+
+`StringManager.resolve_all_languages(ref, inst)` iterates all language
+subdirectories under `inst.install_path/lang/` (EE games) or returns a
+single `{"default": text}` for original games with one TLK.
+
+---
+
 ## Dependency rules
 
 These are strict. Violating them creates circular imports or inappropriate
@@ -149,7 +284,15 @@ core/index.py             — may import: core/formats/*, core/util/*,
                             game/string_manager, game/installation
                           — game/* imports are TYPE_CHECKING only
 
-core/project/*            — may import: core/formats/*, core/game/*, core/util/*
+core/project/strref.py    — may import: core/util/strref (TYPE_CHECKING only),
+                            core/formats/tlk (TYPE_CHECKING only)
+                          — no runtime project imports
+
+core/project/importer.py  — may import: core/formats/*, core/util/*,
+                            game/string_manager, game/installation
+
+core/project/*            — may import: core/formats/*, core/util/*,
+                            game/string_manager, game/installation
                           — may NOT import: ui/*
 
 ui/*                      — may import anything in core/
@@ -275,6 +418,9 @@ All format modules follow this contract without exception:
 - `manager.set_mod_tlk(male_tlk, female_tlk=None)` — load mod override layer
 - `manager.clear_mod_tlk()` — remove mod override layer
 - `manager.has_mod_tlk -> bool`
+- `manager.resolve_all_languages(ref: StrRef, inst: GameInstallation) -> dict[str, str]`
+  — resolves StrRef against every installed language; used at import time only.
+    EE games: iterates `lang/*/dialog.tlk`; original games: `{"default": text}`.
 - Imports: `core/formats/tlk`, `core/util/strref`; `game/installation` TYPE_CHECKING only
 
 ### core/index.py
@@ -304,6 +450,28 @@ All format modules follow this contract without exception:
 - `_NAME_EXTRACTORS` dict — ResType → `(parsed, string_manager) -> str`
 - Override dir: `<install_root>/override/` only (type-specific folders
   Characters/Portrait/Sounds/Scripts are not indexed — see IESDP override docs)
+
+### core/project/strref.py  (ProjectStrRef)
+- `ProjectStrRef(strref: int | None, strings: dict[str, str])`
+- Three variants: live reference, imported snapshot, project-authored
+  (see "ProjectStrRef — three-variant string reference" section above)
+- `is_live` — `strref` set, `strings` empty
+- `is_snapshot` — `strref` set, `strings` populated
+- `is_authored` — `strref` is None
+- `resolve(language: str, string_manager) -> str`
+  — returns `strings[language]` if available, else `strings["en_US"]` as
+    fallback, else resolves live via `string_manager`
+- `to_json() -> dict` — one of the three JSON forms above
+- `ProjectStrRef.from_json(d: dict) -> ProjectStrRef`
+- `to_weidu_ref(assigned_index: int | None) -> str`
+  — live → `str(strref)`; snapshot/authored → `@{assigned_index}`
+
+### core/project/importer.py
+- `import_resource(resref, res_type, source_game, key, game_root, string_manager) -> dict`
+  — reads resource, parses it, converts all StrRef fields to ProjectStrRef,
+    returns JSON dict ready to write to `imported/<game_id>/<type>/`
+- Snapshot vs live decision: secondary game → always snapshot;
+  primary game → live (unless string is modified later)
 
 ### core/formats/key_biff.py
 - `KeyFile.open(path)` — parses CHITIN.KEY
@@ -365,13 +533,17 @@ In priority order:
 
 1. Fix CRE V1.2 (PST) parser — three known field-size bugs listed above
 2. Implement CRE V2.2 (IWD2) parser
-3. `core/resources.py` — `load_resource(entry, raw) -> XxxFile` dispatcher
-   that maps ResType to the correct parser class. Lives in `core/` not
-   `core/formats/` to avoid circular imports (it imports from all format
-   modules). Decision pending on: what to return for unknown types (raise,
-   return raw bytes, or return None).
-5. `core/project/` — mod project management layer
-6. UI layer (Dear PyGui)
+3. Convert `cre.py` `soundset` from `bytes` to `List[StrRef]`
+4. ResRef migration — apply ResRef type to all format parser fields
+5. Add `StringManager.resolve_all_languages()` (designed, not yet implemented)
+6. `core/project/strref.py` — ProjectStrRef type
+7. `core/project/importer.py` — resource import logic
+8. `core/project/project.py` — Project open/save/new
+9. `core/project/mod_structure.py` — WeiDU .tp2 + .tra generation
+10. `core/project/undo_redo.py` — command pattern
+11. `core/watcher.py` — filesystem watcher (watchdog)
+12. UI layer (Dear PyGui)
+13. Unit tests for all modules
 
 ---
 
@@ -498,4 +670,48 @@ _PARSERS rather than having a separate dispatcher. Override directory indexed as
 **2026-03 — Dependency policy on non-stdlib libraries**
 Standard library preferred. Non-standard libraries permitted case-by-case; must be
 well-maintained. Approved so far: `watchdog` (for core/watcher.py, not yet implemented).
+
+**2026-03 — Mod project structure and ProjectStrRef design**
+Projects are self-contained directories; no shared files between projects.
+Resources are split between `imported/<game_id>/<type>/` (pulled from a game
+installation) and `created/<type>/` (user-authored). Same ResRef can exist
+under multiple game IDs without collision. The distinction drives WeiDU output:
+imported → COPY_EXISTING + patch; created → ADD_ITEM/ADD_CREATURE etc.
+
+StrRef fields in project JSON use `ProjectStrRef` (core/project/strref.py),
+distinct from the binary-format `StrRef` (core/util/strref.py). Three variants:
+live reference (strref only), imported snapshot (strref + strings map),
+project-authored (strings map only). Live references resolve at display time;
+others carry inline text. At export, live → raw integer; others → @N WeiDU ref.
+
+At import time, all StrRef fields are resolved against every available language
+via StringManager.resolve_all_languages(). Only installed languages are captured.
+Resources from secondary games always become snapshots (their StrRef indices are
+meaningless in the primary game TLK). Primary game resources start as live
+references and become snapshots if/when the user modifies the string.
+
+The project does NOT maintain its own dialog.tlk. New strings are WeiDU @N
+references written to .tra files (one per language under strings/<lang>/).
+.tra files are maintained as a live working copy, not generated only at export.
+Total conversion TLK support is deferred.
+
+**2026-03 — itm.py to_json() bug: self.field instead of self.header.field**
+`ItmFile.to_json()` referenced `self.unidentified_name`, `self.identified_name`,
+`self.unidentified_desc`, `self.identified_desc` directly on the ItmFile instance
+instead of `self.header.*`. This caused `to_json()` to raise `AttributeError` on
+every call, which was silently caught by `_index_raw` in `core/index.py`, producing
+empty `data` dicts and empty `display_name` for all ITM entries. Fixed by changing
+all four references to `h.*` (where `h = self.header`).
+
+**2026-03 — itm.py ResRef fields contain garbage bytes**
+Several fields in ITM (e.g. `replacement_item`, `feature_blocks[n].resource`) are
+being read as raw strings containing binary garbage rather than clean ResRef strings.
+This is a parsing bug in `itm.py` to be fixed during the itm.py vetting pass.
+Discovered during the demo_search diagnostic run on a real BG2EE MISC75.ITM file.
+
+**2026-03 — string_manager.resolve() isinstance → duck typing**
+The `isinstance(ref, StrRef)` check in `resolve()` and `resolve_all_languages()`
+failed silently when the StrRef class was imported under a different module path
+(e.g. `strref` vs `core.util.strref`). Replaced with `hasattr` checks for
+`file_id`, `tlk_index`, and `is_none`.
 

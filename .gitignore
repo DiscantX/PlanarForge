@@ -6,6 +6,7 @@ __pycache__/
 .venv/
 dist/
 build/
+demo_output/
 
 # Bundled binaries (WeiDU etc — committed separately or downloaded at setup)
 tools/bin/*

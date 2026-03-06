@@ -61,6 +61,10 @@ Usage::
 
     # List available EE languages
     langs = StringManager.available_languages(finder.find("BG2EE"))
+
+    # Resolve a StrRef across every installed language (used at import time)
+    strings = manager.resolve_all_languages(ref, finder.find("BG2EE"))
+    # {"en_US": "Leather Armour", "fr_FR": "Armure de cuir", ...}
 """
 
 from __future__ import annotations
@@ -273,10 +277,13 @@ class StringManager:
         object rather than decoded (file_id, tlk_index) components.
 
             text = manager.resolve(item.identified_name)
+
+        Uses duck typing rather than isinstance() so the StrRef class
+        imported by the caller need not be the same object as the one
+        imported here (avoids silent failures from module path mismatches).
         """
-        from core.util.strref import StrRef
-        if not isinstance(ref, StrRef):
-            raise TypeError(f"Expected StrRef, got {type(ref).__name__!r}")
+        if not (hasattr(ref, 'file_id') and hasattr(ref, 'tlk_index') and hasattr(ref, 'is_none')):
+            raise TypeError(f"Expected StrRef-like object, got {type(ref).__name__!r}")
         if ref.is_none:
             return ""
         return self.get(ref.file_id, ref.tlk_index)
@@ -300,6 +307,62 @@ class StringManager:
             p.name for p in lang_dir.iterdir()
             if p.is_dir() and (p / "dialog.tlk").is_file()
         )
+
+    def resolve_all_languages(
+        self,
+        ref:  "StrRef",
+        inst: "GameInstallation",
+    ) -> dict[str, str]:
+        """
+        Resolve a StrRef against every installed language for *inst*.
+
+        Used at import time to capture all available translations so that
+        the project is not locked to a single language.  Only languages
+        that are installed on disk are captured — if the user only has
+        English, only English is returned.
+
+        Return value is a dict mapping language code to resolved text,
+        e.g. ``{"en_US": "Leather Armour", "fr_FR": "Armure de cuir"}``.
+
+        For original (non-EE) games there is only one TLK with no language
+        code, so the result is keyed as ``{"default": text}``.
+
+        Returns an empty dict if the StrRef is invalid or resolves to an
+        empty string in every language.
+        """
+        if not (hasattr(ref, 'file_id') and hasattr(ref, 'tlk_index') and hasattr(ref, 'is_none')):
+            raise TypeError(f"Expected StrRef-like object, got {type(ref).__name__!r}")
+        if ref.is_none:
+            return {}
+
+        root     = Path(inst.install_path)
+        lang_dir = root / "lang"
+        results: dict[str, str] = {}
+
+        if lang_dir.is_dir():
+            # EE layout — iterate every language that has a dialog.tlk
+            for lang_code in self.available_languages(inst):
+                male_path, female_path = self._find_tlk_paths(root, lang_code)
+                try:
+                    male_tlk   = TlkFile.from_file(male_path)
+                    female_tlk = TlkFile.from_file(female_path) if female_path.is_file() else None
+                    text = male_tlk.get(ref.tlk_index) if ref.file_id == 0 else ""
+                    if not text and female_tlk is not None:
+                        text = female_tlk.get(ref.tlk_index)
+                    if not text:
+                        # fall back to male for female strrefs with no female TLK
+                        text = male_tlk.get(ref.tlk_index)
+                    if text:
+                        results[lang_code] = text
+                except OSError:
+                    continue
+        else:
+            # Original game layout — single TLK, key as "default"
+            text = self.get(ref.file_id, ref.tlk_index)
+            if text:
+                results["default"] = text
+
+        return results
 
     @property
     def base_language_id(self) -> int:
