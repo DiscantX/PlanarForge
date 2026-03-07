@@ -75,7 +75,7 @@ def _clear_screen() -> None:
     os.system("cls" if os.name == "nt" else "clear")
 
 
-def _configure_tab_completion(candidates_provider: Callable[[], list[str]]) -> bool:
+def _configure_tab_completion(candidates_provider: Callable[[str], list[str]]) -> bool:
     """
     Configure tab completion for interactive input, if readline is available.
 
@@ -91,12 +91,12 @@ def _configure_tab_completion(candidates_provider: Callable[[], list[str]]) -> b
         words = line.split()
 
         if not words:
-            pool = COMMAND_WORDS + candidates_provider()
+            pool = COMMAND_WORDS + candidates_provider(text)
         elif len(words) == 1 and not buffer.endswith(" "):
-            pool = COMMAND_WORDS + candidates_provider()
+            pool = COMMAND_WORDS + candidates_provider(text)
         elif words[0].lower() == "open":
             # open <RESREF|RESREF.TYPE>
-            pool = candidates_provider()
+            pool = candidates_provider(text)
         else:
             pool = []
 
@@ -116,18 +116,18 @@ def _configure_tab_completion(candidates_provider: Callable[[], list[str]]) -> b
     return True
 
 
-def _completion_pool(line: str, candidates_provider: Callable[[], list[str]]) -> list[str]:
+def _completion_pool(line: str, word: str, candidates_provider: Callable[[str], list[str]]) -> list[str]:
     words = line.split()
     if not words:
-        return COMMAND_WORDS + candidates_provider()
+        return COMMAND_WORDS + candidates_provider(word)
     if len(words) == 1 and not line.endswith(" "):
-        return COMMAND_WORDS + candidates_provider()
+        return COMMAND_WORDS + candidates_provider(word)
     if words[0].lower() == "open":
-        return candidates_provider()
+        return candidates_provider(word)
     return []
 
 
-def _make_prompt_toolkit_completer(candidates_provider: Callable[[], list[str]]):
+def _make_prompt_toolkit_completer(candidates_provider: Callable[[str], list[str]]):
     if Completer is None or Completion is None:
         return None
 
@@ -135,7 +135,7 @@ def _make_prompt_toolkit_completer(candidates_provider: Callable[[], list[str]])
         def get_completions(self, document, complete_event):
             text = document.text_before_cursor
             word = document.get_word_before_cursor(WORD=True)
-            pool = _completion_pool(text.lstrip(), candidates_provider)
+            pool = _completion_pool(text.lstrip(), word, candidates_provider)
             seen = set()
             for item in sorted(pool):
                 if item in seen:
@@ -147,7 +147,7 @@ def _make_prompt_toolkit_completer(candidates_provider: Callable[[], list[str]])
     return ExplorerCompleter()
 
 
-def _expand_submitted_tab(line: str, candidates_provider: Callable[[], list[str]]) -> str:
+def _expand_submitted_tab(line: str, candidates_provider: Callable[[str], list[str]]) -> str:
     """
     Fallback completion when terminal inserts literal tab characters.
 
@@ -162,20 +162,20 @@ def _expand_submitted_tab(line: str, candidates_provider: Callable[[], list[str]
     if not prefix:
         return cleaned
 
-    pool = COMMAND_WORDS + candidates_provider()
+    pool = COMMAND_WORDS + candidates_provider(prefix)
     matches = sorted({p for p in pool if p.upper().startswith(prefix.upper())})
     if len(matches) == 1:
         return matches[0]
     return cleaned
 
 
-def _prompt_input(prompt_text: str, candidates_provider: Callable[[], list[str]], use_ptk: bool):
+def _prompt_input(prompt_text: str, candidates_provider: Callable[[str], list[str]], use_ptk: bool):
     if use_ptk and PromptSession is not None:
         if not hasattr(_prompt_input, "_session"):
             setattr(_prompt_input, "_session", PromptSession())
         session = getattr(_prompt_input, "_session")
         completer = _make_prompt_toolkit_completer(candidates_provider)
-        return session.prompt(prompt_text, completer=completer, complete_while_typing=False)
+        return session.prompt(prompt_text, completer=completer, complete_while_typing=True)
     return input(prompt_text)
 
 
@@ -808,14 +808,65 @@ def run(args: argparse.Namespace) -> None:
                 return []
         return selector_entries(query=q)
 
-    def completion_candidates() -> list[str]:
-        if not last_results:
-            return []
+    completion_cache_key: tuple | None = None
+    completion_cache_values: list[str] = []
+
+    def completion_candidates(prefix: str = "") -> list[str]:
+        nonlocal completion_cache_key, completion_cache_values
+        pfx = prefix.upper()
+
+        # Prefer focused suggestions from recent query/list results.
+        if last_results:
+            entries = last_results
+            cache_key = (inst.game_id, _res_type_label(current_type), "last", id(entries), len(entries), pfx)
+            if completion_cache_key == cache_key:
+                return completion_cache_values
+
+            out: list[str] = []
+            seen: set[str] = set()
+            for e in entries:
+                base = str(e.resref).upper()
+                typed = f"{base}.{e.res_type.name}"
+                if (not pfx or base.startswith(pfx)) and base not in seen:
+                    out.append(base)
+                    seen.add(base)
+                if (not pfx or typed.startswith(pfx)) and typed not in seen:
+                    out.append(typed)
+                    seen.add(typed)
+                if len(out) >= 20000:
+                    break
+
+            completion_cache_key = cache_key
+            completion_cache_values = out
+            return out
+
+        # Before any search, use raw KEY entries so completion is available
+        # immediately without requiring prior search/list actions.
+        cache_key = (inst.game_id, _res_type_label(current_type), "key", pfx)
+        if completion_cache_key == cache_key:
+            return completion_cache_values
+
         out: list[str] = []
-        for e in last_results:
+        seen: set[str] = set()
+        for e in key.iter_resources():
+            if not _safe_res_type(e.res_type):
+                continue
+            rt = ResType(e.res_type)
+            if current_type is not None and rt != current_type:
+                continue
             base = str(e.resref).upper()
-            out.append(base)
-            out.append(f"{base}.{e.res_type.name}")
+            typed = f"{base}.{rt.name}"
+            if (not pfx or base.startswith(pfx)) and base not in seen:
+                out.append(base)
+                seen.add(base)
+            if (not pfx or typed.startswith(pfx)) and typed not in seen:
+                out.append(typed)
+                seen.add(typed)
+            if len(out) >= 50000:
+                break
+
+        completion_cache_key = cache_key
+        completion_cache_values = out
         return out
 
     use_prompt_toolkit = PromptSession is not None
@@ -849,6 +900,7 @@ def run(args: argparse.Namespace) -> None:
 
         if lowered in CLEAR_WORDS:
             _clear_screen()
+            last_results = []
             print("Interactive mode.")
             print("Commands: <search text> | where <expr> | list | list types | list <TYPE|ALL> | type <TYPE|ALL> | game | random [TYPE|ALL] | open <RESREF[.TYPE]> | cls | exit()")
             print("Where operators: = != < <= > >= ~   (where ~ means contains)")
@@ -980,6 +1032,7 @@ def run(args: argparse.Namespace) -> None:
                 continue
             picked = candidates[0]
             _inspect_entry(picked, key, inst, get_index(picked.res_type), manager)
+            last_results = []
             continue
 
         last_results = _handle_search_flow(run_query_text(raw), _res_type_label(current_type), raw, args.limit)
