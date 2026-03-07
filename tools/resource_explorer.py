@@ -28,6 +28,19 @@ import sys
 import time
 from pathlib import Path
 from collections import defaultdict
+from typing import Callable
+
+try:
+    import readline  # type: ignore
+except Exception:
+    readline = None
+try:
+    from prompt_toolkit import PromptSession  # type: ignore
+    from prompt_toolkit.completion import Completer, Completion  # type: ignore
+except Exception:
+    PromptSession = None
+    Completer = None
+    Completion = None
 
 _ROOT = Path(__file__).resolve().parent.parent
 if str(_ROOT) not in sys.path:
@@ -45,10 +58,125 @@ CACHE_ROOT = Path(".cache")
 EXIT_WORDS = {"exit()"}
 CLEAR_WORDS = {"cls"}
 STRREF_NONE = 0xFFFFFFFF
+COMMAND_WORDS = [
+    "list",
+    "list types",
+    "type",
+    "game",
+    "random",
+    "open",
+    "where",
+    "exit()",
+    "cls",
+]
 
 
 def _clear_screen() -> None:
     os.system("cls" if os.name == "nt" else "clear")
+
+
+def _configure_tab_completion(candidates_provider: Callable[[], list[str]]) -> bool:
+    """
+    Configure tab completion for interactive input, if readline is available.
+
+    Completion suggests command keywords and resource identifiers from the
+    current search/list context.
+    """
+    if readline is None:
+        return False
+
+    def _completer(text: str, state: int):
+        buffer = readline.get_line_buffer()
+        line = buffer.lstrip()
+        words = line.split()
+
+        if not words:
+            pool = COMMAND_WORDS + candidates_provider()
+        elif len(words) == 1 and not buffer.endswith(" "):
+            pool = COMMAND_WORDS + candidates_provider()
+        elif words[0].lower() == "open":
+            # open <RESREF|RESREF.TYPE>
+            pool = candidates_provider()
+        else:
+            pool = []
+
+        seen = set()
+        matches = []
+        for item in pool:
+            if item in seen:
+                continue
+            seen.add(item)
+            if item.upper().startswith(text.upper()):
+                matches.append(item)
+        matches.sort()
+        return matches[state] if state < len(matches) else None
+
+    readline.set_completer(_completer)
+    readline.parse_and_bind("tab: complete")
+    return True
+
+
+def _completion_pool(line: str, candidates_provider: Callable[[], list[str]]) -> list[str]:
+    words = line.split()
+    if not words:
+        return COMMAND_WORDS + candidates_provider()
+    if len(words) == 1 and not line.endswith(" "):
+        return COMMAND_WORDS + candidates_provider()
+    if words[0].lower() == "open":
+        return candidates_provider()
+    return []
+
+
+def _make_prompt_toolkit_completer(candidates_provider: Callable[[], list[str]]):
+    if Completer is None or Completion is None:
+        return None
+
+    class ExplorerCompleter(Completer):
+        def get_completions(self, document, complete_event):
+            text = document.text_before_cursor
+            word = document.get_word_before_cursor(WORD=True)
+            pool = _completion_pool(text.lstrip(), candidates_provider)
+            seen = set()
+            for item in sorted(pool):
+                if item in seen:
+                    continue
+                seen.add(item)
+                if item.upper().startswith(word.upper()):
+                    yield Completion(item, start_position=-len(word))
+
+    return ExplorerCompleter()
+
+
+def _expand_submitted_tab(line: str, candidates_provider: Callable[[], list[str]]) -> str:
+    """
+    Fallback completion when terminal inserts literal tab characters.
+
+    Expands the token containing ``\\t`` if there is exactly one match.
+    """
+    if "\t" not in line:
+        return line
+
+    # Treat tab as completion request marker, not a literal character.
+    cleaned = line.replace("\t", "")
+    prefix = cleaned.strip()
+    if not prefix:
+        return cleaned
+
+    pool = COMMAND_WORDS + candidates_provider()
+    matches = sorted({p for p in pool if p.upper().startswith(prefix.upper())})
+    if len(matches) == 1:
+        return matches[0]
+    return cleaned
+
+
+def _prompt_input(prompt_text: str, candidates_provider: Callable[[], list[str]], use_ptk: bool):
+    if use_ptk and PromptSession is not None:
+        if not hasattr(_prompt_input, "_session"):
+            setattr(_prompt_input, "_session", PromptSession())
+        session = getattr(_prompt_input, "_session")
+        completer = _make_prompt_toolkit_completer(candidates_provider)
+        return session.prompt(prompt_text, completer=completer, complete_while_typing=False)
+    return input(prompt_text)
 
 
 _STRREF_SUFFIXES = (
@@ -680,6 +808,24 @@ def run(args: argparse.Namespace) -> None:
                 return []
         return selector_entries(query=q)
 
+    def completion_candidates() -> list[str]:
+        if not last_results:
+            return []
+        out: list[str] = []
+        for e in last_results:
+            base = str(e.resref).upper()
+            out.append(base)
+            out.append(f"{base}.{e.res_type.name}")
+        return out
+
+    use_prompt_toolkit = PromptSession is not None
+    if use_prompt_toolkit:
+        print("Live tab completion enabled (prompt_toolkit).")
+    elif _configure_tab_completion(completion_candidates):
+        print("Tab completion enabled (readline).")
+    else:
+        print("NOTE: Tab completion unavailable in this Python environment.")
+
     # Initial one-shot action from CLI args (if provided), then continue in loop.
     if args.list_type:
         last_results = _handle_list_flow(selector_entries(query=""), _res_type_label(current_type), args.limit)
@@ -697,7 +843,8 @@ def run(args: argparse.Namespace) -> None:
     print("Example: where name~sword and value>500 and weight<5")
 
     while True:
-        raw = input(f"[{_res_type_label(current_type)}] > ").strip()
+        raw = _prompt_input(f"[{_res_type_label(current_type)}] > ", completion_candidates, use_prompt_toolkit).strip()
+        raw = _expand_submitted_tab(raw, completion_candidates)
         lowered = raw.lower()
 
         if lowered in CLEAR_WORDS:
