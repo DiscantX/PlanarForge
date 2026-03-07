@@ -143,11 +143,25 @@ class BinaryReader:
         Returns the ResRef as an uppercase str with no extension.
         """
         raw = self.read_bytes(8)
+        # All-0xFF is the IE sentinel for "no resref" — treat as empty.
+        if raw == b"\xff" * 8:
+            return ""
         # Truncate at first null byte — bytes beyond it are padding.
         null_pos = raw.find(b"\x00")
         if null_pos >= 0:
             raw = raw[:null_pos]
-        return raw.decode("latin-1").upper()
+        decoded = raw.decode("latin-1").upper()
+        # Truncate at first character that can't appear in a ResRef.
+        # Some tools leave non-null garbage bytes after the name; the IE
+        # engine stops reading at the first non-valid byte just as it would
+        # at a null.  Valid chars: A-Z, 0-9, underscore, hyphen, hash.
+        result = []
+        for ch in decoded:
+            if ch in "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-#":
+                result.append(ch)
+            else:
+                break
+        return "".join(result)
 
     # ------------------------------------------------------------------
     # Validation helpers

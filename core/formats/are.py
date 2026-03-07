@@ -183,11 +183,11 @@ class Actor:
     actor_remove:    StrRef   = StrRef(0xFFFFFFFF)   # uint32 — StrRef condition
     activation_at:   int   = 0             # uint32 — schedule bitmask (BG2)
     activation_day:  int   = 0             # uint32
-    cre_resref:      str   = ""            # ResRef — .cre file
+    cre_resref:      ResRef = ResRef("")     # ResRef — .cre file
     cre_offset:      int   = 0             # uint32 — offset of embedded CRE (0 if in BIFF)
     cre_size:        int   = 0             # uint32
-    dialog:          str   = ""            # ResRef
-    scripts:         List[str] = field(default_factory=lambda: [""] * 8)  # 8 ResRefs
+    dialog:          ResRef = ResRef("")     # ResRef
+    scripts:         List[ResRef] = field(default_factory=lambda: [ResRef("")] * 8)
 
     @classmethod
     def _read(cls, r: BinaryReader) -> "Actor":
@@ -204,13 +204,13 @@ class Actor:
         activation_at    = r.read_uint32()
         activation_day   = r.read_uint32()
         r.skip(4)  # unknown
-        scripts          = [r.read_resref() for _ in range(8)]
+        scripts          = [ResRef(r.read_resref()) for _ in range(8)]
         cre_offset       = r.read_uint32()
         cre_size         = r.read_uint32()
-        dialog           = r.read_resref()
+        dialog           = ResRef(r.read_resref())
         r.skip(8)  # padding
-        cre_resref       = r.read_resref()
-        r.skip(120)  # reserved / CRE embed area handled separately
+        cre_resref       = ResRef(r.read_resref())
+        r.skip(112)  # reserved / CRE embed area handled separately
         return cls(
             name=name, x=x, y=y, dest_x=dest_x, dest_y=dest_y,
             flags=flags, has_been_spawned=has_been_spawned,
@@ -237,24 +237,24 @@ class Actor:
         w.write_uint32(self.activation_day)
         w.write_padding(4)
         for i in range(8):
-            s = self.scripts[i] if i < len(self.scripts) else ""
-            w.write_resref(s)
+            s = self.scripts[i] if i < len(self.scripts) else ResRef("")
+            w.write_resref(str(s))
         w.write_uint32(self.cre_offset)
         w.write_uint32(self.cre_size)
-        w.write_resref(self.dialog)
+        w.write_resref(str(self.dialog))
         w.write_padding(8)
-        w.write_resref(self.cre_resref)
-        w.write_padding(120)
+        w.write_resref(str(self.cre_resref))
+        w.write_padding(112)
 
     def to_json(self) -> dict:
         d: dict = {"name": self.name, "x": self.x, "y": self.y,
-                   "cre_resref": self.cre_resref, "flags": self.flags}
+                   "cre_resref": self.cre_resref.to_json(), "flags": self.flags}
         if self.dest_x != self.x or self.dest_y != self.y:
             d["dest_x"] = self.dest_x
             d["dest_y"] = self.dest_y
-        if self.dialog:          d["dialog"]       = self.dialog
+        if self.dialog:          d["dialog"]       = self.dialog.to_json()
         if self.activation_at:   d["activation_at"] = self.activation_at
-        if any(self.scripts):    d["scripts"]      = self.scripts
+        if any(self.scripts):    d["scripts"]      = [s.to_json() for s in self.scripts]
         return d
 
     @classmethod
@@ -263,11 +263,12 @@ class Actor:
             name=d.get("name",""), x=d.get("x",0), y=d.get("y",0),
             dest_x=d.get("dest_x", d.get("x",0)),
             dest_y=d.get("dest_y", d.get("y",0)),
-            flags=d.get("flags",0), cre_resref=d.get("cre_resref",""),
-            dialog=d.get("dialog",""),
+            flags=d.get("flags",0),
+            cre_resref=ResRef.from_json(d.get("cre_resref","")),
+            dialog=ResRef.from_json(d.get("dialog","")),
             activation_at=d.get("activation_at",0),
             activation_day=d.get("activation_day",0),
-            scripts=d.get("scripts", [""] * 8),
+            scripts=[ResRef.from_json(s) for s in d.get("scripts", [""] * 8)],
         )
 
 
@@ -324,7 +325,7 @@ class Region:
     vertex_index:   int   = 0    # uint32 — index into area vertex array
     trigger_value:  int   = 0    # uint32
     cursor_index:   int   = 0    # uint32
-    destination_area: str = ""   # ResRef — for travel triggers
+    destination_area: ResRef = ResRef("")  # ResRef — for travel triggers
     destination_entrance: str = ""  # 32-char
     flags:          int   = 0    # uint32
     info_text:      StrRef   = StrRef(0xFFFFFFFF)   # StrRef
@@ -334,8 +335,8 @@ class Region:
     trap_detected:  int   = 0    # uint16
     trap_launch_x:  int   = 0    # uint16
     trap_launch_y:  int   = 0    # uint16
-    key_item:       str   = ""   # ResRef
-    region_script:  str   = ""   # ResRef
+    key_item:       ResRef = ResRef("")  # ResRef
+    region_script:  ResRef = ResRef("")  # ResRef
     alt_use_point_x: int  = 0    # uint16
     alt_use_point_y: int  = 0    # uint16
     unknown:        bytes = b"\x00" * 44
@@ -352,7 +353,7 @@ class Region:
         vertex_index  = r.read_uint32()
         trigger_value = r.read_uint32()
         cursor_index  = r.read_uint32()
-        dest_area     = r.read_resref()
+        dest_area     = ResRef(r.read_resref())
         dest_entrance = r.read_string(32)
         flags         = r.read_uint32()
         info_text     = StrRef(r.read_uint32())
@@ -362,8 +363,8 @@ class Region:
         trap_detected = r.read_uint16()
         trap_x        = r.read_uint16()
         trap_y        = r.read_uint16()
-        key_item      = r.read_resref()
-        script        = r.read_resref()
+        key_item      = ResRef(r.read_resref())
+        script        = ResRef(r.read_resref())
         alt_x         = r.read_uint16()
         alt_y         = r.read_uint16()
         unknown       = r.read_bytes(44)
@@ -390,7 +391,7 @@ class Region:
         w.write_uint32(vertex_index)
         w.write_uint32(self.trigger_value)
         w.write_uint32(self.cursor_index)
-        w.write_resref(self.destination_area)
+        w.write_resref(str(self.destination_area))
         w.write_bytes(self.destination_entrance.encode("latin-1")[:32].ljust(32, b"\x00"))
         w.write_uint32(self.flags)
         w.write_uint32(int(self.info_text))
@@ -400,8 +401,8 @@ class Region:
         w.write_uint16(self.trap_detected)
         w.write_uint16(self.trap_launch_x)
         w.write_uint16(self.trap_launch_y)
-        w.write_resref(self.key_item)
-        w.write_resref(self.region_script)
+        w.write_resref(str(self.key_item))
+        w.write_resref(str(self.region_script))
         w.write_uint16(self.alt_use_point_x)
         w.write_uint16(self.alt_use_point_y)
         w.write_bytes(self.unknown[:44].ljust(44, b"\x00"))
@@ -410,13 +411,13 @@ class Region:
         d: dict = {"name": self.name, "type": self.region_type,
                    "bounding_box": self.bounding_box,
                    "vertices": [v.to_json() for v in self.vertices]}
-        if self.destination_area:    d["destination_area"]     = self.destination_area
+        if self.destination_area:    d["destination_area"]     = self.destination_area.to_json()
         if self.destination_entrance: d["destination_entrance"] = self.destination_entrance
         if self.flags:               d["flags"]                = self.flags
-        if not self.info_text.is_none: d["info_text"]       = self.info_text
+        if not self.info_text.is_none: d["info_text"]       = self.info_text.to_json()
         if self.is_trapped:          d["is_trapped"]           = self.is_trapped
-        if self.key_item:            d["key_item"]             = self.key_item
-        if self.region_script:       d["region_script"]        = self.region_script
+        if self.key_item:            d["key_item"]             = self.key_item.to_json()
+        if self.region_script:       d["region_script"]        = self.region_script.to_json()
         return d
 
     @classmethod
@@ -425,12 +426,12 @@ class Region:
             name=d.get("name",""), region_type=d.get("type", RegionType.INFO_POINT),
             bounding_box=d.get("bounding_box",[0,0,0,0]),
             flags=d.get("flags",0),
-            destination_area=d.get("destination_area",""),
+            destination_area=ResRef.from_json(d.get("destination_area","")),
             destination_entrance=d.get("destination_entrance",""),
-            info_text=StrRef.from_json(hd.get("info_text", 0xFFFFFFFF)),
+            info_text=StrRef.from_json(d.get("info_text", 0xFFFFFFFF)),
             is_trapped=d.get("is_trapped",0),
-            key_item=d.get("key_item",""),
-            region_script=d.get("region_script",""),
+            key_item=ResRef.from_json(d.get("key_item","")),
+            region_script=ResRef.from_json(d.get("region_script","")),
         )
         r.vertices = [Vertex.from_json(v) for v in d.get("vertices",[])]
         return r
@@ -446,7 +447,7 @@ class SpawnPoint:
     name:           str   = ""
     x:              int   = 0
     y:              int   = 0
-    creature_resrefs: List[str] = field(default_factory=lambda: [""] * 10)
+    creature_resrefs: List[ResRef] = field(default_factory=lambda: [ResRef("")] * 10)
     creature_count: int   = 0    # uint16 — how many creatures in list
     base_difficulty: int  = 0    # uint16
     frequency:      int   = 0    # uint16 — respawn rate in seconds
@@ -466,7 +467,7 @@ class SpawnPoint:
         name        = r.read_string(32)
         x           = r.read_uint16()
         y           = r.read_uint16()
-        creatures   = [r.read_resref() for _ in range(10)]
+        creatures   = [ResRef(r.read_resref()) for _ in range(10)]
         cre_count   = r.read_uint16()
         base_diff   = r.read_uint16()
         frequency   = r.read_uint16()
@@ -496,7 +497,7 @@ class SpawnPoint:
         w.write_uint16(self.x)
         w.write_uint16(self.y)
         for i in range(10):
-            w.write_resref(self.creature_resrefs[i] if i < len(self.creature_resrefs) else "")
+            w.write_resref(str(self.creature_resrefs[i]) if i < len(self.creature_resrefs) else "")
         w.write_uint16(self.creature_count)
         w.write_uint16(self.base_difficulty)
         w.write_uint16(self.frequency)
@@ -513,7 +514,7 @@ class SpawnPoint:
         w.write_padding(56)
 
     def to_json(self) -> dict:
-        creatures = [c for c in self.creature_resrefs if c]
+        creatures = [c.to_json() for c in self.creature_resrefs if c]
         d: dict = {"name": self.name, "x": self.x, "y": self.y,
                    "creatures": creatures, "flags": self.flags}
         if self.frequency:          d["frequency"]   = self.frequency
@@ -526,7 +527,7 @@ class SpawnPoint:
     @classmethod
     def from_json(cls, d: dict) -> "SpawnPoint":
         creatures = d.get("creatures", [])
-        padded = (creatures + [""] * 10)[:10]
+        padded = ([ResRef.from_json(c) for c in creatures] + [ResRef("")] * 10)[:10]
         return cls(
             name=d.get("name",""), x=d.get("x",0), y=d.get("y",0),
             creature_resrefs=padded, creature_count=len(creatures),
@@ -554,7 +555,7 @@ class Ambient:
     pitch_variance: int   = 0     # uint32
     volume:         int   = 100   # uint16 — 0-100
     volume_variance: int  = 0     # uint16
-    sounds:         List[str] = field(default_factory=lambda: [""] * 10)
+    sounds:         List[ResRef] = field(default_factory=lambda: [ResRef("")] * 10)
     sound_count:    int   = 0
     interval:       int   = 0     # uint16 — seconds between plays
     interval_variance: int = 0    # uint16
@@ -571,7 +572,7 @@ class Ambient:
         pitch_var = r.read_uint32()
         volume    = r.read_uint16()
         vol_var   = r.read_uint16()
-        sounds    = [r.read_resref() for _ in range(10)]
+        sounds    = [ResRef(r.read_resref()) for _ in range(10)]
         snd_count = r.read_uint16()
         interval  = r.read_uint16()
         int_var   = r.read_uint16()
@@ -597,7 +598,7 @@ class Ambient:
         w.write_uint16(self.volume)
         w.write_uint16(self.volume_variance)
         for i in range(10):
-            w.write_resref(self.sounds[i] if i < len(self.sounds) else "")
+            w.write_resref(str(self.sounds[i]) if i < len(self.sounds) else "")
         w.write_uint16(self.sound_count)
         w.write_uint16(self.interval)
         w.write_uint16(self.interval_variance)
@@ -607,7 +608,7 @@ class Ambient:
         w.write_padding(64)
 
     def to_json(self) -> dict:
-        sounds = [s for s in self.sounds if s]
+        sounds = [s.to_json() for s in self.sounds if s]
         d: dict = {"name": self.name, "x": self.x, "y": self.y,
                    "sounds": sounds, "radius": self.radius,
                    "volume": self.volume, "flags": self.flags}
@@ -618,7 +619,7 @@ class Ambient:
     @classmethod
     def from_json(cls, d: dict) -> "Ambient":
         sounds = d.get("sounds", [])
-        padded = (sounds + [""] * 10)[:10]
+        padded = ([ResRef.from_json(s) for s in sounds] + [ResRef("")] * 10)[:10]
         return cls(
             name=d.get("name",""), x=d.get("x",0), y=d.get("y",0),
             radius=d.get("radius",0), volume=d.get("volume",100),
@@ -636,7 +637,7 @@ class Ambient:
 class Door:
     """A door in the area (links to a WED door record)."""
     name:             str   = ""
-    door_id:          str   = ""    # ResRef — identifies this door in WED
+    door_id:          ResRef = ResRef("")  # ResRef — identifies this door in WED
     flags:            int   = DoorFlag.NONE
     open_vertex_index:  int = 0     # uint32 — into area vertex array
     open_vertex_count:  int = 0     # uint16
@@ -650,8 +651,8 @@ class Door:
     close_cell_count: int  = 0      # uint16
     hp:               int  = 0      # uint16
     ac:               int  = 0      # uint16 — armour class
-    open_sound:       str  = ""     # ResRef
-    close_sound:      str  = ""     # ResRef
+    open_sound:       ResRef = ResRef("")  # ResRef
+    close_sound:      ResRef = ResRef("")  # ResRef
     cursor_index:     int  = 0      # uint32
     trap_detect_dc:   int  = 0      # uint16
     trap_disarm_dc:   int  = 0      # uint16
@@ -659,8 +660,8 @@ class Door:
     trap_detected:    int  = 0      # uint16
     trap_launch_x:    int  = 0      # uint16
     trap_launch_y:    int  = 0      # uint16
-    key_item:         str  = ""     # ResRef
-    door_script:      str  = ""     # ResRef
+    key_item:         ResRef = ResRef("")  # ResRef
+    door_script:      ResRef = ResRef("")  # ResRef
     detection_difficulty: int = 0   # uint32
     lock_difficulty:  int  = 0      # uint32
     open_use_point:   List[int] = field(default_factory=lambda: [0,0])
@@ -668,8 +669,8 @@ class Door:
     lock_pick_string: StrRef  = StrRef(0xFFFFFFFF)
     linked_info:      str  = ""     # 32-char
     name_strref:      StrRef  = StrRef(0xFFFFFFFF)
-    door_open_anim:   str  = ""     # ResRef
-    dialog:           str  = ""     # ResRef
+    door_open_anim:   ResRef = ResRef("")  # ResRef
+    dialog:           ResRef = ResRef("")  # ResRef
 
     open_vertices:  List[Vertex] = field(default_factory=list)
     close_vertices: List[Vertex] = field(default_factory=list)
@@ -677,7 +678,7 @@ class Door:
     @classmethod
     def _read(cls, r: BinaryReader) -> "Door":
         name               = r.read_string(32)
-        door_id            = r.read_resref()
+        door_id            = ResRef(r.read_resref())
         flags              = r.read_uint32()
         open_vi            = r.read_uint32()
         open_vc            = r.read_uint16()
@@ -691,8 +692,8 @@ class Door:
         close_cc           = r.read_uint16()
         hp                 = r.read_uint16()
         ac                 = r.read_uint16()
-        open_snd           = r.read_resref()
-        close_snd          = r.read_resref()
+        open_snd           = ResRef(r.read_resref())
+        close_snd          = ResRef(r.read_resref())
         cursor_index       = r.read_uint32()
         trap_detect        = r.read_uint16()
         trap_disarm        = r.read_uint16()
@@ -700,8 +701,8 @@ class Door:
         trap_detected      = r.read_uint16()
         trap_x             = r.read_uint16()
         trap_y             = r.read_uint16()
-        key_item           = r.read_resref()
-        door_script        = r.read_resref()
+        key_item           = ResRef(r.read_resref())
+        door_script        = ResRef(r.read_resref())
         detect_diff        = r.read_uint32()
         lock_diff          = r.read_uint32()
         open_use           = [r.read_uint16(), r.read_uint16()]
@@ -709,8 +710,8 @@ class Door:
         lock_pick_str      = r.read_uint32()
         linked_info        = r.read_string(32)
         name_str           = r.read_uint32()
-        door_open_anim     = r.read_resref()
-        dialog             = r.read_resref()
+        door_open_anim     = ResRef(r.read_resref())
+        dialog             = ResRef(r.read_resref())
         return cls(
             name=name, door_id=door_id, flags=flags,
             open_vertex_index=open_vi, open_vertex_count=open_vc,
@@ -726,14 +727,14 @@ class Door:
             key_item=key_item, door_script=door_script,
             detection_difficulty=detect_diff, lock_difficulty=lock_diff,
             open_use_point=open_use, close_use_point=close_use,
-            lock_pick_string=lock_pick_str, linked_info=linked_info,
-            name_strref=name_str, door_open_anim=door_open_anim,
+            lock_pick_string=StrRef(lock_pick_str), linked_info=linked_info,
+            name_strref=StrRef(name_str), door_open_anim=door_open_anim,
             dialog=dialog,
         )
 
     def _write(self, w: BinaryWriter, open_vi: int, close_vi: int) -> None:
         w.write_bytes(self.name.encode("latin-1")[:32].ljust(32, b"\x00"))
-        w.write_resref(self.door_id)
+        w.write_resref(str(self.door_id))
         w.write_uint32(self.flags)
         w.write_uint32(open_vi)
         w.write_uint16(len(self.open_vertices))
@@ -747,8 +748,8 @@ class Door:
         w.write_uint16(self.close_cell_count)
         w.write_uint16(self.hp)
         w.write_uint16(self.ac)
-        w.write_resref(self.open_sound)
-        w.write_resref(self.close_sound)
+        w.write_resref(str(self.open_sound))
+        w.write_resref(str(self.close_sound))
         w.write_uint32(self.cursor_index)
         w.write_uint16(self.trap_detect_dc)
         w.write_uint16(self.trap_disarm_dc)
@@ -756,8 +757,8 @@ class Door:
         w.write_uint16(self.trap_detected)
         w.write_uint16(self.trap_launch_x)
         w.write_uint16(self.trap_launch_y)
-        w.write_resref(self.key_item)
-        w.write_resref(self.door_script)
+        w.write_resref(str(self.key_item))
+        w.write_resref(str(self.door_script))
         w.write_uint32(self.detection_difficulty)
         w.write_uint32(self.lock_difficulty)
         for v in self.open_use_point[:2]:  w.write_uint16(v)
@@ -765,34 +766,36 @@ class Door:
         w.write_uint32(int(self.lock_pick_string))
         w.write_bytes(self.linked_info.encode("latin-1")[:32].ljust(32, b"\x00"))
         w.write_uint32(int(self.name_strref))
-        w.write_resref(self.door_open_anim)
-        w.write_resref(self.dialog)
+        w.write_resref(str(self.door_open_anim))
+        w.write_resref(str(self.dialog))
 
     def to_json(self) -> dict:
-        d: dict = {"name": self.name, "door_id": self.door_id,
+        d: dict = {"name": self.name, "door_id": self.door_id.to_json(),
                    "flags": self.flags,
                    "open_vertices":  [v.to_json() for v in self.open_vertices],
                    "close_vertices": [v.to_json() for v in self.close_vertices]}
-        if self.key_item:     d["key_item"]     = self.key_item
-        if self.door_script:  d["door_script"]  = self.door_script
-        if self.open_sound:   d["open_sound"]   = self.open_sound
-        if self.close_sound:  d["close_sound"]  = self.close_sound
-        if self.dialog:       d["dialog"]       = self.dialog
+        if self.key_item:     d["key_item"]     = self.key_item.to_json()
+        if self.door_script:  d["door_script"]  = self.door_script.to_json()
+        if self.open_sound:   d["open_sound"]   = self.open_sound.to_json()
+        if self.close_sound:  d["close_sound"]  = self.close_sound.to_json()
+        if self.dialog:       d["dialog"]       = self.dialog.to_json()
         if self.hp:           d["hp"]           = self.hp
         if self.is_trapped:   d["is_trapped"]   = self.is_trapped
-        if not self.name_strref.is_none: d["name_strref"] = self.name_strref
+        if not self.name_strref.is_none: d["name_strref"] = self.name_strref.to_json()
         return d
 
     @classmethod
     def from_json(cls, d: dict) -> "Door":
         door = cls(
-            name=d.get("name",""), door_id=d.get("door_id",""),
+            name=d.get("name",""), door_id=ResRef.from_json(d.get("door_id","")),
             flags=d.get("flags",0),
-            key_item=d.get("key_item",""), door_script=d.get("door_script",""),
-            open_sound=d.get("open_sound",""), close_sound=d.get("close_sound",""),
-            dialog=d.get("dialog",""), hp=d.get("hp",0),
+            key_item=ResRef.from_json(d.get("key_item","")),
+            door_script=ResRef.from_json(d.get("door_script","")),
+            open_sound=ResRef.from_json(d.get("open_sound","")),
+            close_sound=ResRef.from_json(d.get("close_sound","")),
+            dialog=ResRef.from_json(d.get("dialog","")), hp=d.get("hp",0),
             is_trapped=d.get("is_trapped",0),
-            name_strref=StrRef.from_json(hd.get("name_strref", 0xFFFFFFFF)),
+            name_strref=StrRef.from_json(d.get("name_strref", 0xFFFFFFFF)),
         )
         door.open_vertices  = [Vertex.from_json(v) for v in d.get("open_vertices",[])]
         door.close_vertices = [Vertex.from_json(v) for v in d.get("close_vertices",[])]
@@ -821,12 +824,12 @@ class Container:
     bounding_box:     List[int] = field(default_factory=lambda: [0,0,0,0])
     item_index:       int   = 0    # uint32 — first item in area item list
     item_count:       int   = 0    # uint32
-    script_trap:      str   = ""   # ResRef
+    script_trap:      ResRef = ResRef("")  # ResRef
     vertex_index:     int   = 0    # uint32
     vertex_count:     int   = 0    # uint16
     trigger_range:    int   = 0    # uint16
     owner_name:       str   = ""   # 32-char
-    key_item:         str   = ""   # ResRef
+    key_item:         ResRef = ResRef("")  # ResRef
     break_difficulty: int   = 0
     lock_pick_string: StrRef   = StrRef(0xFFFFFFFF)
     unknown:          bytes = b"\x00" * 56
@@ -852,12 +855,12 @@ class Container:
         bbox          = [r.read_uint16() for _ in range(4)]
         item_index    = r.read_uint32()
         item_count    = r.read_uint32()
-        script_trap   = r.read_resref()
+        script_trap   = ResRef(r.read_resref())
         vi            = r.read_uint32()
         vc            = r.read_uint16()
         trig_range    = r.read_uint16()
         owner         = r.read_string(32)
-        key_item      = r.read_resref()
+        key_item      = ResRef(r.read_resref())
         break_diff    = r.read_uint32()
         lock_str      = r.read_uint32()
         unknown       = r.read_bytes(56)
@@ -890,12 +893,12 @@ class Container:
         for v in self.bounding_box[:4]: w.write_uint16(v)
         w.write_uint32(item_index)
         w.write_uint32(len(self.items) if hasattr(self, "items") else self.item_count)
-        w.write_resref(self.script_trap)
+        w.write_resref(str(self.script_trap))
         w.write_uint32(vertex_index)
         w.write_uint16(len(self.vertices))
         w.write_uint16(self.trigger_range)
         w.write_bytes(self.owner_name.encode("latin-1")[:32].ljust(32, b"\x00"))
-        w.write_resref(self.key_item)
+        w.write_resref(str(self.key_item))
         w.write_uint32(self.break_difficulty)
         w.write_uint32(int(self.lock_pick_string))
         w.write_bytes(self.unknown[:56].ljust(56, b"\x00"))
@@ -904,12 +907,12 @@ class Container:
         d: dict = {"name": self.name, "x": self.x, "y": self.y,
                    "type": self.container_type, "flags": self.flags,
                    "vertices": [v.to_json() for v in self.vertices]}
-        if self.key_item:     d["key_item"]    = self.key_item
-        if self.script_trap:  d["script_trap"] = self.script_trap
+        if self.key_item:     d["key_item"]    = self.key_item.to_json()
+        if self.script_trap:  d["script_trap"] = self.script_trap.to_json()
         if self.is_trapped:   d["is_trapped"]  = self.is_trapped
         if self.lock_difficulty: d["lock_difficulty"] = self.lock_difficulty
         if not self.lock_pick_string.is_none:
-            d["lock_pick_string"] = self.lock_pick_string
+            d["lock_pick_string"] = self.lock_pick_string.to_json()
         return d
 
     @classmethod
@@ -918,10 +921,11 @@ class Container:
             name=d.get("name",""), x=d.get("x",0), y=d.get("y",0),
             container_type=d.get("type", ContainerType.PILE),
             flags=d.get("flags",0),
-            key_item=d.get("key_item",""), script_trap=d.get("script_trap",""),
+            key_item=ResRef.from_json(d.get("key_item","")),
+            script_trap=ResRef.from_json(d.get("script_trap","")),
             is_trapped=d.get("is_trapped",0),
             lock_difficulty=d.get("lock_difficulty",0),
-            lock_pick_string=StrRef.from_json(hd.get("lock_pick_string", 0xFFFFFFFF)),
+            lock_pick_string=StrRef.from_json(d.get("lock_pick_string", 0xFFFFFFFF)),
         )
         c.vertices = [Vertex.from_json(v) for v in d.get("vertices",[])]
         return c
@@ -938,7 +942,7 @@ class AreaAnimation:
     schedule:   int = 0      # uint32 — active-hours bitmask
     x:          int = 0
     y:          int = 0
-    animation:  str = ""     # ResRef — BAM file
+    animation:  ResRef = ResRef("")  # ResRef — BAM file
     sequence:   int = 0      # uint16 — BAM sequence index
     frame:      int = 0      # uint16 — starting frame
     flags:      int = 0      # uint32
@@ -947,7 +951,7 @@ class AreaAnimation:
     start_frame: int = 0     # uint16
     looping_chance: int = 100 # uint8
     skip_cycles: int = 0     # uint8
-    palette:    str = ""     # ResRef — palette override
+    palette:    ResRef = ResRef("")  # ResRef — palette override
     unknown:    int = 0      # uint16
 
     @classmethod
@@ -956,7 +960,7 @@ class AreaAnimation:
         schedule    = r.read_uint32()
         x           = r.read_uint16()
         y           = r.read_uint16()
-        animation   = r.read_resref()
+        animation   = ResRef(r.read_resref())
         sequence    = r.read_uint16()
         frame       = r.read_uint16()
         flags       = r.read_uint32()
@@ -965,7 +969,7 @@ class AreaAnimation:
         start_frame = r.read_uint16()
         loop_chance = r.read_uint8()
         skip        = r.read_uint8()
-        palette     = r.read_resref()
+        palette     = ResRef(r.read_resref())
         unknown     = r.read_uint16()
         return cls(
             name=name, schedule=schedule, x=x, y=y, animation=animation,
@@ -980,7 +984,7 @@ class AreaAnimation:
         w.write_uint32(self.schedule)
         w.write_uint16(self.x)
         w.write_uint16(self.y)
-        w.write_resref(self.animation)
+        w.write_resref(str(self.animation))
         w.write_uint16(self.sequence)
         w.write_uint16(self.frame)
         w.write_uint32(self.flags)
@@ -989,25 +993,25 @@ class AreaAnimation:
         w.write_uint16(self.start_frame)
         w.write_uint8(self.looping_chance)
         w.write_uint8(self.skip_cycles)
-        w.write_resref(self.palette)
+        w.write_resref(str(self.palette))
         w.write_uint16(self.unknown)
 
     def to_json(self) -> dict:
-        d: dict = {"name": self.name, "animation": self.animation,
+        d: dict = {"name": self.name, "animation": self.animation.to_json(),
                    "x": self.x, "y": self.y, "flags": self.flags}
         if self.schedule:        d["schedule"]    = self.schedule
         if self.transparency:    d["transparency"] = self.transparency
-        if self.palette:         d["palette"]     = self.palette
+        if self.palette:         d["palette"]     = self.palette.to_json()
         if self.height:          d["height"]      = self.height
         return d
 
     @classmethod
     def from_json(cls, d: dict) -> "AreaAnimation":
         return cls(
-            name=d.get("name",""), animation=d.get("animation",""),
+            name=d.get("name",""), animation=ResRef.from_json(d.get("animation","")),
             x=d.get("x",0), y=d.get("y",0), flags=d.get("flags",0),
             schedule=d.get("schedule",0), transparency=d.get("transparency",0),
-            palette=d.get("palette",""), height=d.get("height",0),
+            palette=ResRef.from_json(d.get("palette","")), height=d.get("height",0),
         )
 
 
@@ -1047,7 +1051,7 @@ class MapNote:
     @classmethod
     def from_json(cls, d: dict) -> "MapNote":
         return cls(x=d.get("x",0), y=d.get("y",0),
-                   text=StrRef.from_json(hd.get("text", 0xFFFFFFFF)), color=d.get("color",0))
+                   text=StrRef.from_json(d.get("text", 0xFFFFFFFF)), color=d.get("color",0))
 
 
 # ---------------------------------------------------------------------------
@@ -1059,7 +1063,7 @@ class RestEncounter:
     """Creatures that may ambush the party when resting in this area."""
     name:            str   = ""
     encounter_text:  List[StrRef] = field(default_factory=lambda: [StrRef(0xFFFFFFFF)]*10)
-    creature_resrefs: List[str] = field(default_factory=lambda: [""] * 10)
+    creature_resrefs: List[ResRef] = field(default_factory=lambda: [ResRef("")] * 10)
     creature_count:  int   = 0
     difficulty:      int   = 0
     removal_time:    int   = 0
@@ -1072,7 +1076,7 @@ class RestEncounter:
     def _read(cls, r: BinaryReader) -> "RestEncounter":
         name       = r.read_string(32)
         enc_texts  = [StrRef(r.read_uint32()) for _ in range(10)]
-        creatures  = [r.read_resref() for _ in range(10)]
+        creatures  = [ResRef(r.read_resref()) for _ in range(10)]
         cre_count  = r.read_uint16()
         difficulty = r.read_uint16()
         removal    = r.read_uint32()
@@ -1093,7 +1097,7 @@ class RestEncounter:
         for t in (self.encounter_text + [StrRef(0xFFFFFFFF)]*10)[:10]:
             w.write_uint32(int(t))
         for i in range(10):
-            w.write_resref(self.creature_resrefs[i] if i < len(self.creature_resrefs) else "")
+            w.write_resref(str(self.creature_resrefs[i]) if i < len(self.creature_resrefs) else "")
         w.write_uint16(self.creature_count)
         w.write_uint16(self.difficulty)
         w.write_uint32(self.removal_time)
@@ -1106,7 +1110,7 @@ class RestEncounter:
     def to_json(self) -> dict:
         return {
             "name": self.name,
-            "creatures": [c for c in self.creature_resrefs if c],
+            "creatures": [c.to_json() for c in self.creature_resrefs if c],
             "enabled": self.enabled,
             "difficulty": self.difficulty,
         }
@@ -1114,7 +1118,7 @@ class RestEncounter:
     @classmethod
     def from_json(cls, d: dict) -> "RestEncounter":
         creatures = d.get("creatures", [])
-        padded = (creatures + [""] * 10)[:10]
+        padded = ([ResRef.from_json(c) for c in creatures] + [ResRef("")] * 10)[:10]
         return cls(
             name=d.get("name",""), creature_resrefs=padded,
             creature_count=len(creatures),
@@ -1133,20 +1137,20 @@ class AreHeader:
 
     Offset fields are managed by :class:`AreFile` on write.
     """
-    wed_resref:      str   = ""            # ResRef — companion WED file
+    wed_resref:      ResRef = ResRef("")       # companion WED file
     last_saved:      int   = 0             # uint32 — game-time timestamp
     area_flags:      int   = AreaFlag.NONE
-    area_north:      str   = ""            # ResRef — adjacent area N
-    area_east:       str   = ""
-    area_south:      str   = ""
-    area_west:       str   = ""
+    area_north:      ResRef = ResRef("")       # adjacent area N
+    area_east:       ResRef = ResRef("")
+    area_south:      ResRef = ResRef("")
+    area_west:       ResRef = ResRef("")
     area_type:       int   = AreaType.DUNGEON
     rain_probability: int  = 0             # uint16
     snow_probability: int  = 0
     fog_probability:  int  = 0
     lightning_probability: int = 0
     wind_speed:      int   = 0
-    area_script:     str   = ""            # ResRef
+    area_script:     ResRef = ResRef("")       # ResRef
     explored_mask_size: int = 0            # uint32 — for V9.1 fog-of-war
     explored_mask_offset: int = 0          # uint32
     # Music
@@ -1198,13 +1202,13 @@ class AreHeader:
 
     @classmethod
     def _read(cls, r: BinaryReader, version: bytes) -> "AreHeader":
-        wed_resref     = r.read_resref()
+        wed_resref     = ResRef(r.read_resref())
         last_saved     = r.read_uint32()
         area_flags     = r.read_uint32()
-        area_north     = r.read_resref()
-        area_east      = r.read_resref()
-        area_south     = r.read_resref()
-        area_west      = r.read_resref()
+        area_north     = ResRef(r.read_resref())
+        area_east      = ResRef(r.read_resref())
+        area_south     = ResRef(r.read_resref())
+        area_west      = ResRef(r.read_resref())
         area_type      = r.read_uint16()
         rain_prob      = r.read_uint16()
         snow_prob      = r.read_uint16()
@@ -1231,7 +1235,7 @@ class AreHeader:
         variables_cnt  = r.read_uint32()
         tiled_obj_off  = r.read_uint32()
         tiled_obj_cnt  = r.read_uint32()
-        area_script    = r.read_resref()
+        area_script    = ResRef(r.read_resref())
         expl_mask_size = r.read_uint32()
         expl_mask_off  = r.read_uint32()
         doors_off      = r.read_uint32()
@@ -1291,13 +1295,13 @@ class AreHeader:
         )
 
     def _write(self, w: BinaryWriter) -> None:
-        w.write_resref(self.wed_resref)
+        w.write_resref(str(self.wed_resref))
         w.write_uint32(self.last_saved)
         w.write_uint32(self.area_flags)
-        w.write_resref(self.area_north)
-        w.write_resref(self.area_east)
-        w.write_resref(self.area_south)
-        w.write_resref(self.area_west)
+        w.write_resref(str(self.area_north))
+        w.write_resref(str(self.area_east))
+        w.write_resref(str(self.area_south))
+        w.write_resref(str(self.area_west))
         w.write_uint16(self.area_type)
         w.write_uint16(self.rain_probability)
         w.write_uint16(self.snow_probability)
@@ -1324,7 +1328,7 @@ class AreHeader:
         w.write_uint32(self.variables_count)
         w.write_uint32(self.tiled_obj_offset)
         w.write_uint32(self.tiled_obj_count)
-        w.write_resref(self.area_script)
+        w.write_resref(str(self.area_script))
         w.write_uint32(self.explored_mask_size)
         w.write_uint32(self.explored_mask_offset)
         w.write_uint32(self.doors_offset)
@@ -1342,7 +1346,7 @@ class AreHeader:
         w.write_uint32(self.rest_count)
         w.write_uint32(self.unknown_offset)
         w.write_uint32(self.unknown_count)
-        w.write_padding(84)
+        w.write_padding(72)
 
 
 # ---------------------------------------------------------------------------
@@ -1408,7 +1412,7 @@ class AreaVariable:
 @dataclass
 class AreaItem:
     """An item stored in a container within this area."""
-    resref:   str = ""
+    resref:   ResRef = ResRef("")
     flags:    int = 0     # uint16 — identified, stolen, etc.
     charges1: int = 0
     charges2: int = 0
@@ -1421,7 +1425,7 @@ class AreaItem:
 
     @classmethod
     def _read(cls, r: BinaryReader) -> "AreaItem":
-        resref   = r.read_resref()
+        resref   = ResRef(r.read_resref())
         flags    = r.read_uint16()
         charges1 = r.read_uint16()
         charges2 = r.read_uint16()
@@ -1431,7 +1435,7 @@ class AreaItem:
                    charges1=charges1, charges2=charges2, charges3=charges3)
 
     def _write(self, w: BinaryWriter) -> None:
-        w.write_resref(self.resref)
+        w.write_resref(str(self.resref))
         w.write_uint16(self.flags)
         w.write_uint16(self.charges1)
         w.write_uint16(self.charges2)
@@ -1439,7 +1443,7 @@ class AreaItem:
         w.write_padding(4)
 
     def to_json(self) -> dict:
-        d: dict = {"resref": self.resref}
+        d: dict = {"resref": self.resref.to_json()}
         if self.flags:    d["flags"]    = self.flags
         if self.charges1: d["charges1"] = self.charges1
         if self.charges2: d["charges2"] = self.charges2
@@ -1448,7 +1452,7 @@ class AreaItem:
 
     @classmethod
     def from_json(cls, d: dict) -> "AreaItem":
-        return cls(resref=d.get("resref",""), flags=d.get("flags",0),
+        return cls(resref=ResRef.from_json(d.get("resref","")), flags=d.get("flags",0),
                    charges1=d.get("charges1",0), charges2=d.get("charges2",0),
                    charges3=d.get("charges3",0))
 
@@ -1803,16 +1807,17 @@ class AreFile:
     def to_json(self) -> dict:
         h = self.header
         hd: dict = {
-            "wed_resref":  h.wed_resref,
+            "wed_resref":  h.wed_resref.to_json(),
             "area_flags":  h.area_flags,
             "area_type":   h.area_type,
-            "area_script": h.area_script,
+            "area_script": h.area_script.to_json(),
             "day_song":    h.day_song,
             "night_song":  h.night_song,
             "battle_song": h.battle_song,
         }
         for attr in ("area_north","area_east","area_south","area_west"):
-            if getattr(h, attr): hd[attr] = getattr(h, attr)
+            v = getattr(h, attr)
+            if v: hd[attr] = v.to_json()
         for attr in ("rain_probability","snow_probability","fog_probability",
                      "lightning_probability","wind_speed"):
             if getattr(h, attr): hd[attr] = getattr(h, attr)
@@ -1841,12 +1846,14 @@ class AreFile:
         hd = d.get("header", {})
         v91_hex = hd.get("v91_extra","")
         header = AreHeader(
-            wed_resref=hd.get("wed_resref",""),
+            wed_resref=ResRef.from_json(hd.get("wed_resref","")),
             area_flags=hd.get("area_flags",0),
             area_type=hd.get("area_type", AreaType.DUNGEON),
-            area_script=hd.get("area_script",""),
-            area_north=hd.get("area_north",""), area_east=hd.get("area_east",""),
-            area_south=hd.get("area_south",""), area_west=hd.get("area_west",""),
+            area_script=ResRef.from_json(hd.get("area_script","")),
+            area_north=ResRef.from_json(hd.get("area_north","")),
+            area_east=ResRef.from_json(hd.get("area_east","")),
+            area_south=ResRef.from_json(hd.get("area_south","")),
+            area_west=ResRef.from_json(hd.get("area_west","")),
             rain_probability=hd.get("rain_probability",0),
             snow_probability=hd.get("snow_probability",0),
             fog_probability=hd.get("fog_probability",0),

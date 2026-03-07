@@ -75,7 +75,7 @@ EFFECT_V1_SIZE        = 48
 EFFECT_V2_SIZE        = 104
 
 SLOT_COUNT     = 40   # V1 / V9  (BG1/BG2/BGEE: 40 slots per IESDP)
-SLOT_COUNT_V12 = 46   # PST
+SLOT_COUNT_V12 = 48   # PST V1.2 (48 slots per IESDP)
 
 
 
@@ -205,57 +205,74 @@ class PstSlotIndex(IntEnum):
     """
     Equipment slot indices for V1.2 (Planescape: Torment) creatures.
 
-    PST has a significantly different slot layout:
-    - No shield slot (PST is mostly fist/weapon only)
-    - Only 2 weapon slots
-    - Adds Tattoo and Lens slots unique to Sigil's item system
-    - Larger inventory (20 slots)
+    Order per IESDP V1.2 (48 slots total):
+    0  Right Earring/Lens/Helmet
+    1  Armor/Chest
+    2  Left Tattoo
+    3  Hand
+    4  L.Ring
+    5  R.Ring
+    6  Left Earring/Eyeball
+    7  Right Tattoo (lower)
+    8  Boots/Wrist
+    9-12  Weapon 1-4
+    13-18 Quiver 1-6
+    19  Right Tattoo (upper)
+    20-22 Quick item 1-3
+    23-24 Quick item 4-5
+    25-44 Inventory 1-20
+    45  Magic weapon
+    46  Selected weapon
+    47  Selected weapon ability
     """
-    HELMET       = 0
-    ARMOUR       = 1
-    # slot 2 unused (no shield)
-    GLOVES       = 3
+    HELMET       = 0   # Right Earring / Lens / Helmet
+    ARMOUR       = 1   # Chest
+    TATTOO_LEFT  = 2   # Left Tattoo
+    HAND         = 3
     RING_LEFT    = 4
     RING_RIGHT   = 5
-    AMULET       = 6
-    BELT         = 7
+    EYEBALL      = 6   # Left Earring / Eyeball
+    TATTOO_RIGHT_LOWER = 7  # Right Tattoo (lower)
     BOOTS        = 8
     WEAPON1      = 9
     WEAPON2      = 10
-    # slots 11-12 unused (no weapon 3/4)
+    WEAPON3      = 11
+    WEAPON4      = 12
     QUIVER1      = 13
     QUIVER2      = 14
     QUIVER3      = 15
-    CLOAK        = 16
-    QUICK_ITEM1  = 17
-    QUICK_ITEM2  = 18
-    QUICK_ITEM3  = 19
-    INVENTORY_0  = 20
-    INVENTORY_1  = 21
-    INVENTORY_2  = 22
-    INVENTORY_3  = 23
-    INVENTORY_4  = 24
-    INVENTORY_5  = 25
-    INVENTORY_6  = 26
-    INVENTORY_7  = 27
-    INVENTORY_8  = 28
-    INVENTORY_9  = 29
-    INVENTORY_10 = 30
-    INVENTORY_11 = 31
-    INVENTORY_12 = 32
-    INVENTORY_13 = 33
-    INVENTORY_14 = 34
-    INVENTORY_15 = 35
-    INVENTORY_16 = 36
-    INVENTORY_17 = 37
-    INVENTORY_18 = 38
-    INVENTORY_19 = 39
-    TATTOO1      = 40   # PST-specific
-    TATTOO2      = 41   # PST-specific
-    LENS         = 42   # PST-specific (eyeball slot)
-    MAGIC_WEAPON    = 43
-    WEAPON_SELECTED = 44
-    # slot 45: unused padding
+    QUIVER4      = 16
+    QUIVER5      = 17
+    QUIVER6      = 18
+    TATTOO_RIGHT_UPPER = 19  # Right Tattoo (upper)
+    QUICK_ITEM1  = 20
+    QUICK_ITEM2  = 21
+    QUICK_ITEM3  = 22
+    QUICK_ITEM4  = 23
+    QUICK_ITEM5  = 24
+    INVENTORY_0  = 25
+    INVENTORY_1  = 26
+    INVENTORY_2  = 27
+    INVENTORY_3  = 28
+    INVENTORY_4  = 29
+    INVENTORY_5  = 30
+    INVENTORY_6  = 31
+    INVENTORY_7  = 32
+    INVENTORY_8  = 33
+    INVENTORY_9  = 34
+    INVENTORY_10 = 35
+    INVENTORY_11 = 36
+    INVENTORY_12 = 37
+    INVENTORY_13 = 38
+    INVENTORY_14 = 39
+    INVENTORY_15 = 40
+    INVENTORY_16 = 41
+    INVENTORY_17 = 42
+    INVENTORY_18 = 43
+    INVENTORY_19 = 44
+    MAGIC_WEAPON    = 45
+    WEAPON_SELECTED = 46
+    # slot 47: selected weapon ability (not named, read-only engine field)
 
 
 # ---------------------------------------------------------------------------
@@ -513,13 +530,22 @@ class MemorisedSpell:
 
 @dataclass
 class CreItem:
-    """An item in the creature's inventory or equipment."""
-    resref:   ResRef = ResRef("")
-    flags:    int = 0
-    charges1: int = 0
-    charges2: int = 0
-    charges3: int = 0
-    unknown: bytes = b"\x00\x00\x00\x00"   # 4 bytes at offset 16 (often 0x02000000)
+    """An item in the creature's inventory or equipment.
+
+    Binary layout (20 bytes, all versions):
+        0x0000  8  resref
+        0x0008  2  expiration_time (word; 0 = no expiry; V1.2/V9 always 0)
+        0x000a  2  charges1
+        0x000c  2  charges2
+        0x000e  2  charges3
+        0x0010  4  flags (dword)
+    """
+    resref:          ResRef = ResRef("")
+    expiration_time: int = 0   # 0x0008: word
+    charges1:        int = 0
+    charges2:        int = 0
+    charges3:        int = 0
+    flags:           int = 0   # 0x0010: dword
 
     FLAG_IDENTIFIED  = 0x0001
     FLAG_UNSTEALABLE = 0x0002
@@ -528,37 +554,39 @@ class CreItem:
 
     @classmethod
     def _read(cls, r: BinaryReader) -> "CreItem":
-        resref   = ResRef(r.read_resref())
-        flags    = r.read_uint16()
-        charges1 = r.read_uint16()
-        charges2 = r.read_uint16()
-        charges3 = r.read_uint16()
-        unknown  = r.read_bytes(4)
-        return cls(resref=resref, flags=flags,
+        resref          = ResRef(r.read_resref())
+        expiration_time = r.read_uint16()
+        charges1        = r.read_uint16()
+        charges2        = r.read_uint16()
+        charges3        = r.read_uint16()
+        flags           = r.read_uint32()
+        return cls(resref=resref, expiration_time=expiration_time,
                    charges1=charges1, charges2=charges2, charges3=charges3,
-                   unknown=unknown)
+                   flags=flags)
 
     def _write(self, w: BinaryWriter) -> None:
         w.write_resref(str(self.resref))
-        w.write_uint16(self.flags)
+        w.write_uint16(self.expiration_time)
         w.write_uint16(self.charges1)
         w.write_uint16(self.charges2)
         w.write_uint16(self.charges3)
-        w.write_bytes(self.unknown[:4].ljust(4, b"\x00"))
+        w.write_uint32(self.flags)
 
     def to_json(self) -> dict:
         d: dict = {"resref": self.resref.to_json()}
-        if self.flags:    d["flags"]    = self.flags
-        if self.charges1: d["charges1"] = self.charges1
-        if self.charges2: d["charges2"] = self.charges2
-        if self.charges3: d["charges3"] = self.charges3
+        if self.expiration_time: d["expiration_time"] = self.expiration_time
+        if self.charges1:        d["charges1"]        = self.charges1
+        if self.charges2:        d["charges2"]        = self.charges2
+        if self.charges3:        d["charges3"]        = self.charges3
+        if self.flags:           d["flags"]           = self.flags
         return d
 
     @classmethod
     def from_json(cls, d: dict) -> "CreItem":
-        return cls(resref=ResRef.from_json(d.get("resref","")), flags=d.get("flags",0),
+        return cls(resref=ResRef.from_json(d.get("resref","")),
+                   expiration_time=d.get("expiration_time",0),
                    charges1=d.get("charges1",0), charges2=d.get("charges2",0),
-                   charges3=d.get("charges3",0))
+                   charges3=d.get("charges3",0), flags=d.get("flags",0))
 
 
 # ---------------------------------------------------------------------------
@@ -980,10 +1008,6 @@ class CreHeader:
         """Write the complete V1.0 header (724 bytes, not including sig+ver)."""
         self._write_common_prefix(w)
         self._write_shared_tail(w)
-        w.write_uint8(self.leather_color)
-        w.write_uint8(self.armor_color)
-        w.write_uint8(self.hair_color)
-        w.write_uint8(self.eff_version)
 
 
 # ---------------------------------------------------------------------------
@@ -1213,10 +1237,11 @@ class CreHeaderV12:
     unknown_profs:      bytes = b"\x00" * 10  # 10 additional prof bytes in PST
 
     # -- Tracking --
-    tracking:           int   = 0
-    tracking_target:    StrRef = StrRef(0xFFFFFFFF)
+    turn_undead_level:  int   = 0              # 0x0082
+    tracking:           int   = 0              # 0x0083
+    tracking_target:    bytes = b"\x00" * 32   # 0x0084: 32-byte char array
 
-    soundset:           List[StrRef] = field(default_factory=lambda: [StrRef(0xFFFFFFFF)] * 25)  # 25 × uint32 strrefs
+    soundset:           List[StrRef] = field(default_factory=lambda: [StrRef(0xFFFFFFFF)] * 100)  # 100 × uint32 strrefs (same as V1.0)
 
     # -- Character --
     level_1:            int   = 0
@@ -1303,8 +1328,7 @@ class CreHeaderV12:
         eff_version     = r.read_uint8()
         small_portrait  = ResRef(r.read_resref())
         large_portrait  = ResRef(r.read_resref())
-        reputation      = r.read_int8()
-        hide_in_shadows = r.read_uint8()
+        reputation      = r.read_int16()   # 0x0044: signed word (V1.2, no hide_in_shadows)
         ac_base         = r.read_int16()
         ac_crush        = r.read_int16()
         ac_missile      = r.read_int16()
@@ -1345,10 +1369,10 @@ class CreHeaderV12:
         club_prof           = r.read_uint8()
         misc_prof           = r.read_uint8()
         unknown_profs       = r.read_bytes(10)
-        tracking            = r.read_uint8()
-        r.skip(3)
-        tracking_target     = r.read_uint32()
-        soundset            = [StrRef(r.read_uint32()) for _ in range(25)]
+        turn_undead_level   = r.read_uint8()    # 0x0082
+        tracking            = r.read_uint8()    # 0x0083
+        tracking_target     = r.read_bytes(32)  # 0x0084: 32-byte char array
+        soundset            = [StrRef(r.read_uint32()) for _ in range(100)]  # 0x00A4: 100 × uint32
         level_1             = r.read_uint8()
         level_2             = r.read_uint8()
         level_3             = r.read_uint8()
@@ -1408,7 +1432,7 @@ class CreHeaderV12:
             color5=color5, color6=color6, color7=color7,
             eff_version=eff_version,
             small_portrait=small_portrait, large_portrait=large_portrait,
-            reputation=reputation, hide_in_shadows=hide_in_shadows,
+            reputation=reputation,
             ac_base=ac_base, ac_crush=ac_crush, ac_missile=ac_missile,
             ac_pierce=ac_pierce, ac_slash=ac_slash,
             thac0=thac0, attacks=attacks,
@@ -1427,6 +1451,7 @@ class CreHeaderV12:
             fist_prof=fist_prof, edged_prof=edged_prof, hammer_prof=hammer_prof,
             axe_prof=axe_prof, club_prof=club_prof, misc_prof=misc_prof,
             unknown_profs=unknown_profs,
+            turn_undead_level=turn_undead_level,
             tracking=tracking,
             tracking_target=tracking_target,
             soundset=soundset,
@@ -1482,8 +1507,7 @@ class CreHeaderV12:
         w.write_uint8(self.eff_version)
         w.write_resref(str(self.small_portrait))
         w.write_resref(str(self.large_portrait))
-        w.write_int8(self.reputation)
-        w.write_uint8(self.hide_in_shadows)
+        w.write_int16(self.reputation)   # 0x0044: signed word (V1.2, no hide_in_shadows)
         w.write_int16(self.ac_base)
         w.write_int16(self.ac_crush)
         w.write_int16(self.ac_missile)
@@ -1524,10 +1548,10 @@ class CreHeaderV12:
         w.write_uint8(self.club_prof)
         w.write_uint8(self.misc_prof)
         w.write_bytes(self.unknown_profs[:10].ljust(10, b"\x00"))
-        w.write_uint8(self.tracking)
-        w.write_padding(3)
-        w.write_uint32(self.tracking_target)
-        for s in (self.soundset + [StrRef(0xFFFFFFFF)] * 25)[:25]:  # 25 × uint32 strrefs
+        w.write_uint8(self.turn_undead_level)                            # 0x0082
+        w.write_uint8(self.tracking)                                     # 0x0083
+        w.write_bytes(self.tracking_target[:32].ljust(32, b"\x00"))      # 0x0084
+        for s in (self.soundset + [StrRef(0xFFFFFFFF)] * 100)[:100]:    # 100 × uint32
             w.write_uint32(int(s))
         w.write_uint8(self.level_1)
         w.write_uint8(self.level_2)
@@ -2131,14 +2155,9 @@ class CreFileV12(CreFile):
         """Called by CreFile.from_bytes after the version tag is consumed."""
         header = CreHeaderV12._read(r)
 
-        known_spells, memorise_info, memorised_spells, raw_slots, items, effects = (
-            _read_subarrays(BinaryReader(data[8:]), header, SLOT_COUNT_V12,
-                            use_v2_effects=False)
-        )
-        # The sub-array reader needs absolute offsets, so re-read from full data
         r2 = BinaryReader(data)
-        r2.skip(8)  # sig + ver
-        known_spells, memorise_info, memorised_spells, raw_slots, items, effects = (
+        r2.skip(8)  # sig + ver — offsets in header are absolute from file start
+        known_spells, memorise_info, memorised_spells, raw_slots, items, effects, tail = (
             _read_subarrays(r2, header, SLOT_COUNT_V12, use_v2_effects=False)
         )
 
@@ -2191,7 +2210,7 @@ class CreFileV12(CreFile):
             ("xp",0),("gold",0),("level_2",0),("level_3",0),("str_extra",0),
             ("faction",0),("team",0),("reputation",10),("status_flags",0),
             ("morale",10),("morale_break",5),("morale_recovery",0),
-            ("racial_enemy",0),("hide_in_shadows",0),("death_variable",""),
+            ("racial_enemy",0),("death_variable",""),
             ("save_death",20),("save_wands",20),("save_poly",20),
             ("save_breath",20),("save_spells",20),
         ):
@@ -2206,7 +2225,7 @@ class CreFileV12(CreFile):
         for i in range(1, 8):
             v = getattr(h, f"color{i}")
             if v: hd[f"color{i}"] = v
-        _NONE_SOUNDSET_V12 = [StrRef(0xFFFFFFFF)] * 25
+        _NONE_SOUNDSET_V12 = [StrRef(0xFFFFFFFF)] * 100
         if h.soundset != _NONE_SOUNDSET_V12:
             hd["soundset"] = [s.to_json() for s in h.soundset]
         if any(h.overlay_data):
@@ -2230,9 +2249,9 @@ class CreFileV12(CreFile):
         _raw_soundset_v12 = hd.get("soundset", None)
         if isinstance(_raw_soundset_v12, list):
             _soundset_v12 = [StrRef.from_json(v) for v in _raw_soundset_v12]
-            _soundset_v12 = (_soundset_v12 + [StrRef(0xFFFFFFFF)] * 25)[:25]
+            _soundset_v12 = (_soundset_v12 + [StrRef(0xFFFFFFFF)] * 100)[:100]
         else:
-            _soundset_v12 = [StrRef(0xFFFFFFFF)] * 25
+            _soundset_v12 = [StrRef(0xFFFFFFFF)] * 100
         overlay_hex   = hd.get("overlay_data", "")
         v12_tail_hex  = hd.get("v12_tail", "")
         header = CreHeaderV12(
@@ -2249,7 +2268,6 @@ class CreFileV12(CreFile):
             small_portrait=ResRef.from_json(hd.get("small_portrait","")),
             large_portrait=ResRef.from_json(hd.get("large_portrait","")),
             reputation=hd.get("reputation",10),
-            hide_in_shadows=hd.get("hide_in_shadows",0),
             ac_base=hd.get("ac_base",10), ac_crush=hd.get("ac_crush",0),
             ac_missile=hd.get("ac_missile",0), ac_pierce=hd.get("ac_pierce",0),
             ac_slash=hd.get("ac_slash",0),
@@ -2274,8 +2292,9 @@ class CreFileV12(CreFile):
             fist_prof=hd.get("fist_prof",0), edged_prof=hd.get("edged_prof",0),
             hammer_prof=hd.get("hammer_prof",0), axe_prof=hd.get("axe_prof",0),
             club_prof=hd.get("club_prof",0), misc_prof=hd.get("misc_prof",0),
+            turn_undead_level=hd.get("turn_undead_level",0),
             tracking=hd.get("tracking",0),
-            tracking_target=StrRef.from_json(hd.get("tracking_target", 0xFFFFFFFF)),
+            tracking_target=bytes.fromhex(hd["tracking_target"]) if hd.get("tracking_target") else b"\x00"*32,
             soundset=_soundset_v12,
             level_1=hd.get("level_1",0), level_2=hd.get("level_2",0),
             level_3=hd.get("level_3",0), sex=hd.get("sex",Gender.MALE),

@@ -462,7 +462,7 @@ def _safe_res_type(code: int) -> bool:
 
 
 def _cache_path(inst: GameInstallation, res_type: ResType) -> Path:
-    return CACHE_ROOT / inst.game_id / f"{res_type.name}_index.json"
+    return CACHE_ROOT / inst.game_id / "index" / f"{res_type.name}_index.json"
 
 
 def _parser_hash(res_type: ResType) -> str:
