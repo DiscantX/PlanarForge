@@ -282,7 +282,7 @@ class EffectBlock:
     duration:      int   = 0
     probability1:  int   = 100
     probability2:  int   = 0
-    resource:      str   = ""
+    resource:      ResRef = ResRef("")
     dice_count:    int   = 0
     dice_sides:    int   = 0
     saving_throw:  int   = 0
@@ -304,7 +304,7 @@ class EffectBlock:
         probability1  = r.read_uint8()
         probability2  = r.read_uint8()
         r.skip(2)
-        resource      = r.read_resref()
+        resource      = ResRef(r.read_resref())
         dice_count    = r.read_int32()
         dice_sides    = r.read_int32()
         saving_throw  = r.read_uint32()
@@ -340,7 +340,7 @@ class EffectBlock:
         w.write_uint8(self.probability1)
         w.write_uint8(self.probability2)
         w.write_padding(2)
-        w.write_resref(self.resource)
+        w.write_resref(str(self.resource))
         w.write_int32(self.dice_count)
         w.write_int32(self.dice_sides)
         w.write_uint32(self.saving_throw)
@@ -363,7 +363,7 @@ class EffectBlock:
         if self.duration:            d["duration"]      = self.duration
         if self.probability1 != 100: d["probability1"]  = self.probability1
         if self.probability2:        d["probability2"]  = self.probability2
-        if self.resource:            d["resource"]      = self.resource
+        if self.resource:            d["resource"]      = self.resource.to_json()
         if self.dice_count:          d["dice_count"]    = self.dice_count
         if self.dice_sides:          d["dice_sides"]    = self.dice_sides
         if self.saving_throw:        d["saving_throw"]  = self.saving_throw
@@ -386,7 +386,7 @@ class EffectBlock:
             duration      = d.get("duration", 0),
             probability1  = d.get("probability1", 100),
             probability2  = d.get("probability2", 0),
-            resource      = d.get("resource", ""),
+            resource      = ResRef.from_json(d.get("resource", "")),
             dice_count    = d.get("dice_count", 0),
             dice_sides    = d.get("dice_sides", 0),
             saving_throw  = d.get("saving_throw", 0),
@@ -403,27 +403,27 @@ class EffectBlock:
 @dataclass
 class KnownSpell:
     """A spell the creature knows and may memorise."""
-    resref:     str = ""
+    resref:     ResRef = ResRef("")
     level:      int = 0
     spell_type: int = 0   # 0=wizard 1=cleric 2=innate
 
     @classmethod
     def _read(cls, r: BinaryReader) -> "KnownSpell":
-        return cls(resref=r.read_resref(), level=r.read_uint16(),
+        return cls(resref=ResRef(r.read_resref()), level=r.read_uint16(),
                    spell_type=r.read_uint16())
 
     def _write(self, w: BinaryWriter) -> None:
-        w.write_resref(self.resref)
+        w.write_resref(str(self.resref))
         w.write_uint16(self.level)
         w.write_uint16(self.spell_type)
 
     def to_json(self) -> dict:
-        return {"resref": self.resref, "level": self.level,
+        return {"resref": self.resref.to_json(), "level": self.level,
                 "spell_type": self.spell_type}
 
     @classmethod
     def from_json(cls, d: dict) -> "KnownSpell":
-        return cls(resref=d.get("resref",""), level=d.get("level",0),
+        return cls(resref=ResRef.from_json(d.get("resref","")), level=d.get("level",0),
                    spell_type=d.get("spell_type",0))
 
 
@@ -485,26 +485,26 @@ class MemoriseInfo:
 @dataclass
 class MemorisedSpell:
     """A spell currently memorised (ready to cast)."""
-    resref:    str = ""
+    resref:    ResRef = ResRef("")
     memorised: int = 1   # 1=available, 0=already cast today
 
     @classmethod
     def _read(cls, r: BinaryReader) -> "MemorisedSpell":
-        return cls(resref=r.read_resref(), memorised=r.read_uint32())
+        return cls(resref=ResRef(r.read_resref()), memorised=r.read_uint32())
 
     def _write(self, w: BinaryWriter) -> None:
-        w.write_resref(self.resref)
+        w.write_resref(str(self.resref))
         w.write_uint32(self.memorised)
 
     def to_json(self) -> dict:
-        d: dict = {"resref": self.resref}
+        d: dict = {"resref": self.resref.to_json()}
         if not self.memorised:
             d["memorised"] = 0
         return d
 
     @classmethod
     def from_json(cls, d: dict) -> "MemorisedSpell":
-        return cls(resref=d.get("resref",""), memorised=d.get("memorised",1))
+        return cls(resref=ResRef.from_json(d.get("resref","")), memorised=d.get("memorised",1))
 
 
 # ---------------------------------------------------------------------------
@@ -514,7 +514,7 @@ class MemorisedSpell:
 @dataclass
 class CreItem:
     """An item in the creature's inventory or equipment."""
-    resref:   str = ""
+    resref:   ResRef = ResRef("")
     flags:    int = 0
     charges1: int = 0
     charges2: int = 0
@@ -528,7 +528,7 @@ class CreItem:
 
     @classmethod
     def _read(cls, r: BinaryReader) -> "CreItem":
-        resref   = r.read_resref()
+        resref   = ResRef(r.read_resref())
         flags    = r.read_uint16()
         charges1 = r.read_uint16()
         charges2 = r.read_uint16()
@@ -539,7 +539,7 @@ class CreItem:
                    unknown=unknown)
 
     def _write(self, w: BinaryWriter) -> None:
-        w.write_resref(self.resref)
+        w.write_resref(str(self.resref))
         w.write_uint16(self.flags)
         w.write_uint16(self.charges1)
         w.write_uint16(self.charges2)
@@ -547,7 +547,7 @@ class CreItem:
         w.write_bytes(self.unknown[:4].ljust(4, b"\x00"))
 
     def to_json(self) -> dict:
-        d: dict = {"resref": self.resref}
+        d: dict = {"resref": self.resref.to_json()}
         if self.flags:    d["flags"]    = self.flags
         if self.charges1: d["charges1"] = self.charges1
         if self.charges2: d["charges2"] = self.charges2
@@ -556,7 +556,7 @@ class CreItem:
 
     @classmethod
     def from_json(cls, d: dict) -> "CreItem":
-        return cls(resref=d.get("resref",""), flags=d.get("flags",0),
+        return cls(resref=ResRef.from_json(d.get("resref","")), flags=d.get("flags",0),
                    charges1=d.get("charges1",0), charges2=d.get("charges2",0),
                    charges3=d.get("charges3",0))
 
@@ -592,8 +592,8 @@ class CreHeader:
     armor_color:        int   = 0
     hair_color:         int   = 0
     eff_version:        int   = 0   # 0=inline V1, 1=EFF V2.0
-    small_portrait:     str   = ""
-    large_portrait:     str   = ""
+    small_portrait:     ResRef = ResRef("")
+    large_portrait:     ResRef = ResRef("")
     reputation:         int   = 10
     hide_in_shadows:    int   = 0
 
@@ -675,11 +675,11 @@ class CreHeader:
     racial_enemy:       int   = 0
     morale_recovery:    int   = 0
     kit:                int   = 0
-    override_script:    str   = ""
-    class_script:       str   = ""
-    race_script:        str   = ""
-    general_script:     str   = ""
-    default_script:     str   = ""
+    override_script:    ResRef = ResRef("")
+    class_script:       ResRef = ResRef("")
+    race_script:        ResRef = ResRef("")
+    general_script:     ResRef = ResRef("")
+    default_script:     ResRef = ResRef("")
     enemy:              int   = 0
     general:            int   = 0
     race:               int   = Race.HUMAN
@@ -704,11 +704,7 @@ class CreHeader:
     items_count:             int = 0
     effects_offset:          int = 0
     effects_count:           int = 0
-    dialog:                  str = ""
-
-    # ------------------------------------------------------------------
-    # Read
-    # ------------------------------------------------------------------
+    dialog:                  ResRef = ResRef("")
 
     @classmethod
     def _read(cls, r: BinaryReader) -> "CreHeader":
@@ -742,8 +738,8 @@ class CreHeader:
             armor_color         = r.read_uint8(),
             hair_color          = r.read_uint8(),
             eff_version         = r.read_uint8(),
-            small_portrait      = r.read_resref(),
-            large_portrait      = r.read_resref(),
+            small_portrait      = ResRef(r.read_resref()),
+            large_portrait      = ResRef(r.read_resref()),
             reputation          = r.read_int8(),
             hide_in_shadows     = r.read_uint8(),
             ac_base             = r.read_int16(),
@@ -814,11 +810,11 @@ class CreHeader:
             racial_enemy        = r.read_uint8(),
             morale_recovery     = r.read_uint16(),
             kit                 = r.read_uint32(),
-            override_script     = r.read_resref(),
-            class_script        = r.read_resref(),
-            race_script         = r.read_resref(),
-            general_script      = r.read_resref(),
-            default_script      = r.read_resref(),
+            override_script     = ResRef(r.read_resref()),
+            class_script        = ResRef(r.read_resref()),
+            race_script         = ResRef(r.read_resref()),
+            general_script      = ResRef(r.read_resref()),
+            default_script      = ResRef(r.read_resref()),
             # common prefix ends at 0x0270 — caller reads the version-specific tail
         )
 
@@ -849,7 +845,7 @@ class CreHeader:
             items_count             = r.read_uint32(),
             effects_offset          = r.read_uint32(),
             effects_count           = r.read_uint32(),
-            dialog                  = r.read_resref(),
+            dialog                  = ResRef(r.read_resref()),
         )
         return cls(**kw)
 
@@ -878,8 +874,8 @@ class CreHeader:
         w.write_uint8(self.armor_color)
         w.write_uint8(self.hair_color)
         w.write_uint8(self.eff_version)
-        w.write_resref(self.small_portrait)
-        w.write_resref(self.large_portrait)
+        w.write_resref(str(self.small_portrait))
+        w.write_resref(str(self.large_portrait))
         w.write_int8(self.reputation)
         w.write_uint8(self.hide_in_shadows)
         w.write_int16(self.ac_base)
@@ -946,11 +942,11 @@ class CreHeader:
         w.write_uint8(self.racial_enemy)
         w.write_uint16(self.morale_recovery)
         w.write_uint32(self.kit)
-        w.write_resref(self.override_script)
-        w.write_resref(self.class_script)
-        w.write_resref(self.race_script)
-        w.write_resref(self.general_script)
-        w.write_resref(self.default_script)
+        w.write_resref(str(self.override_script))
+        w.write_resref(str(self.class_script))
+        w.write_resref(str(self.race_script))
+        w.write_resref(str(self.general_script))
+        w.write_resref(str(self.default_script))
         # common prefix ends at 0x0270
 
     def _write_shared_tail(self, w: BinaryWriter) -> None:
@@ -978,7 +974,7 @@ class CreHeader:
         w.write_uint32(self.items_count)
         w.write_uint32(self.effects_offset)
         w.write_uint32(self.effects_count)
-        w.write_resref(self.dialog)
+        w.write_resref(str(self.dialog))
 
     def _write(self, w: BinaryWriter) -> None:
         """Write the complete V1.0 header (724 bytes, not including sig+ver)."""
@@ -1091,7 +1087,7 @@ class CreHeaderV9(CreHeader):
             items_count             = r.read_uint32(),
             effects_offset          = r.read_uint32(),
             effects_count           = r.read_uint32(),
-            dialog                  = r.read_resref(),
+            dialog                  = ResRef(r.read_resref()),
         )
         return cls(**kw)
 
@@ -1162,8 +1158,8 @@ class CreHeaderV12:
     color7:             int   = 0
 
     eff_version:        int   = 0
-    small_portrait:     str   = ""
-    large_portrait:     str   = ""
+    small_portrait:     ResRef = ResRef("")
+    large_portrait:     ResRef = ResRef("")
     reputation:         int   = 10
     hide_in_shadows:    int   = 0
 
@@ -1244,8 +1240,8 @@ class CreHeaderV12:
     faction:            int   = 0
     team:               int   = 0
 
-    override_script:    str   = ""   # PST only has override + default
-    default_script:     str   = ""
+    override_script:    ResRef = ResRef("")   # PST only has override + default
+    default_script:     ResRef = ResRef("")
     enemy:              int   = 0
     general:            int   = 0
     race:               int   = Race.HUMAN
@@ -1275,7 +1271,7 @@ class CreHeaderV12:
     items_count:             int = 0
     effects_offset:          int = 0
     effects_count:           int = 0
-    dialog:                  str = ""
+    dialog:                  ResRef = ResRef("")
 
     # -- Remaining unknown / internal V1.2 fields --
     v12_tail: bytes = b""   # bytes from end of named fields to HEADER_SIZE_V12
@@ -1305,8 +1301,8 @@ class CreHeaderV12:
         color6          = r.read_uint8()
         color7          = r.read_uint8()
         eff_version     = r.read_uint8()
-        small_portrait  = r.read_resref()
-        large_portrait  = r.read_resref()
+        small_portrait  = ResRef(r.read_resref())
+        large_portrait  = ResRef(r.read_resref())
         reputation      = r.read_int8()
         hide_in_shadows = r.read_uint8()
         ac_base         = r.read_int16()
@@ -1371,8 +1367,8 @@ class CreHeaderV12:
         morale_recovery     = r.read_uint16()
         faction             = r.read_uint8()
         team                = r.read_uint8()
-        override_script     = r.read_resref()
-        default_script      = r.read_resref()
+        override_script     = ResRef(r.read_resref())
+        default_script      = ResRef(r.read_resref())
         enemy               = r.read_uint8()
         general             = r.read_uint8()
         race                = r.read_uint8()
@@ -1396,7 +1392,7 @@ class CreHeaderV12:
         items_count             = r.read_uint32()
         effects_offset          = r.read_uint32()
         effects_count           = r.read_uint32()
-        dialog                  = r.read_resref()
+        dialog                  = ResRef(r.read_resref())
 
         # Capture any remaining header bytes up to HEADER_SIZE_V12
         consumed = r.pos - 8   # subtract sig+ver already read by caller
@@ -1431,7 +1427,7 @@ class CreHeaderV12:
             fist_prof=fist_prof, edged_prof=edged_prof, hammer_prof=hammer_prof,
             axe_prof=axe_prof, club_prof=club_prof, misc_prof=misc_prof,
             unknown_profs=unknown_profs,
-            turn_undead_level=turn_undead_level, tracking=tracking,
+            tracking=tracking,
             tracking_target=tracking_target,
             soundset=soundset,
             level_1=level_1, level_2=level_2, level_3=level_3,
@@ -1484,8 +1480,8 @@ class CreHeaderV12:
         w.write_uint8(self.color6)
         w.write_uint8(self.color7)
         w.write_uint8(self.eff_version)
-        w.write_resref(self.small_portrait)
-        w.write_resref(self.large_portrait)
+        w.write_resref(str(self.small_portrait))
+        w.write_resref(str(self.large_portrait))
         w.write_int8(self.reputation)
         w.write_uint8(self.hide_in_shadows)
         w.write_int16(self.ac_base)
@@ -1551,8 +1547,8 @@ class CreHeaderV12:
         w.write_uint16(self.morale_recovery)
         w.write_uint8(self.faction)
         w.write_uint8(self.team)
-        w.write_resref(self.override_script)
-        w.write_resref(self.default_script)
+        w.write_resref(str(self.override_script))
+        w.write_resref(str(self.default_script))
         w.write_uint8(self.enemy)
         w.write_uint8(self.general)
         w.write_uint8(self.race)
@@ -1577,7 +1573,7 @@ class CreHeaderV12:
         w.write_uint32(self.items_count)
         w.write_uint32(self.effects_offset)
         w.write_uint32(self.effects_count)
-        w.write_resref(self.dialog)
+        w.write_resref(str(self.dialog))
         # Tail
         tail_space = HEADER_SIZE_V12 - w.pos + 8  # +8 for sig+ver written outside
         if tail_space > 0:
@@ -1861,7 +1857,7 @@ class CreFile:
             "wis": h.wis, "dex": h.dex, "con": h.con, "cha": h.cha,
             "thac0": h.thac0, "ac_base": h.ac_base, "ac_effective": h.ac_effective,
             "attacks": h.attacks,
-            "dialog": h.dialog,
+            "dialog": h.dialog.to_json(),
         }
         # Sparse optional fields
         for attr, default in (
@@ -1869,7 +1865,6 @@ class CreFile:
             ("kit",0),("reputation",10),("status_flags",0),("morale",10),
             ("morale_break",5),("morale_recovery",0),("racial_enemy",0),
             ("lore",0),("hide_in_shadows",0),("death_variable",""),
-            ("small_portrait",""),("large_portrait",""),
             ("save_death",20),("save_wands",20),("save_poly",20),
             ("save_breath",20),("save_spells",20),
             ("ac_crush",0),("ac_missile",0),("ac_pierce",0),("ac_slash",0),
@@ -1880,9 +1875,13 @@ class CreFile:
             v = getattr(h, attr)
             if v != default:
                 hd[attr] = v
+        for attr in ("small_portrait", "large_portrait"):
+            v = getattr(h, attr)
+            if v: hd[attr] = v.to_json()
         for attr in ("override_script","class_script","race_script",
                      "general_script","default_script"):
-            if getattr(h, attr): hd[attr] = getattr(h, attr)
+            v = getattr(h, attr)
+            if v: hd[attr] = v.to_json()
         for attr in ("metal_color","minor_color","major_color","skin_color",
                      "leather_color","armor_color","hair_color"):
             if getattr(h, attr): hd[attr] = getattr(h, attr)
@@ -1941,8 +1940,8 @@ class CreFile:
             leather_color=hd.get("leather_color", 0), armor_color=hd.get("armor_color", 0),
             hair_color=hd.get("hair_color", 0),
             eff_version=hd.get("eff_version", 0),
-            small_portrait=hd.get("small_portrait", ""),
-            large_portrait=hd.get("large_portrait", ""),
+            small_portrait=ResRef.from_json(hd.get("small_portrait", "")),
+            large_portrait=ResRef.from_json(hd.get("large_portrait", "")),
             reputation=hd.get("reputation", 10),
             hide_in_shadows=hd.get("hide_in_shadows", 0),
             ac_base=hd.get("ac_base", 10), ac_effective=hd.get("ac_effective", 10),
@@ -1986,11 +1985,11 @@ class CreFile:
             racial_enemy=hd.get("racial_enemy", 0),
             morale_recovery=hd.get("morale_recovery", 0),
             kit=hd.get("kit", 0),
-            override_script=hd.get("override_script", ""),
-            class_script=hd.get("class_script", ""),
-            race_script=hd.get("race_script", ""),
-            general_script=hd.get("general_script", ""),
-            default_script=hd.get("default_script", ""),
+            override_script=ResRef.from_json(hd.get("override_script", "")),
+            class_script=ResRef.from_json(hd.get("class_script", "")),
+            race_script=ResRef.from_json(hd.get("race_script", "")),
+            general_script=ResRef.from_json(hd.get("general_script", "")),
+            default_script=ResRef.from_json(hd.get("default_script", "")),
             enemy=hd.get("enemy", 0), general=hd.get("general", 0),
             race=hd.get("race", Race.HUMAN), klass=hd.get("klass", Class.FIGHTER),
             specific=hd.get("specific", 0), gender=hd.get("gender", Gender.MALE),
@@ -1999,7 +1998,7 @@ class CreFile:
             global_actor_enum=hd.get("global_actor_enum", 0),
             local_actor_enum=hd.get("local_actor_enum", 0),
             death_variable=hd.get("death_variable", ""),
-            dialog=hd.get("dialog", ""),
+            dialog=ResRef.from_json(hd.get("dialog", "")),
         )
 
         if version == VERSION_V9:
@@ -2186,21 +2185,24 @@ class CreFileV12(CreFile):
             "wis": h.wis, "dex": h.dex, "con": h.con, "cha": h.cha,
             "lore": h.lore, "current_lore": h.current_lore,
             "thac0": h.thac0, "ac_base": h.ac_base, "attacks": h.attacks,
-            "dialog": h.dialog,
+            "dialog": h.dialog.to_json(),
         }
         for attr, default in (
             ("xp",0),("gold",0),("level_2",0),("level_3",0),("str_extra",0),
             ("faction",0),("team",0),("reputation",10),("status_flags",0),
             ("morale",10),("morale_break",5),("morale_recovery",0),
             ("racial_enemy",0),("hide_in_shadows",0),("death_variable",""),
-            ("small_portrait",""),("large_portrait",""),
             ("save_death",20),("save_wands",20),("save_poly",20),
             ("save_breath",20),("save_spells",20),
         ):
             v = getattr(h, attr)
             if v != default: hd[attr] = v
+        for attr in ("small_portrait", "large_portrait"):
+            v = getattr(h, attr)
+            if v: hd[attr] = v.to_json()
         for attr in ("override_script","default_script"):
-            if getattr(h, attr): hd[attr] = getattr(h, attr)
+            v = getattr(h, attr)
+            if v: hd[attr] = v.to_json()
         for i in range(1, 8):
             v = getattr(h, f"color{i}")
             if v: hd[f"color{i}"] = v
@@ -2244,8 +2246,8 @@ class CreFileV12(CreFile):
             color3=hd.get("color3",0), color4=hd.get("color4",0),
             color5=hd.get("color5",0), color6=hd.get("color6",0),
             color7=hd.get("color7",0),
-            small_portrait=hd.get("small_portrait",""),
-            large_portrait=hd.get("large_portrait",""),
+            small_portrait=ResRef.from_json(hd.get("small_portrait","")),
+            large_portrait=ResRef.from_json(hd.get("large_portrait","")),
             reputation=hd.get("reputation",10),
             hide_in_shadows=hd.get("hide_in_shadows",0),
             ac_base=hd.get("ac_base",10), ac_crush=hd.get("ac_crush",0),
@@ -2285,8 +2287,8 @@ class CreFileV12(CreFile):
             racial_enemy=hd.get("racial_enemy",0),
             morale_recovery=hd.get("morale_recovery",0),
             faction=hd.get("faction",0), team=hd.get("team",0),
-            override_script=hd.get("override_script",""),
-            default_script=hd.get("default_script",""),
+            override_script=ResRef.from_json(hd.get("override_script","")),
+            default_script=ResRef.from_json(hd.get("default_script","")),
             enemy=hd.get("enemy",0), general=hd.get("general",0),
             race=hd.get("race",Race.HUMAN), klass=hd.get("klass",Class.FIGHTER),
             specific=hd.get("specific",0), gender=hd.get("gender",Gender.MALE),
@@ -2295,7 +2297,7 @@ class CreFileV12(CreFile):
             local_actor_enum=hd.get("local_actor_enum",0),
             death_variable=hd.get("death_variable",""),
             overlay_data=bytes.fromhex(overlay_hex) if overlay_hex else b"\x00"*56,
-            dialog=hd.get("dialog",""),
+            dialog=ResRef.from_json(hd.get("dialog","")),
             v12_tail=bytes.fromhex(v12_tail_hex) if v12_tail_hex else b"",
         )
         slots: Dict[PstSlotIndex, int] = {s: 0xFFFF for s in PstSlotIndex}
