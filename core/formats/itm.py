@@ -236,7 +236,7 @@ class FeatureBlock:
     duration:       int = 0       # uint32  — in ticks (15 ticks/sec)
     probability1:   int = 100     # uint8   — high byte of probability
     probability2:   int = 0       # uint8   — low byte  (combined = uint16)
-    resource:       str = ""      # ResRef  — resource used by effect
+    resource:       ResRef = ResRef("")   # ResRef  — resource used by effect
     dice_count:     int = 0       # int32
     dice_sides:     int = 0       # int32
     saving_throw:   int = 0       # uint32  — saving throw flags
@@ -259,7 +259,7 @@ class FeatureBlock:
         duration      = r.read_uint32()
         probability1  = r.read_uint8()
         probability2  = r.read_uint8()
-        resource      = r.read_resref()
+        resource      = ResRef(r.read_resref())
         dice_count    = r.read_int32()
         dice_sides    = r.read_int32()
         saving_throw  = r.read_uint32()
@@ -287,7 +287,7 @@ class FeatureBlock:
         w.write_uint32(self.duration)
         w.write_uint8(self.probability1)
         w.write_uint8(self.probability2)
-        w.write_resref(self.resource)
+        w.write_resref(str(self.resource))
         w.write_int32(self.dice_count)
         w.write_int32(self.dice_sides)
         w.write_uint32(self.saving_throw)
@@ -309,7 +309,7 @@ class FeatureBlock:
         if self.duration:       d["duration"]      = self.duration
         if self.probability1 != 100: d["probability1"] = self.probability1
         if self.probability2:   d["probability2"]  = self.probability2
-        if self.resource:       d["resource"]      = self.resource
+        if self.resource:       d["resource"]      = self.resource.to_json()
         if self.dice_count:     d["dice_count"]    = self.dice_count
         if self.dice_sides:     d["dice_sides"]    = self.dice_sides
         if self.saving_throw:   d["saving_throw"]  = self.saving_throw
@@ -330,7 +330,7 @@ class FeatureBlock:
             duration      = d.get("duration", 0),
             probability1  = d.get("probability1", 100),
             probability2  = d.get("probability2", 0),
-            resource      = d.get("resource", ""),
+            resource      = ResRef.from_json(d.get("resource", "")),
             dice_count    = d.get("dice_count", 0),
             dice_sides    = d.get("dice_sides", 0),
             saving_throw  = d.get("saving_throw", 0),
@@ -358,7 +358,7 @@ class ExtendedHeader:
     id_req:            int = 0                  # uint8  — identification required
     location:          int = 0                  # uint8  — where in the UI this appears
     alt_dice_sides:    int = 0                  # uint8
-    use_icon:          str = ""                 # ResRef — icon shown in quick-slot
+    use_icon:          ResRef = ResRef("")              # ResRef — icon shown in quick-slot
     target_type:       int = TargetType.INVALID # uint8
     target_count:      int = 1                  # uint8
     range:             int = 0                  # uint16 — in feet
@@ -396,7 +396,7 @@ class ExtendedHeader:
         id_req           = r.read_uint8()
         location         = r.read_uint8()
         alt_dice_sides   = r.read_uint8()
-        use_icon         = r.read_resref()
+        use_icon         = ResRef(r.read_resref())
         target_type      = r.read_uint8()
         target_count     = r.read_uint8()
         rng              = r.read_uint16()
@@ -443,7 +443,7 @@ class ExtendedHeader:
         w.write_uint8(self.id_req)
         w.write_uint8(self.location)
         w.write_uint8(self.alt_dice_sides)
-        w.write_resref(self.use_icon)
+        w.write_resref(str(self.use_icon))
         w.write_uint8(self.target_type)
         w.write_uint8(self.target_count)
         w.write_uint16(self.range)
@@ -480,7 +480,7 @@ class ExtendedHeader:
             "range":        self.range,
             "charges":      self.charges,
         }
-        if self.use_icon:          d["use_icon"]          = self.use_icon
+        if self.use_icon:          d["use_icon"]          = self.use_icon.to_json()
         if self.id_req:            d["id_req"]            = self.id_req
         if self.location:          d["location"]          = self.location
         if self.target_count != 1: d["target_count"]      = self.target_count
@@ -512,7 +512,7 @@ class ExtendedHeader:
             id_req           = d.get("id_req", 0),
             location         = d.get("location", 0),
             alt_dice_sides   = d.get("alt_dice_sides", 0),
-            use_icon         = d.get("use_icon", ""),
+            use_icon         = ResRef.from_json(d.get("use_icon", "")),
             target_type      = d.get("target_type", TargetType.INVALID),
             target_count     = d.get("target_count", 1),
             range            = d.get("range", 0),
@@ -555,7 +555,7 @@ class ItmHeader:
     # Identity
     unidentified_name:  StrRef = StrRef(0xFFFFFFFF)   # StrRef
     identified_name:    StrRef = StrRef(0xFFFFFFFF)   # StrRef
-    replacement_item:   str = ""            # ResRef — item replaced when depleted
+    replacement_item:   ResRef = ResRef("")      # ResRef — item replaced when depleted
     flags:              int = ItemFlag.DROPPABLE
     item_type:          int = ItemType.MISCELLANEOUS
     usability:          int = 0             # uint32 — usability bitmask (who can use)
@@ -579,13 +579,13 @@ class ItmHeader:
     # Economy
     base_value:         int = 0             # uint32 — price in gold pieces
     max_stack:          int = 1             # uint16
-    item_icon:          str = ""            # ResRef — inventory BAM
+    item_icon:          ResRef = ResRef("")      # ResRef — inventory BAM
     lore_required:      int = 0             # uint16 — lore to identify
-    ground_icon:        str = ""            # ResRef — dropped-on-ground BAM
+    ground_icon:        ResRef = ResRef("")      # ResRef — dropped-on-ground BAM
     base_weight:        int = 0             # int32  — in tenths of a pound
     unidentified_desc:  StrRef = StrRef(0xFFFFFFFF)   # StrRef
     identified_desc:    StrRef = StrRef(0xFFFFFFFF)   # StrRef
-    description_icon:   str = ""            # ResRef
+    description_icon:   ResRef = ResRef("")      # ResRef
     enchantment:        int = 0             # int32  — "+N" enchantment level
 
     # Offsets (managed by ItmFile, stored here for completeness)
@@ -606,7 +606,7 @@ class ItmHeader:
     def _read(cls, r: BinaryReader, version: bytes) -> "ItmHeader":
         unidentified_name   = StrRef(r.read_uint32())
         identified_name     = StrRef(r.read_uint32())
-        replacement_item    = r.read_resref()
+        replacement_item    = ResRef(r.read_resref())
         flags               = r.read_uint32()
         item_type           = r.read_uint16()
         usability           = r.read_uint32()
@@ -626,13 +626,13 @@ class ItmHeader:
         min_charisma        = r.read_uint16()
         base_value          = r.read_uint32()
         max_stack           = r.read_uint16()
-        item_icon           = r.read_resref()
+        item_icon           = ResRef(r.read_resref())
         lore_required       = r.read_uint16()
-        ground_icon         = r.read_resref()
+        ground_icon         = ResRef(r.read_resref())
         base_weight         = r.read_int32()
         unidentified_desc   = StrRef(r.read_uint32())
         identified_desc     = StrRef(r.read_uint32())
-        description_icon    = r.read_resref()
+        description_icon    = ResRef(r.read_resref())
         enchantment         = r.read_int32()
         ext_header_offset   = r.read_uint32()
         ext_header_count    = r.read_uint16()
@@ -670,7 +670,7 @@ class ItmHeader:
     def _write(self, w: BinaryWriter, version: bytes) -> None:
         w.write_uint32(int(self.unidentified_name))
         w.write_uint32(int(self.identified_name))
-        w.write_resref(self.replacement_item)
+        w.write_resref(str(self.replacement_item))
         w.write_uint32(self.flags)
         w.write_uint16(self.item_type)
         w.write_uint32(self.usability)
@@ -691,13 +691,13 @@ class ItmHeader:
         w.write_uint16(self.min_charisma)
         w.write_uint32(self.base_value)
         w.write_uint16(self.max_stack)
-        w.write_resref(self.item_icon)
+        w.write_resref(str(self.item_icon))
         w.write_uint16(self.lore_required)
-        w.write_resref(self.ground_icon)
+        w.write_resref(str(self.ground_icon))
         w.write_int32(self.base_weight)
         w.write_uint32(int(self.unidentified_desc))
         w.write_uint32(int(self.identified_desc))
-        w.write_resref(self.description_icon)
+        w.write_resref(str(self.description_icon))
         w.write_int32(self.enchantment)
         w.write_uint32(self.ext_header_offset)
         w.write_uint16(self.ext_header_count)
@@ -909,11 +909,11 @@ class ItmFile:
             },
         }
         hd = d["header"]
-        if h.replacement_item:   hd["replacement_item"]   = h.replacement_item
+        if h.replacement_item:   hd["replacement_item"]   = h.replacement_item.to_json()
         if h.animation.strip():  hd["animation"]          = h.animation
-        if h.item_icon:          hd["item_icon"]          = h.item_icon
-        if h.ground_icon:        hd["ground_icon"]        = h.ground_icon
-        if h.description_icon:   hd["description_icon"]   = h.description_icon
+        if h.item_icon:          hd["item_icon"]          = h.item_icon.to_json()
+        if h.ground_icon:        hd["ground_icon"]        = h.ground_icon.to_json()
+        if h.description_icon:   hd["description_icon"]   = h.description_icon.to_json()
         if h.min_level:          hd["min_level"]          = h.min_level
         if h.min_strength:       hd["min_strength"]       = h.min_strength
         if h.min_strength_bonus: hd["min_strength_bonus"] = h.min_strength_bonus
@@ -947,7 +947,7 @@ class ItmFile:
         header = ItmHeader(
             unidentified_name=StrRef.from_json(hd.get("unidentified_name", 0xFFFFFFFF)),
             identified_name=StrRef.from_json(hd.get("identified_name", 0xFFFFFFFF)),
-            replacement_item    = hd.get("replacement_item",   ""),
+            replacement_item    = ResRef.from_json(hd.get("replacement_item",   "")),
             flags               = hd.get("flags",              ItemFlag.DROPPABLE),
             item_type           = hd.get("item_type",          ItemType.MISCELLANEOUS),
             usability           = hd.get("usability",          0),
@@ -967,13 +967,13 @@ class ItmFile:
             min_charisma        = hd.get("min_charisma",       0),
             base_value          = hd.get("base_value",         0),
             max_stack           = hd.get("max_stack",          1),
-            item_icon           = hd.get("item_icon",          ""),
+            item_icon           = ResRef.from_json(hd.get("item_icon",          "")),
             lore_required       = hd.get("lore_required",      0),
-            ground_icon         = hd.get("ground_icon",        ""),
+            ground_icon         = ResRef.from_json(hd.get("ground_icon",        "")),
             base_weight         = hd.get("base_weight",        0),
             unidentified_desc=StrRef.from_json(hd.get("unidentified_desc", 0xFFFFFFFF)),
             identified_desc=StrRef.from_json(hd.get("identified_desc", 0xFFFFFFFF)),
-            description_icon    = hd.get("description_icon",   ""),
+            description_icon    = ResRef.from_json(hd.get("description_icon",   "")),
             enchantment         = hd.get("enchantment",        0),
             equip_feature_index = hd.get("equip_feature_index", 0),
             equip_feature_count = hd.get("equip_feature_count", 0),

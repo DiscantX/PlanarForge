@@ -656,7 +656,7 @@ class CreHeader:
     tracking_target:    bytes = b"\x00" * 32   # 0x0084: 32-byte char array
 
     # -- Sound / voice --
-    soundset:           bytes = b"\xff" * 400  # 0x00A4: 100 × uint32 strrefs = 400 bytes
+    soundset:           List[StrRef] = field(default_factory=lambda: [StrRef(0xFFFFFFFF)] * 100)  # 0x00A4: 100 × uint32 strrefs
 
     # -- Character --
     level_1:            int   = 0
@@ -795,8 +795,8 @@ class CreHeader:
             tracking            = r.read_uint8(),
             # -- 0x0084..0x00A3: tracking target (32-byte char array) --
             tracking_target     = r.read_bytes(32),
-            # -- 0x00A4..0x0233: soundset (100 × uint32 strrefs = 400 bytes) --
-            soundset            = r.read_bytes(400),
+            # -- 0x00A4..0x0233: soundset (100 × uint32 strrefs) --
+            soundset            = [StrRef(r.read_uint32()) for _ in range(100)],
             # -- 0x0234..0x026F: levels, stats, kit, scripts --
             level_1             = r.read_uint8(),
             level_2             = r.read_uint8(),
@@ -928,7 +928,8 @@ class CreHeader:
         w.write_uint8(self.turn_undead_level)                       # 0x0082
         w.write_uint8(self.tracking)                                # 0x0083
         w.write_bytes(self.tracking_target[:32].ljust(32, b"\x00")) # 0x0084: 32-byte char array
-        w.write_bytes(self.soundset[:400].ljust(400, b"\xff"))      # 0x00A4: 100 × uint32 strrefs
+        for s in (self.soundset + [StrRef(0xFFFFFFFF)] * 100)[:100]:  # 0x00A4: 100 × uint32 strrefs
+            w.write_uint32(int(s))
         w.write_uint8(self.level_1)
         w.write_uint8(self.level_2)
         w.write_uint8(self.level_3)
@@ -1219,8 +1220,7 @@ class CreHeaderV12:
     tracking:           int   = 0
     tracking_target:    StrRef = StrRef(0xFFFFFFFF)
 
-    # -- PST soundset: 100 bytes (25 × uint32 strrefs) --
-    soundset:           bytes = b"\xff" * 100
+    soundset:           List[StrRef] = field(default_factory=lambda: [StrRef(0xFFFFFFFF)] * 25)  # 25 × uint32 strrefs
 
     # -- Character --
     level_1:            int   = 0
@@ -1352,7 +1352,7 @@ class CreHeaderV12:
         tracking            = r.read_uint8()
         r.skip(3)
         tracking_target     = r.read_uint32()
-        soundset            = r.read_bytes(100)  # 25 × uint32
+        soundset            = [StrRef(r.read_uint32()) for _ in range(25)]
         level_1             = r.read_uint8()
         level_2             = r.read_uint8()
         level_3             = r.read_uint8()
@@ -1531,7 +1531,8 @@ class CreHeaderV12:
         w.write_uint8(self.tracking)
         w.write_padding(3)
         w.write_uint32(self.tracking_target)
-        w.write_bytes(self.soundset[:100].ljust(100, b"\xff"))
+        for s in (self.soundset + [StrRef(0xFFFFFFFF)] * 25)[:25]:  # 25 × uint32 strrefs
+            w.write_uint32(int(s))
         w.write_uint8(self.level_1)
         w.write_uint8(self.level_2)
         w.write_uint8(self.level_3)
@@ -1885,8 +1886,9 @@ class CreFile:
         for attr in ("metal_color","minor_color","major_color","skin_color",
                      "leather_color","armor_color","hair_color"):
             if getattr(h, attr): hd[attr] = getattr(h, attr)
-        if h.soundset and h.soundset != b"\xff"*400:
-            hd["soundset"] = h.soundset.hex()
+        _NONE_SOUNDSET = [StrRef(0xFFFFFFFF)] * 100
+        if h.soundset != _NONE_SOUNDSET:
+            hd["soundset"] = [s.to_json() for s in h.soundset]
         # V9-specific fields
         if isinstance(h, CreHeaderV9):
             if h.visible != 1:
@@ -1918,7 +1920,13 @@ class CreFile:
             return CreFileV12.from_json(d)
         version = VERSION_V9 if ver_str == "V9.0" else VERSION_V1
         hd = d.get("header", {})
-        soundset_hex = hd.get("soundset", "")
+        _raw_soundset = hd.get("soundset", None)
+        if isinstance(_raw_soundset, list):
+            _soundset = [StrRef.from_json(v) for v in _raw_soundset]
+            # Pad/truncate to exactly 100
+            _soundset = (_soundset + [StrRef(0xFFFFFFFF)] * 100)[:100]
+        else:
+            _soundset = [StrRef(0xFFFFFFFF)] * 100
 
         # Fields shared by both V1.0 and V9.0
         common = dict(
@@ -1968,7 +1976,7 @@ class CreFile:
             turn_undead_level=hd.get("turn_undead_level", 0),
             tracking=hd.get("tracking", 0),
             tracking_target=bytes.fromhex(hd["tracking_target"]) if hd.get("tracking_target") else b"\x00"*32,
-            soundset=bytes.fromhex(soundset_hex) if soundset_hex else b"\xff"*400,
+            soundset=_soundset,
             level_1=hd.get("level_1", 0), level_2=hd.get("level_2", 0),
             level_3=hd.get("level_3", 0), sex=hd.get("sex", Gender.MALE),
             str=hd.get("str", 9), str_extra=hd.get("str_extra", 0),
@@ -2196,8 +2204,9 @@ class CreFileV12(CreFile):
         for i in range(1, 8):
             v = getattr(h, f"color{i}")
             if v: hd[f"color{i}"] = v
-        if h.soundset and h.soundset != b"\xff"*100:
-            hd["soundset"] = h.soundset.hex()
+        _NONE_SOUNDSET_V12 = [StrRef(0xFFFFFFFF)] * 25
+        if h.soundset != _NONE_SOUNDSET_V12:
+            hd["soundset"] = [s.to_json() for s in h.soundset]
         if any(h.overlay_data):
             hd["overlay_data"] = h.overlay_data.hex()
         if h.v12_tail:
@@ -2216,7 +2225,12 @@ class CreFileV12(CreFile):
     @classmethod
     def from_json(cls, d: dict) -> "CreFileV12":
         hd = d.get("header", {})
-        soundset_hex  = hd.get("soundset", "")
+        _raw_soundset_v12 = hd.get("soundset", None)
+        if isinstance(_raw_soundset_v12, list):
+            _soundset_v12 = [StrRef.from_json(v) for v in _raw_soundset_v12]
+            _soundset_v12 = (_soundset_v12 + [StrRef(0xFFFFFFFF)] * 25)[:25]
+        else:
+            _soundset_v12 = [StrRef(0xFFFFFFFF)] * 25
         overlay_hex   = hd.get("overlay_data", "")
         v12_tail_hex  = hd.get("v12_tail", "")
         header = CreHeaderV12(
@@ -2260,7 +2274,7 @@ class CreFileV12(CreFile):
             club_prof=hd.get("club_prof",0), misc_prof=hd.get("misc_prof",0),
             tracking=hd.get("tracking",0),
             tracking_target=StrRef.from_json(hd.get("tracking_target", 0xFFFFFFFF)),
-            soundset=bytes.fromhex(soundset_hex) if soundset_hex else b"\xff"*100,
+            soundset=_soundset_v12,
             level_1=hd.get("level_1",0), level_2=hd.get("level_2",0),
             level_3=hd.get("level_3",0), sex=hd.get("sex",Gender.MALE),
             str=hd.get("str",9), str_extra=hd.get("str_extra",0),

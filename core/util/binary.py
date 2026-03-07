@@ -134,10 +134,20 @@ class BinaryReader:
         """
         Read an 8-byte resource reference.
 
-        ResRefs are the Infinity Engine's resource name type - always
-        exactly 8 bytes, uppercase, no extension. Stored null-padded.
+        ResRefs are the Infinity Engine's resource name type: exactly 8
+        bytes on disk, null-terminated (not just null-padded).  Bytes
+        after the first null are padding and must be ignored — some
+        Bioware/Black Isle tools leave non-zero garbage in the padding
+        area which would otherwise appear as extra characters.
+
+        Returns the ResRef as an uppercase str with no extension.
         """
-        return self.read_string(8).upper()
+        raw = self.read_bytes(8)
+        # Truncate at first null byte — bytes beyond it are padding.
+        null_pos = raw.find(b"\x00")
+        if null_pos >= 0:
+            raw = raw[:null_pos]
+        return raw.decode("latin-1").upper()
 
     # ------------------------------------------------------------------
     # Validation helpers
