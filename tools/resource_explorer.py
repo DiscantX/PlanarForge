@@ -22,6 +22,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import random
 import re
 import sys
 import time
@@ -39,7 +40,7 @@ from core.index import ResourceIndex, IndexEntry, SOURCE_BIFF
 from core.util.strref import StrRef
 
 
-SAFE_TYPES = {ResType.ITM}
+SAFE_TYPES = {ResType.ITM, ResType.CRE}
 CACHE_ROOT = Path(".cache")
 EXIT_WORDS = {"exit()"}
 CLEAR_WORDS = {"cls"}
@@ -311,6 +312,17 @@ def _parse_res_type_selector(name: str) -> ResType | None:
 
 def _res_type_label(res_type: ResType | None) -> str:
     return res_type.name if res_type is not None else "ALL"
+
+
+def _print_available_types() -> None:
+    print("  Available resource types:\n")
+    print(f"  {'Type':<8} {'Ext':<6} {'Code':<8} Status")
+    print(f"  {'-'*8} {'-'*6} {'-'*8} {'-'*10}")
+    for rt in ResType:
+        ext = ResType.extension(int(rt))
+        code = f"0x{int(rt):04X}"
+        status = "safe" if rt in SAFE_TYPES else "untested"
+        print(f"  {rt.name:<8} {ext:<6} {code:<8} {status}")
 
 
 def _safe_res_type(code: int) -> bool:
@@ -590,50 +602,55 @@ def run(args: argparse.Namespace) -> None:
                 print(f"{g.game_id:<14} {g.display_name:<40} {g.install_path}")
         return
 
+    def _activate_game(selected_inst: GameInstallation) -> tuple[KeyFile, StringManager]:
+        print(f"\nUsing: {selected_inst.display_name}")
+        print(f"       {selected_inst.install_path}\n")
+
+        print("Opening CHITIN.KEY ... ", end="", flush=True)
+        try:
+            selected_key = KeyFile.open(selected_inst.chitin_key)
+        except Exception as exc:
+            print(f"\nERROR: Cannot open CHITIN.KEY: {exc}")
+            sys.exit(1)
+        print(f"{selected_key.num_resources} resources across {selected_key.num_biff} BIFF archives.")
+
+        print("Loading TLK ... ", end="", flush=True)
+        try:
+            selected_manager = StringManager.from_installation(selected_inst)
+        except StringManagerError as exc:
+            print(f"\nERROR: {exc}")
+            sys.exit(1)
+
+        langs = StringManager.available_languages(selected_inst)
+        if langs:
+            print(f"{selected_manager.base_entry_count} strings, {len(langs)} language(s): {', '.join(langs)}")
+        else:
+            print(f"{selected_manager.base_entry_count} strings (single-language install).")
+        return selected_key, selected_manager
+
     inst = _pick_game(finder, args.game)
-    print(f"\nUsing: {inst.display_name}")
-    print(f"       {inst.install_path}\n")
-
-    print("Opening CHITIN.KEY ... ", end="", flush=True)
-    try:
-        key = KeyFile.open(inst.chitin_key)
-    except Exception as exc:
-        print(f"\nERROR: Cannot open CHITIN.KEY: {exc}")
-        sys.exit(1)
-    print(f"{key.num_resources} resources across {key.num_biff} BIFF archives.")
-
-    print("Loading TLK ... ", end="", flush=True)
-    try:
-        manager = StringManager.from_installation(inst)
-    except StringManagerError as exc:
-        print(f"\nERROR: {exc}")
-        sys.exit(1)
-
-    langs = StringManager.available_languages(inst)
-    if langs:
-        print(f"{manager.base_entry_count} strings, {len(langs)} language(s): {', '.join(langs)}")
-    else:
-        print(f"{manager.base_entry_count} strings (single-language install).")
+    key, manager = _activate_game(inst)
 
     current_type = _parse_res_type_selector(args.list_type or args.type)
-    index_cache: dict[ResType, ResourceIndex] = {}
+    index_cache_by_game: dict[str, dict[ResType, ResourceIndex]] = {}
     last_results: list[IndexEntry] = []
     all_mode = current_type is None
     if all_mode:
         print("WARNING: ALL mode includes untested types. Parse errors will be skipped.")
 
     def get_index(res_type: ResType) -> ResourceIndex:
-        if res_type not in index_cache:
+        game_cache = index_cache_by_game.setdefault(inst.game_id, {})
+        if res_type not in game_cache:
             if (not all_mode) and res_type not in SAFE_TYPES:
                 print(f"WARNING: {res_type.name} is marked untested. Parse errors will be skipped.")
-            index_cache[res_type] = _load_or_build_index(
+            game_cache[res_type] = _load_or_build_index(
                 key=key,
                 inst=inst,
                 manager=manager,
                 res_type=res_type,
                 no_cache=args.no_cache,
             )
-        return index_cache[res_type]
+        return game_cache[res_type]
 
     def selector_entries(query: str = "") -> list[IndexEntry]:
         if current_type is not None:
@@ -674,7 +691,7 @@ def run(args: argparse.Namespace) -> None:
 
     _clear_screen()
     print("Interactive mode.")
-    print("Commands: <search text> | where <expr> | list | type <TYPE|ALL> | open <RESREF[.TYPE]> | exit()")
+    print("Commands: <search text> | where <expr> | list | list types | list <TYPE|ALL> | type <TYPE|ALL> | game | random [TYPE|ALL] | open <RESREF[.TYPE]> | exit()")
     print("Where operators: = != < <= > >= ~   (where ~ means contains)")
     print("Where aliases: name, value, weight, resref, type")
     print("Example: where name~sword and value>500 and weight<5")
@@ -686,7 +703,7 @@ def run(args: argparse.Namespace) -> None:
         if lowered in CLEAR_WORDS:
             _clear_screen()
             print("Interactive mode.")
-            print("Commands: <search text> | where <expr> | list | type <TYPE|ALL> | open <RESREF[.TYPE]> | cls | exit()")
+            print("Commands: <search text> | where <expr> | list | list types | list <TYPE|ALL> | type <TYPE|ALL> | game | random [TYPE|ALL] | open <RESREF[.TYPE]> | cls | exit()")
             print("Where operators: = != < <= > >= ~   (where ~ means contains)")
             print("Where aliases: name, value, weight, resref, type")
             print("Example: where name~sword and value>500 and weight<5")
@@ -701,6 +718,61 @@ def run(args: argparse.Namespace) -> None:
 
         if lowered == "list":
             last_results = _handle_list_flow(selector_entries(query=""), _res_type_label(current_type), args.limit)
+            continue
+
+        if lowered == "list types":
+            _print_available_types()
+            continue
+
+        if lowered in {"game", "games", "switch game"}:
+            inst = _pick_game(finder, None)
+            key, manager = _activate_game(inst)
+            last_results = []
+            print(f"  Switched to game {inst.game_id}.")
+            continue
+
+        if lowered == "random" or lowered.startswith("random "):
+            random_arg = raw.split(None, 1)[1].strip() if len(raw.split(None, 1)) > 1 else ""
+            if not random_arg:
+                random_type = current_type
+            else:
+                try:
+                    random_type = _parse_res_type_selector(random_arg)
+                except SystemExit:
+                    continue
+
+            if random_type is None:
+                candidates = selector_entries(query="")
+                label = "ALL"
+            else:
+                candidates = get_index(random_type).search(query="", res_type=random_type)
+                label = random_type.name
+
+            if not candidates:
+                print(f"  No resources available for type {label}.")
+                continue
+
+            picked = random.choice(candidates)
+            print(f"  Random pick: {picked.resref}.{picked.res_type.name.lower()}  ({label})")
+            _inspect_entry(picked, key, inst, get_index(picked.res_type), manager)
+            continue
+
+        if lowered.startswith("list "):
+            list_arg = raw.split(None, 1)[1].strip() if len(raw.split(None, 1)) > 1 else ""
+            if not list_arg:
+                print("  Usage: list <TYPE|ALL>   (example: list ITM)")
+                continue
+            try:
+                list_type = _parse_res_type_selector(list_arg)
+            except SystemExit:
+                continue
+            if list_type is None:
+                scoped = selector_entries(query="")
+                label = "ALL"
+            else:
+                scoped = get_index(list_type).search(query="", res_type=list_type)
+                label = list_type.name
+            last_results = _handle_list_flow(scoped, label, args.limit)
             continue
 
         if lowered.startswith("type "):
