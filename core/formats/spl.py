@@ -20,7 +20,7 @@ IESDP references:
     https://gibberlings3.github.io/iesdp/file_formats/ie_formats/spl_v11.htm
 
 File layout:
-    0x0000  Header          (114 bytes V1 / 116 bytes V1.1)
+    0x0000  Header          (88 bytes V1 / 90 bytes V1.1)
     after header:
         N × ExtendedHeader  (40 bytes each)  ← note: 40, not 56 like ITM
         M × FeatureBlock    (48 bytes each)
@@ -66,8 +66,8 @@ SIGNATURE       = b"SPL "
 VERSION_V1      = b"V1  "
 VERSION_V11     = b"V1.1"
 
-HEADER_SIZE_V1  = 114
-HEADER_SIZE_V11 = 116
+HEADER_SIZE_V1  = 88
+HEADER_SIZE_V11 = 90
 EXT_HEADER_SIZE = 40
 FEATURE_BLOCK_SIZE = 48
 
@@ -231,7 +231,7 @@ class FeatureBlock:
     duration:       int = 0       # uint32  — ticks (15/sec)
     probability1:   int = 100     # uint8
     probability2:   int = 0       # uint8
-    resource:       str = ""      # ResRef
+    resource:       ResRef = ResRef("")   # ResRef
     dice_count:     int = 0       # int32
     dice_sides:     int = 0       # int32
     saving_throw:   int = 0       # uint32
@@ -256,7 +256,7 @@ class FeatureBlock:
         probability1  = r.read_uint8()
         probability2  = r.read_uint8()
         r.skip(2)                           # padding
-        resource      = r.read_resref()
+        resource      = ResRef(r.read_resref())
         dice_count    = r.read_int32()
         dice_sides    = r.read_int32()
         saving_throw  = r.read_uint32()
@@ -286,7 +286,7 @@ class FeatureBlock:
         w.write_uint8(self.probability1)
         w.write_uint8(self.probability2)
         w.write_padding(2)
-        w.write_resref(self.resource)
+        w.write_resref(str(self.resource))
         w.write_int32(self.dice_count)
         w.write_int32(self.dice_sides)
         w.write_uint32(self.saving_throw)
@@ -308,7 +308,7 @@ class FeatureBlock:
         if self.duration:            d["duration"]      = self.duration
         if self.probability1 != 100: d["probability1"]  = self.probability1
         if self.probability2:        d["probability2"]  = self.probability2
-        if self.resource:            d["resource"]      = self.resource
+        if self.resource:            d["resource"]      = self.resource.to_json()
         if self.dice_count:          d["dice_count"]    = self.dice_count
         if self.dice_sides:          d["dice_sides"]    = self.dice_sides
         if self.saving_throw:        d["saving_throw"]  = self.saving_throw
@@ -329,7 +329,7 @@ class FeatureBlock:
             duration      = d.get("duration", 0),
             probability1  = d.get("probability1", 100),
             probability2  = d.get("probability2", 0),
-            resource      = d.get("resource", ""),
+            resource      = ResRef.from_json(d.get("resource", "")),
             dice_count    = d.get("dice_count", 0),
             dice_sides    = d.get("dice_sides", 0),
             saving_throw  = d.get("saving_throw", 0),
@@ -486,7 +486,7 @@ class SplHeader:
     # Identity
     unidentified_name: StrRef = StrRef(0xFFFFFFFF)   # StrRef — name before identification
     identified_name:   StrRef = StrRef(0xFFFFFFFF)   # StrRef — true spell name
-    casting_graphics:  str = ""            # ResRef — VEF/VVC casting animation
+    casting_graphics:  ResRef = ResRef("")         # ResRef — VEF/VVC casting animation
     flags:             int = SpellFlag.NONE
     spell_type:        int = SpellType.WIZARD
     usability:         int = 0             # uint32 — UsabilityFlag (exclusions)
@@ -501,9 +501,9 @@ class SplHeader:
     spell_level:       int = 0             # uint32 — spell circle (1–9)
     unidentified_desc: StrRef = StrRef(0xFFFFFFFF)   # StrRef
     identified_desc:   StrRef = StrRef(0xFFFFFFFF)   # StrRef
-    memorisation_icon: str = ""            # ResRef — icon in spellbook
+    memorisation_icon: ResRef = ResRef("")         # ResRef — icon in spellbook
     first_level_cond:  int = 0             # uint16 — condition for first casting
-    spell_icon:        str = ""            # ResRef — quick-slot icon
+    spell_icon:        ResRef = ResRef("")         # ResRef — quick-slot icon
 
     # Offsets (managed by SplFile)
     ext_header_offset:   int = 0           # uint32
@@ -523,7 +523,7 @@ class SplHeader:
     def _read(cls, r: BinaryReader, version: bytes) -> "SplHeader":
         unidentified_name  = StrRef(r.read_uint32())
         identified_name    = StrRef(r.read_uint32())
-        casting_graphics   = r.read_resref()
+        casting_graphics   = ResRef(r.read_resref())
         flags              = r.read_uint32()
         spell_type         = r.read_uint16()
         usability          = r.read_uint32()
@@ -537,9 +537,9 @@ class SplHeader:
         spell_level        = r.read_uint32()
         unidentified_desc  = StrRef(r.read_uint32())
         identified_desc    = StrRef(r.read_uint32())
-        memorisation_icon  = r.read_resref()
+        memorisation_icon  = ResRef(r.read_resref())
         first_level_cond   = r.read_uint16()
-        spell_icon         = r.read_resref()
+        spell_icon         = ResRef(r.read_resref())
         ext_header_offset  = r.read_uint32()
         ext_header_count   = r.read_uint16()
         feature_offset     = r.read_uint32()
@@ -573,7 +573,7 @@ class SplHeader:
     def _write(self, w: BinaryWriter, version: bytes) -> None:
         w.write_uint32(int(self.unidentified_name))
         w.write_uint32(int(self.identified_name))
-        w.write_resref(self.casting_graphics)
+        w.write_resref(str(self.casting_graphics))
         w.write_uint32(self.flags)
         w.write_uint16(self.spell_type)
         w.write_uint32(self.usability)
@@ -587,9 +587,9 @@ class SplHeader:
         w.write_uint32(self.spell_level)
         w.write_uint32(int(self.unidentified_desc))
         w.write_uint32(int(self.identified_desc))
-        w.write_resref(self.memorisation_icon)
+        w.write_resref(str(self.memorisation_icon))
         w.write_uint16(self.first_level_cond)
-        w.write_resref(self.spell_icon)
+        w.write_resref(str(self.spell_icon))
         w.write_uint32(self.ext_header_offset)
         w.write_uint16(self.ext_header_count)
         w.write_uint32(self.feature_offset)
@@ -766,24 +766,24 @@ class SplFile:
             "format":  "spl",
             "version": _version_str(self.version),
             "header": {
-                "unidentified_name": self.unidentified_name.to_json(),
-                "identified_name": self.identified_name.to_json(),
+                "unidentified_name": h.unidentified_name.to_json(),
+                "identified_name": h.identified_name.to_json(),
                 "spell_type":        h.spell_type,
                 "spell_level":       h.spell_level,
                 "primary_type":      h.primary_type,
                 "flags":             h.flags,
                 "usability":         h.usability,
-                "unidentified_desc": self.unidentified_desc.to_json(),
-                "identified_desc": self.identified_desc.to_json(),
+                "unidentified_desc": h.unidentified_desc.to_json(),
+                "identified_desc": h.identified_desc.to_json(),
             },
         }
         hd = d["header"]
-        if h.casting_graphics:             hd["casting_graphics"]  = h.casting_graphics
+        if h.casting_graphics:             hd["casting_graphics"]  = h.casting_graphics.to_json()
         if h.casting_anim:                 hd["casting_anim"]      = h.casting_anim
         if h.min_level:                    hd["min_level"]         = h.min_level
         if h.secondary_type:               hd["secondary_type"]    = h.secondary_type
-        if h.memorisation_icon:            hd["memorisation_icon"] = h.memorisation_icon
-        if h.spell_icon:                   hd["spell_icon"]        = h.spell_icon
+        if h.memorisation_icon:            hd["memorisation_icon"] = h.memorisation_icon.to_json()
+        if h.spell_icon:                   hd["spell_icon"]        = h.spell_icon.to_json()
         if h.first_level_cond:             hd["first_level_cond"]  = h.first_level_cond
         if h.unknown_28:                   hd["unknown_28"]        = h.unknown_28
         if h.unknown_2c:                   hd["unknown_2c"]        = h.unknown_2c
@@ -808,7 +808,7 @@ class SplFile:
         header = SplHeader(
             unidentified_name=StrRef.from_json(hd.get("unidentified_name", 0xFFFFFFFF)),
             identified_name=StrRef.from_json(hd.get("identified_name", 0xFFFFFFFF)),
-            casting_graphics   = hd.get("casting_graphics",   ""),
+            casting_graphics   = ResRef.from_json(hd.get("casting_graphics",   "")),
             flags              = hd.get("flags",              SpellFlag.NONE),
             spell_type         = hd.get("spell_type",         SpellType.WIZARD),
             usability          = hd.get("usability",          0),
@@ -822,9 +822,9 @@ class SplFile:
             spell_level        = hd.get("spell_level",        0),
             unidentified_desc=StrRef.from_json(hd.get("unidentified_desc", 0xFFFFFFFF)),
             identified_desc=StrRef.from_json(hd.get("identified_desc", 0xFFFFFFFF)),
-            memorisation_icon  = hd.get("memorisation_icon",  ""),
+            memorisation_icon  = ResRef.from_json(hd.get("memorisation_icon",  "")),
             first_level_cond   = hd.get("first_level_cond",   0),
-            spell_icon         = hd.get("spell_icon",         ""),
+            spell_icon         = ResRef.from_json(hd.get("spell_icon",         "")),
             projectile_type    = hd.get("projectile_type",    0),
         )
 
