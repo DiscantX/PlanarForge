@@ -90,8 +90,9 @@ infinity_editor/
 │       ├── flags_editor.py
 │       └── viewport.py
 │
-├── tools/                       # External tool integration (NOT YET IMPLEMENTED)
-│   ├── weidu.py
+├── tools/                       # Utility scripts and external tool integration
+│   ├── resource_explorer.py     # Interactive CLI resource explorer (implemented)
+│   ├── weidu.py                 # NOT YET IMPLEMENTED
 │   └── bin/
 │
 ├── data/
@@ -110,6 +111,10 @@ infinity_editor/
 │
 ├── docs/
 │   └── format_notes.md
+│
+├── .cache/                      # Runtime caches (gitignored)
+│   └── <GAME_ID>/
+│       └── <TYPE>_index.json
 │
 ├── requirements.txt
 ├── README.md
@@ -531,19 +536,23 @@ instead of 40).
 
 In priority order:
 
-1. Fix CRE V1.2 (PST) parser — three known field-size bugs listed above
-2. Implement CRE V2.2 (IWD2) parser
-3. Convert `cre.py` `soundset` from `bytes` to `List[StrRef]`
-4. ResRef migration — apply ResRef type to all format parser fields
-5. Add `StringManager.resolve_all_languages()` (designed, not yet implemented)
-6. `core/project/strref.py` — ProjectStrRef type
-7. `core/project/importer.py` — resource import logic
-8. `core/project/project.py` — Project open/save/new
-9. `core/project/mod_structure.py` — WeiDU .tp2 + .tra generation
-10. `core/project/undo_redo.py` — command pattern
-11. `core/watcher.py` — filesystem watcher (watchdog)
-12. UI layer (Dear PyGui)
-13. Unit tests for all modules
+1. Implement CRE V2.2 (IWD2) parser — completely different header, not started
+2. Convert `cre.py` `soundset` from `bytes` to `List[StrRef]` — V1.0 and V9.0
+3. Vet and fix `itm.py` — ResRef fields contain garbage bytes (see decisions log)
+4. ResRef migration — apply ResRef type to all format parser fields across all parsers
+5. Vet remaining parsers against real game files: `spl.py`, `dlg.py`, `are.py`, `wed.py`, `mos.py`, `tis.py`
+6. `core/project/project.py` — Project open/save/new, dirty tracking, path management
+7. `core/project/mod_structure.py` — WeiDU .tp2 + .tra generation
+8. `core/project/undo_redo.py` — command pattern
+9. `core/watcher.py` — filesystem watcher (watchdog)
+10. UI layer (Dear PyGui)
+11. Unit tests for all modules
+
+Completed (removed from list):
+- CRE V1.2 (PST) parser fixes — done (turn_undead_level, tracking_target, soundset)
+- `StringManager.resolve_all_languages()` — done
+- `core/project/strref.py` ProjectStrRef — done
+- `core/project/importer.py` — done
 
 ---
 
@@ -714,4 +723,31 @@ The `isinstance(ref, StrRef)` check in `resolve()` and `resolve_all_languages()`
 failed silently when the StrRef class was imported under a different module path
 (e.g. `strref` vs `core.util.strref`). Replaced with `hasattr` checks for
 `file_id`, `tlk_index`, and `is_none`.
+
+**2026-03 — itm.py to_json() bug: self.field instead of self.header.field**
+`ItmFile.to_json()` referenced `self.unidentified_name`, `self.identified_name`,
+`self.unidentified_desc`, `self.identified_desc` directly on the ItmFile instance
+instead of `self.header.*`. This caused `to_json()` to raise `AttributeError` on
+every call, which was silently caught by `_index_raw` in `core/index.py`, producing
+empty `data` dicts and empty `display_name` for all ITM entries. Fixed by changing
+all four references to `h.*` (where `h = self.header`).
+
+**2026-03 — itm.py ResRef fields contain garbage bytes**
+Several fields in ITM (e.g. `replacement_item`, `feature_blocks[n].resource`) are
+being read as raw strings containing binary garbage rather than clean ResRef strings.
+This is a parsing bug in `itm.py` to be fixed during the itm.py vetting pass.
+Discovered during the demo_search diagnostic run on a real BG2EE MISC75.ITM file.
+
+**2026-03 — string_manager.resolve() isinstance → duck typing**
+The `isinstance(ref, StrRef)` check in `resolve()` and `resolve_all_languages()`
+failed silently when the StrRef class was imported under a different module path
+(e.g. `strref` vs `core.util.strref`). Replaced with `hasattr` checks for
+`file_id`, `tlk_index`, and `is_none`.
+
+**2026-03 — demo_search.py renamed to resource_explorer.py, moved to tools/**
+The demo script was upgraded to a full interactive CLI explorer with a REPL loop,
+structured `where` query syntax, `open <RESREF>` inspection, runtime type switching,
+and `cls` screen clear. Cache moved from `demo_output/` to `.cache/<game_id>/`.
+Script lives at `tools/resource_explorer.py`; `_ROOT` set to `parent.parent` so
+imports resolve from the project root.
 

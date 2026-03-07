@@ -53,9 +53,6 @@ from core.util.binary import BinaryReader, BinaryWriter, SignatureMismatch
 from core.util.resref import ResRef
 from core.util.strref import StrRef, StrRefError
 
-# patched
-# patched2
-
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -1854,7 +1851,7 @@ class CreFile:
     def to_json(self) -> dict:
         h = self.header
         hd: dict = {
-            "name": self.name.to_json(), "tooltip": self.tooltip.to_json(), "flags": h.flags,
+            "name": h.name.to_json(), "tooltip": h.tooltip.to_json(), "flags": h.flags,
             "xp_value": h.xp_value, "current_hp": h.current_hp,
             "max_hp": h.max_hp, "animation_id": h.animation_id,
             "race": h.race, "klass": h.klass, "gender": h.gender,
@@ -2172,7 +2169,7 @@ class CreFileV12(CreFile):
     def to_json(self) -> dict:
         h = self.header
         hd: dict = {
-            "name": self.name.to_json(), "tooltip": self.tooltip.to_json(), "flags": h.flags,
+            "name": h.name.to_json(), "tooltip": h.tooltip.to_json(), "flags": h.flags,
             "xp_value": h.xp_value, "current_hp": h.current_hp,
             "max_hp": h.max_hp, "animation_id": h.animation_id,
             "race": h.race, "klass": h.klass, "gender": h.gender,
