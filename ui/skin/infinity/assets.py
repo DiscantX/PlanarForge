@@ -26,11 +26,13 @@ class InfinitySkinAssets:
         *,
         icon_loader: Callable[[str], tuple[int, int, list[float]] | None],
         mos_loader: Callable[[str], tuple[int, int, list[float]] | None],
+        bam_loader: Callable[[str], tuple[int, int, list[float]] | None] | None = None,
         chu_loader: Callable[[str], bytes | None] | None = None,
         texture_parent: str = "window_icon_textures",
     ) -> None:
         self._icon_loader = icon_loader
         self._mos_loader  = mos_loader
+        self._bam_loader  = bam_loader
         self._chu_loader  = chu_loader
         self._texture_parent = texture_parent
 
@@ -61,8 +63,14 @@ class InfinitySkinAssets:
             return
 
     def invalidate_chu_cache(self) -> None:
-        """Call when the selected game changes so CHU layouts are reloaded."""
+        """Call when the selected game changes so all game-specific caches are cleared."""
         self._chu_layout_cache.clear()
+        # Also evict any MOS/BAM textures — they are game-specific resources.
+        stale = [k for k in self._persistent_tags if k.startswith(("mos_", "slot_frame_"))]
+        for k in stale:
+            tag, _, _ = self._persistent_tags.pop(k)
+            if dpg.does_item_exist(tag):
+                dpg.delete_item(tag)
 
     # ------------------------------------------------------------------
     # Frame lifecycle
@@ -81,22 +89,39 @@ class InfinitySkinAssets:
     # Slot frame texture (persistent)
     # ------------------------------------------------------------------
 
-    def get_slot_frame_texture(self) -> tuple[str, int, int] | None:
-        cached = self._persistent_tags.get("slot_frame")
+    def get_slot_frame_texture(self, bam_resref: str = "STONSLOT") -> tuple[str, int, int] | None:
+        """
+        Load the slot frame texture.  Tries (in order):
+          1. Named BAM (default STONSLOT — the standard CHU button graphic)
+          2. Manifest slot_frame_icon_resref (BAM icon)
+          3. Manifest slot_frame_mos_resref  (MOS)
+          4. Programmatic fallback frame
+        """
+        cache_key = f"slot_frame_{bam_resref}"
+        cached = self._persistent_tags.get(cache_key)
         if cached is not None and dpg.does_item_exist(cached[0]):
             return cached
 
-        icon_resref = self._manifest.get("slot_frame_icon_resref", "").strip().upper()
-        mos_resref  = self._manifest.get("slot_frame_mos_resref",  "").strip().upper()
+        icon: tuple[int, int, list[float]] | None = None
 
-        icon = self._icon_loader(icon_resref) if icon_resref else None
-        if icon is None and mos_resref:
-            icon = self._mos_loader(mos_resref)
+        if bam_resref and self._bam_loader is not None:
+            icon = self._bam_loader(bam_resref)
+
+        if icon is None:
+            icon_resref = self._manifest.get("slot_frame_icon_resref", "").strip().upper()
+            if icon_resref:
+                icon = self._icon_loader(icon_resref)
+
+        if icon is None:
+            mos_resref = self._manifest.get("slot_frame_mos_resref", "").strip().upper()
+            if mos_resref:
+                icon = self._mos_loader(mos_resref)
+
         if icon is None:
             icon = self._generate_fallback_frame()
 
         tag, width, height = self._add_texture(
-            icon[0], icon[1], icon[2], persistent_key="slot_frame"
+            icon[0], icon[1], icon[2], persistent_key=cache_key
         )
         return tag, width, height
 
@@ -108,9 +133,9 @@ class InfinitySkinAssets:
         """
         Load and cache a MOS texture.  Returns (tag, w, h) or None.
 
-        Supports both palette-based (V1/MOSC) and PVRZ-based (V2) MOS files.
-        For PVRZ MOS files, attempts to decode using available decoders.  If
-        PVRTC decoding is unavailable, uses a fallback placeholder pattern.
+        EE games use MOS V2 (PVRZ-based) for large backgrounds — to_rgba()
+        returns None for those.  We detect this and print a diagnostic so
+        the caller knows to use the fallback background.
         """
         key = f"mos_{resref.upper()}"
         cached = self._persistent_tags.get(key)
@@ -119,6 +144,7 @@ class InfinitySkinAssets:
 
         img = self._mos_loader(resref)
         if img is None:
+            print(f"[InfinitySkinAssets] MOS {resref!r}: not found or is PVRZ (no RGBA decode) — using fallback background")
             return None
 
         tag, w, h = self._add_texture(img[0], img[1], img[2], persistent_key=key)

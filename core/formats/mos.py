@@ -74,12 +74,21 @@ class PaletteBlock:
 
 @dataclass
 class PvrzBlock:
-    """One PVRZ-reference block (EE MOS V2)."""
-    page: int = 0    # uint32 — PVRZ file index
-    x:    int = 0    # uint32 — pixel offset within page
-    y:    int = 0    # uint32 — pixel offset within page
-    width:  int = BLOCK_SIZE   # actual block width (last col/row may be <64)
+    """One PVRZ-reference block (EE MOS V2).
+
+    Actual EE on-disk format is 28 bytes per block:
+      page(4)  src_x(4)  src_y(4)  width(4)  height(4)  dst_x(4)  dst_y(4)
+
+    src_x/src_y are the source offset within the PVRZ page texture.
+    dst_x/dst_y are the explicit pixel destination in the output image.
+    """
+    page:   int = 0
+    x:      int = 0    # src_x — offset within PVRZ page
+    y:      int = 0    # src_y — offset within PVRZ page
+    width:  int = BLOCK_SIZE
     height: int = BLOCK_SIZE
+    dst_x:  int = 0    # destination x in output image
+    dst_y:  int = 0    # destination y in output image
 
 
 # ---------------------------------------------------------------------------
@@ -201,20 +210,27 @@ class MosFile:
 
     @classmethod
     def _parse_v2(cls, r: BinaryReader) -> "MosFile":
-        width        = r.read_uint32()
-        height       = r.read_uint32()
-        block_count  = r.read_uint32()
+        width         = r.read_uint32()
+        height        = r.read_uint32()
+        block_count   = r.read_uint32()
         blocks_offset = r.read_uint32()
 
         r.seek(blocks_offset)
         blocks: List[PvrzBlock] = []
         for _ in range(block_count):
-            page = r.read_uint32()
-            x    = r.read_uint32()
-            y    = r.read_uint32()
-            w    = r.read_uint32()
-            h    = r.read_uint32()
-            blocks.append(PvrzBlock(page=page, x=x, y=y, width=w, height=h))
+            # 28 bytes per block: page src_x src_y width height dst_x dst_y
+            page  = r.read_uint32()
+            src_x = r.read_uint32()
+            src_y = r.read_uint32()
+            w     = r.read_uint32()
+            h     = r.read_uint32()
+            dst_x = r.read_uint32()
+            dst_y = r.read_uint32()
+            blocks.append(PvrzBlock(
+                page=page, x=src_x, y=src_y,
+                width=w, height=h,
+                dst_x=dst_x, dst_y=dst_y,
+            ))
 
         return cls(width=width, height=height, blocks=blocks, version=VERSION_V2)
 
@@ -238,7 +254,8 @@ class MosFile:
         the decompressed PVRZ texture data given a page number.
 
         Args:
-            pvrz_loader: Optional callable(page_number) -> decompressed_pvrz_bytes | None
+            pvrz_loader: Optional callable(page_number) -> raw_pvrz_bytes | None
+                         Raw (still zlib-compressed) PVRZ data as stored in the KEY.
                          If None and MOS is PVRZ-based, returns None.
 
         Returns:
@@ -286,29 +303,19 @@ class MosFile:
         """
         Convert PVRZ-based MOS to RGBA using external PVRZ texture pages.
 
-        Each block in a PVRZ MOS references (page, x, y, width, height) coordinates
-        within a PVRZ texture file.  This method:
-        1. Loads each unique PVRZ page via pvrz_loader
-        2. Decodes the PVRTC texture data
-        3. Extracts rectangle regions from those pages
-        4. Assembles them into the output image
+        Each block record (28 bytes) contains:
+          page, src_x, src_y, width, height, dst_x, dst_y
 
-        Args:
-            pvrz_loader: Callable(page_number) -> decompressed_pvrz_bytes | None
-
-        Returns:
-            RGBA byte array or None if decoding fails
+        src_x/src_y  — source offset within the PVRZ page texture
+        dst_x/dst_y  — explicit pixel destination in the output image
         """
         try:
             out = bytearray(self.width * self.height * 4)
             pvrz_cache: dict[int, PvrzFile | None] = {}
             blocks_decoded = 0
-            blocks_failed = 0
 
-            # MOS V2 blocks are stored individually, not in a grid
-            # Iterate through the actual block list
-            for block_idx, block in enumerate(self.blocks):
-                # Get or load PVRZ page for this block
+            for block in self.blocks:
+                # Load and cache PVRZ page
                 page_num = block.page
                 if page_num not in pvrz_cache:
                     pvrz_bytes = pvrz_loader(page_num)
@@ -316,47 +323,41 @@ class MosFile:
                         pvrz_cache[page_num] = None
                     else:
                         try:
-                            # pvrz_loader returns decompressed PVRZ data
-                            pvrz_cache[page_num] = PvrzFile.from_decompressed(pvrz_bytes)
+                            pvrz_cache[page_num] = PvrzFile.from_bytes(pvrz_bytes)
                         except Exception as e:
                             print(f"[MOS PVRZ] Failed to parse PVRZ page {page_num}: {e}")
                             pvrz_cache[page_num] = None
 
                 pvrz = pvrz_cache[page_num]
                 if pvrz is None:
-                    blocks_failed += 1
                     continue
 
-                # Extract region from PVRZ page
+                # Extract source rectangle from PVRZ page
                 region_rgba = pvrz.get_region_rgba(
                     block.x, block.y, block.width, block.height
                 )
                 if region_rgba is None:
-                    blocks_failed += 1
                     continue
 
                 blocks_decoded += 1
 
-                # Copy region into output image
-                # MOS V2 blocks are placed at explicit (x,y) coordinates
+                # Copy into output using the explicit destination coordinates
+                dst_x = block.dst_x
+                dst_y = block.dst_y
                 for local_y in range(block.height):
-                    for local_x in range(block.width):
-                        src_idx = (local_y * block.width + local_x) * 4
-                        dst_x = block.x + local_x
-                        dst_y = block.y + local_y
-
-                        if dst_x >= self.width or dst_y >= self.height:
-                            continue
-
-                        dst_idx = (dst_y * self.width + dst_x) * 4
-
-                        # Copy RGBA pixel
-                        for c in range(4):
-                            out[dst_idx + c] = region_rgba[src_idx + c]
+                    oy = dst_y + local_y
+                    if oy >= self.height:
+                        break
+                    row_w = min(block.width, self.width - dst_x)
+                    if row_w <= 0:
+                        continue
+                    src_off = local_y * block.width * 4
+                    dst_off = (oy * self.width + dst_x) * 4
+                    out[dst_off: dst_off + row_w * 4] = region_rgba[src_off: src_off + row_w * 4]
 
             if blocks_decoded == 0:
                 return None
-            
+
             return bytes(out)
 
         except Exception:

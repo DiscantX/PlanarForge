@@ -47,6 +47,7 @@ class CharacterEditorPanel:
         self._skin_assets = InfinitySkinAssets(
             icon_loader=self.service.load_icon_by_resref,
             mos_loader=self.service.load_mos_by_resref,
+            bam_loader=self.service.load_bam_by_resref,
             chu_loader=self.service.load_chu_by_resref,
         )
         manifest_path = Path("ui/skin/infinity/manifest_default.json")
@@ -61,24 +62,16 @@ class CharacterEditorPanel:
         ):
             with dpg.group(tag=self.top_tag, horizontal=True):
                 dpg.add_text("Game:")
-                dpg.add_combo(
-                    tag=self.game_combo_tag,
-                    width=160,
-                    callback=self._on_game_selected
-                )
-                dpg.add_button(label="Refresh", callback=self._on_refresh_clicked)
-                dpg.add_button(label="Rebuild", callback=self._on_rebuild_clicked)
-                dpg.add_spacer(width=14)
-                dpg.add_text("Search:")
+                dpg.add_combo(tag=self.game_combo_tag, width=160, callback=self._on_game_selected)
+                dpg.add_spacer(width=10)
+                dpg.add_text("Find:")
                 dpg.add_input_text(
                     tag=self.search_tag,
-                    width=380,
-                    hint="ResRef, display name, or any CRE field...",
+                    width=260,
+                    hint="Search character by resref or name...",
                     callback=self._on_search_changed,
                 )
-                dpg.add_spacer(width=14)
-                dpg.add_text("", tag=self.status_tag)
-                dpg.add_spacer(width=10)
+                dpg.add_spacer(width=8)
                 dpg.add_text("Layout:")
                 dpg.add_combo(
                     tag=self.layout_combo_tag,
@@ -87,6 +80,10 @@ class CharacterEditorPanel:
                     width=120,
                     callback=self._on_layout_changed,
                 )
+                dpg.add_button(label="Refresh", callback=self._on_refresh_clicked)
+                dpg.add_button(label="Rebuild", callback=self._on_rebuild_clicked)
+                dpg.add_spacer(width=16)
+                dpg.add_text("", tag=self.status_tag)
 
             with dpg.group(tag=self.body_tag, horizontal=True):
                 with dpg.child_window(tag=self.left_tag, border=True):
@@ -108,9 +105,6 @@ class CharacterEditorPanel:
 
                 with dpg.child_window(tag=self.right_tag, border=True):
                     with dpg.tab_bar():
-                        with dpg.tab(label="Game Screen"):
-                            with dpg.child_window(tag=self.screen_tab_tag, border=False, no_scrollbar=True):
-                                pass
                         with dpg.tab(label="Overview"):
                             with dpg.child_window(tag=self.overview_tag, border=False):
                                 with dpg.group(tag=self.summary_tag):
@@ -139,7 +133,9 @@ class CharacterEditorPanel:
                         with dpg.tab(label="Raw JSON"):
                             with dpg.child_window(tag=self.raw_text_tag, border=False):
                                 dpg.add_text("No character loaded.")
-
+                        with dpg.tab(label="Game Screen"):
+                            with dpg.child_window(tag=self.screen_tab_tag, border=False, no_scrollbar=True):
+                                pass
 
         self._load_games()
 

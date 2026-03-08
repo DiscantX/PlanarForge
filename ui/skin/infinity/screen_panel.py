@@ -164,7 +164,7 @@ class InfinityScreenPanel:
         # we need to map them into our panel without clipping any slots.
         lw = max(1, layout.window_width)
         lh = max(1, layout.window_height)
-        scale = min(w / lw, h / lh, 1)   # never upscale past 1:1
+        scale = min(w / lw, h / lh, 1.0)   # never upscale past 1:1
 
         # Build scaled layout if needed
         if scale < 0.999:
@@ -178,9 +178,6 @@ class InfinityScreenPanel:
                 )
                 for name, rect in layout.slots.items()
             }
-            # for item in layout.slots:
-            #     print(item, layout.slots[item])
-
             layout = _CL(
                 background_mos=layout.background_mos,
                 window_x=layout.window_x,
@@ -201,16 +198,19 @@ class InfinityScreenPanel:
             height=h,
         )
 
-        # 1. MOS background
+        # 1. MOS background — draw at the scaled CHU window size so it
+        #    aligns with slot positions, not stretched to fill the whole panel
+        bg_w = layout.window_width
+        bg_h = layout.window_height
         if layout.background_mos:
             bg = self._assets.get_mos_texture(layout.background_mos)
             if bg is not None:
                 bg_tag, bw, bh = bg
-                dpg.draw_image(bg_tag, pmin=(0, 0), pmax=(w, h), parent=dl)
+                dpg.draw_image(bg_tag, pmin=(0, 0), pmax=(bg_w, bg_h), parent=dl)
             else:
-                self._draw_fallback_background(dl, w, h)
+                self._draw_fallback_background(dl, bg_w, bg_h)
         else:
-            self._draw_fallback_background(dl, w, h)
+            self._draw_fallback_background(dl, bg_w, bg_h)
 
         # 2. Slot frames + item icons
         for slot_name, rect in layout.slots.items():

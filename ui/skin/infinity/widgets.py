@@ -24,8 +24,8 @@ def draw_inventory_slot_card(
 
     if item_icon is not None:
         icon_tag, iw, ih = assets.texture_for_icon(item_icon)
-        max_inner_w = max(8, int(slot_w * 0.70))
-        max_inner_h = max(8, int(slot_h * 0.70))
+        max_inner_w = max(8, int(slot_w * .7))
+        max_inner_h = max(8, int(slot_h * .7))
         scale = min(max_inner_w / max(1, iw), max_inner_h / max(1, ih))
         # Allow small icons to scale up for readability.
         scale = max(scale, 1.0)
