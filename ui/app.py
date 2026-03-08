@@ -272,10 +272,10 @@ def apply_vscode_style() -> None:
 def on_viewport_resize(_sender, _app_data) -> None:
     width = dpg.get_viewport_client_width()
     height = dpg.get_viewport_client_height()
-    title_rect = _get_titlebar_rect()
-    title_height = TITLEBAR_HEIGHT if not title_rect else int(title_rect[3] - title_rect[1])
+    title_height = TITLEBAR_HEIGHT
     dpg.configure_item("root", width=width, height=height)
-    dpg.configure_item("content", pos=[0, title_height + CONTENT_GAP], width=width, height=max(0, height - title_height - CONTENT_GAP))
+    dpg.configure_item("title_bar", height=title_height)
+    dpg.configure_item("content", pos=[0, title_height + CONTENT_GAP])
 
     controls_w = _safe_item_width("title_controls_group", fallback=120.0)
     controls_x = max(TITLEBAR_PAD_X, width - TITLEBAR_PAD_X - controls_w)
@@ -388,6 +388,7 @@ dpg.create_viewport(
     height=VIEWPORT_HEIGHT,
     decorated=False,
     resizable=True,
+    clear_color=(31, 31, 31, 255),
     x_pos=app_state["restore_pos"][0],
     y_pos=app_state["restore_pos"][1],
 )
@@ -403,6 +404,7 @@ with dpg.window(
     no_resize=True,
     no_collapse=True,
     no_scrollbar=True,
+    no_scroll_with_mouse=True,
     no_background=False,
     pos=[0, 0],
     width=VIEWPORT_WIDTH,
@@ -414,6 +416,7 @@ with dpg.window(
         height=TITLEBAR_HEIGHT,
         border=False,
         no_scrollbar=True,
+        no_scroll_with_mouse=True,
     ):
         with dpg.group(tag="title_left_group", horizontal=True, pos=[TITLEBAR_PAD_X, TITLEBAR_PAD_Y]):
             with dpg.group(tag="title_left_before_search", horizontal=True):
@@ -434,10 +437,8 @@ with dpg.window(
             dpg.add_image_button("icon_max_tex", tag="max_btn", callback=toggle_maximize, width=CONTROL_ICON_SIZE, height=CONTROL_ICON_SIZE)
             dpg.add_image_button("icon_close_tex", tag="close_btn", callback=close_app, width=CONTROL_ICON_SIZE, height=CONTROL_ICON_SIZE)
 
-    with dpg.child_window(
+    with dpg.group(
         tag="content",
-        border=False,
-        no_scrollbar=True,
         pos=[0, TITLEBAR_HEIGHT + CONTENT_GAP],
     ):
         dpg.add_spacer(height=12)
