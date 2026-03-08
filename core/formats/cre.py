@@ -9,6 +9,7 @@ memorised spells, inventory, equipment slots, and active effects.
 
 Supported versions:
     V1   — BG1, IWD1
+    V1.1 — older PST files (same layout as V1.2; treated as V1.2)
     V1.2 — Planescape: Torment  (significantly different header layout)
     V9   — BG2, BG2:EE, IWD:EE  (larger header, EFF V2.0 effect blocks)
 
@@ -60,6 +61,7 @@ from core.util.strref import StrRef, StrRefError
 
 SIGNATURE        = b"CRE "
 VERSION_V1       = b"V1.0"
+VERSION_V11      = b"V1.1"   # older PST files; treated identically to V1.2
 VERSION_V12      = b"V1.2"
 VERSION_V9       = b"V9.0"
 
@@ -71,8 +73,8 @@ KNOWN_SPELL_SIZE      = 12
 MEMORISE_INFO_SIZE    = 16
 MEMORISED_SPELL_SIZE  = 12
 ITEM_SIZE             = 20
-EFFECT_V1_SIZE        = 48
-EFFECT_V2_SIZE        = 104
+EFFECT_V1_SIZE        = 48   # V1 inline: opcode … save_bonus
+EFFECT_V2_SIZE        = 108  # V2 embedded: 48 + special(4) + tail(56)
 
 SLOT_COUNT     = 40   # V1 / V9  (BG1/BG2/BGEE: 40 slots per IESDP)
 SLOT_COUNT_V12 = 48   # PST V1.2 (48 slots per IESDP)
@@ -284,10 +286,13 @@ class EffectBlock:
     """
     A single active effect on a creature.
 
-    The 48-byte core is identical to ITM/SPL feature blocks.  For V9
-    creatures, the engine stores 104-byte EFF V2.0 structs; the extra
-    56 bytes are kept verbatim in ``raw_extra`` for lossless round-trips.
-    Callers that only need the common fields can ignore ``raw_extra``.
+    V1 inline effects (eff_version=0, used by BG1/IWD/PST CREs and all ITM/SPL):
+        48 bytes.  Fields: opcode … save_bonus.  ``special`` is always 0.
+        ``raw_extra`` is always empty.
+
+    V2 embedded effects (eff_version=1, used by BG2/EE CREs):
+        108 bytes = 52-byte extended core (V1 fields + ``special``) +
+        56-byte tail (kept verbatim in ``raw_extra`` for lossless round-trips).
     """
     opcode:        int   = 0
     target:        int   = 0
@@ -304,11 +309,16 @@ class EffectBlock:
     dice_sides:    int   = 0
     saving_throw:  int   = 0
     save_bonus:    int   = 0
-    special:       int   = 0
-    raw_extra:     bytes = b""   # 56 bytes for V2, empty for V1/V1.2
+    special:       int   = 0   # V2 only; always 0 for V1 effects
+    raw_extra:     bytes = b""  # 56 bytes for V2, empty for V1/V1.2
+
+    # ------------------------------------------------------------------
+    # Helpers shared by both read methods
+    # ------------------------------------------------------------------
 
     @classmethod
-    def _read_v1(cls, r: BinaryReader) -> "EffectBlock":
+    def _read_common(cls, r: BinaryReader):
+        """Read the 48-byte core shared by V1 and V2 (opcode … save_bonus)."""
         opcode        = r.read_uint16()
         target        = r.read_uint8()
         power         = r.read_uint8()
@@ -326,8 +336,7 @@ class EffectBlock:
         dice_sides    = r.read_int32()
         saving_throw  = r.read_uint32()
         save_bonus    = r.read_int32()
-        special       = r.read_uint32()
-        return cls(
+        return dict(
             opcode=opcode, target=target, power=power,
             parameter1=parameter1, parameter2=parameter2,
             timing_mode=timing_mode, dispel_resist=dispel_resist,
@@ -335,16 +344,10 @@ class EffectBlock:
             probability2=probability2, resource=resource,
             dice_count=dice_count, dice_sides=dice_sides,
             saving_throw=saving_throw, save_bonus=save_bonus,
-            special=special,
         )
 
-    @classmethod
-    def _read_v2(cls, r: BinaryReader) -> "EffectBlock":
-        base = cls._read_v1(r)
-        base.raw_extra = r.read_bytes(56)
-        return base
-
-    def _write_v1(self, w: BinaryWriter) -> None:
+    def _write_common(self, w: BinaryWriter) -> None:
+        """Write the 48-byte core shared by V1 and V2."""
         w.write_uint16(self.opcode)
         w.write_uint8(self.target)
         w.write_uint8(self.power)
@@ -362,10 +365,37 @@ class EffectBlock:
         w.write_int32(self.dice_sides)
         w.write_uint32(self.saving_throw)
         w.write_int32(self.save_bonus)
-        w.write_uint32(self.special)
+
+    # ------------------------------------------------------------------
+    # V1 inline effect  (48 bytes; eff_version=0 in CRE; all ITM/SPL)
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def _read_v1(cls, r: BinaryReader) -> "EffectBlock":
+        """Read a 48-byte V1 inline effect.  ``special`` stays 0."""
+        return cls(**cls._read_common(r))
+
+    def _write_v1(self, w: BinaryWriter) -> None:
+        """Write a 48-byte V1 inline effect (``special`` not written)."""
+        self._write_common(w)
+
+    # ------------------------------------------------------------------
+    # V2 embedded effect  (108 bytes; eff_version=1 in CRE)
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def _read_v2(cls, r: BinaryReader) -> "EffectBlock":
+        """Read a 108-byte V2 embedded effect (48-byte core + 4-byte
+        ``special`` + 56-byte extended tail stored in ``raw_extra``)."""
+        fields        = cls._read_common(r)
+        fields["special"]   = r.read_uint32()   # +4 bytes = 52 bytes so far
+        fields["raw_extra"] = r.read_bytes(56)  # +56 bytes = 108 bytes total
+        return cls(**fields)
 
     def _write_v2(self, w: BinaryWriter) -> None:
-        self._write_v1(w)
+        """Write a 108-byte V2 embedded effect."""
+        self._write_common(w)
+        w.write_uint32(self.special)
         tail = self.raw_extra[:56].ljust(56, b"\x00")
         w.write_bytes(tail)
 
@@ -1793,7 +1823,7 @@ class CreFile:
         """
         Parse a CRE resource from raw bytes.
 
-        Returns a :class:`CreFileV12` for PST V1.2 files.
+        Returns a :class:`CreFileV12` for PST V1.2 and V1.1 files.
         """
         r = BinaryReader(data)
         try:
@@ -1802,8 +1832,10 @@ class CreFile:
         except SignatureMismatch as exc:
             raise ValueError(str(exc)) from exc
 
-        if version == VERSION_V12:
-            return CreFileV12._from_reader(r, data)
+        if version in (VERSION_V12, VERSION_V11):
+            # V1.1 is an older PST format with the same layout as V1.2;
+            # parse it identically and preserve the original version tag.
+            return CreFileV12._from_reader(r, data, version=version)
         if version not in (VERSION_V1, VERSION_V9):
             raise ValueError(f"Unsupported CRE version {version!r}.")
 
@@ -2151,7 +2183,12 @@ class CreFileV12(CreFile):
     # ------------------------------------------------------------------
 
     @classmethod
-    def _from_reader(cls, r: BinaryReader, data: bytes) -> "CreFileV12":
+    def _from_reader(
+        cls,
+        r: BinaryReader,
+        data: bytes,
+        version: bytes = VERSION_V12,
+    ) -> "CreFileV12":
         """Called by CreFile.from_bytes after the version tag is consumed."""
         header = CreHeaderV12._read(r)
 
@@ -2166,8 +2203,10 @@ class CreFileV12(CreFile):
             if slot.value < SLOT_COUNT_V12:
                 slots[slot] = raw_slots[slot.value]
 
-        return cls(header, known_spells, memorise_info, memorised_spells,
-                   items, slots, effects)
+        obj = cls(header, known_spells, memorise_info, memorised_spells,
+                  items, slots, effects)
+        obj._version = version  # preserve V1.1 vs V1.2 tag for round-trip fidelity
+        return obj
 
     # ------------------------------------------------------------------
     # Serialisation
@@ -2181,9 +2220,11 @@ class CreFileV12(CreFile):
             use_v2_effects=False,
             header_size=HEADER_SIZE_V12,
         )
+        # Preserve the original version tag (V1.1 or V1.2) for round-trip fidelity.
+        version_tag = getattr(self, "_version", VERSION_V12)
         w = BinaryWriter()
         w.write_bytes(SIGNATURE)
-        w.write_bytes(VERSION_V12)
+        w.write_bytes(version_tag)
         self.header._write(w)
         w.write_bytes(sub_bytes)
         return w.to_bytes()
