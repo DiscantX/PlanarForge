@@ -2,7 +2,9 @@ import ctypes
 
 import dearpygui.dearpygui as dpg
 
+from core.services.itm_catalog import ItmCatalog
 from ui.custom_chrome import CustomTitleBarController
+from ui.viewers.itm_viewer import ItmViewerPanel
 
 VIEWPORT_WIDTH = 1100
 VIEWPORT_HEIGHT = 700
@@ -21,6 +23,9 @@ app_state = {
     "maximized": False,
     "restore_pos": [100, 0],
     "restore_size": [VIEWPORT_WIDTH, VIEWPORT_HEIGHT],
+}
+ui_state: dict[str, object] = {
+    "active_view": "home",
 }
 
 
@@ -175,6 +180,30 @@ def on_viewport_resize(_sender, _app_data) -> None:
     available_search_w = max(80.0, controls_x - search_x - 12.0)
     dpg.configure_item("title_search", width=int(available_search_w))
 
+    viewer = ui_state.get("itm_viewer")
+    if isinstance(viewer, ItmViewerPanel):
+        viewer.set_size(width=width, height=max(0, height - TITLEBAR_HEIGHT - CONTENT_GAP))
+
+
+def show_home_view() -> None:
+    ui_state["active_view"] = "home"
+    if dpg.does_item_exist("home_view"):
+        dpg.show_item("home_view")
+    viewer = ui_state.get("itm_viewer")
+    if isinstance(viewer, ItmViewerPanel):
+        dpg.hide_item(viewer.root_tag)
+
+
+def show_itm_viewer() -> None:
+    ui_state["active_view"] = "itm"
+    if dpg.does_item_exist("home_view"):
+        dpg.hide_item("home_view")
+
+    viewer = ui_state.get("itm_viewer")
+    if isinstance(viewer, ItmViewerPanel):
+        dpg.show_item(viewer.root_tag)
+        viewer.refresh_results()
+
 
 dpg.create_context()
 with dpg.texture_registry(tag="window_icon_textures"):
@@ -225,7 +254,7 @@ with dpg.window(
                 dpg.add_spacer(width=10)
                 dpg.add_button(tag="menu_file_btn", label="File")
                 dpg.add_button(tag="menu_edit_btn", label="Edit")
-                dpg.add_button(tag="menu_view_btn", label="View")
+                dpg.add_button(tag="menu_view_btn", label="View", callback=show_itm_viewer)
                 dpg.add_spacer(width=16)
             dpg.add_input_text(
                 tag="title_search",
@@ -242,9 +271,10 @@ with dpg.window(
         tag="content",
         pos=[0, TITLEBAR_HEIGHT + CONTENT_GAP],
     ):
-        dpg.add_spacer(height=12)
-        dpg.add_text("Main content area")
-        dpg.add_text("Replace this with your editor panes, data grids, and tools.")
+        with dpg.group(tag="home_view"):
+            dpg.add_spacer(height=12)
+            dpg.add_text("Main content area")
+            dpg.add_text("Use View to open the ITM viewer.")
 
 dpg.bind_item_theme("root", "vscode_theme")
 dpg.bind_item_theme("min_btn", "title_control_theme")
@@ -254,6 +284,13 @@ dpg.set_primary_window("root", True)
 dpg.set_viewport_resize_callback(on_viewport_resize)
 on_viewport_resize(None, None)
 _sync_max_button()
+
+itm_catalog = ItmCatalog()
+itm_viewer = ItmViewerPanel(parent_tag="content", catalog=itm_catalog, tag_prefix="itm")
+ui_state["itm_viewer"] = itm_viewer
+dpg.hide_item(itm_viewer.root_tag)
+show_home_view()
+on_viewport_resize(None, None)
 
 chrome = CustomTitleBarController(
     window_title=WINDOW_TITLE,
