@@ -1,7 +1,8 @@
-import dearpygui.dearpygui as dpg
 import ctypes
-import sys
-from ctypes import wintypes
+
+import dearpygui.dearpygui as dpg
+
+from ui.custom_chrome import CustomTitleBarController
 
 VIEWPORT_WIDTH = 1100
 VIEWPORT_HEIGHT = 700
@@ -16,37 +17,14 @@ CONTROL_ICON_SIZE = 10
 CONTROL_FRAME_PAD = 6
 TITLEBAR_HEIGHT = (2 * TITLEBAR_PAD_Y) + CONTROL_ICON_SIZE + (2 * CONTROL_FRAME_PAD)
 
-if sys.platform == "win32":
-    user32 = ctypes.windll.user32
-    WM_NCHITTEST = 0x0084
-    WM_NCLBUTTONDBLCLK = 0x00A3
-    GWLP_WNDPROC = -4
-    HTCLIENT = 1
-    HTCAPTION = 2
-    HTLEFT = 10
-    HTRIGHT = 11
-    HTTOP = 12
-    HTTOPLEFT = 13
-    HTTOPRIGHT = 14
-    HTBOTTOM = 15
-    HTBOTTOMLEFT = 16
-    HTBOTTOMRIGHT = 17
-
 app_state = {
     "maximized": False,
     "restore_pos": [100, 0],
     "restore_size": [VIEWPORT_WIDTH, VIEWPORT_HEIGHT],
 }
-native_state = {
-    "hwnd": None,
-    "orig_wndproc": None,
-    "new_wndproc": None,
-}
 
 
 def _get_viewport_hwnd() -> int | None:
-    if sys.platform != "win32":
-        return None
     return ctypes.windll.user32.FindWindowW(None, WINDOW_TITLE)
 
 
@@ -107,77 +85,6 @@ def _make_icon_texture(tag: str, kind: str, size: int = 16) -> None:
     dpg.add_static_texture(size, size, flat, tag=tag, parent="window_icon_textures")
 
 
-def _is_point_over_item_rect(item_tag: str, x_pos: float, y_pos: float) -> bool:
-    if not dpg.does_item_exist(item_tag):
-        return False
-
-    try:
-        min_x, min_y = dpg.get_item_rect_min(item_tag)
-        max_x, max_y = dpg.get_item_rect_max(item_tag)
-    except Exception:
-        return False
-
-    return min_x <= x_pos <= max_x and min_y <= y_pos <= max_y
-
-
-def _screen_to_viewport_point(x_pos: float, y_pos: float) -> tuple[float, float]:
-    view_x, view_y = dpg.get_viewport_pos()
-    return x_pos - view_x, y_pos - view_y
-
-
-def _iter_titlebar_descendants() -> list[int | str]:
-    if not dpg.does_item_exist("title_bar"):
-        return []
-
-    descendants: list[int | str] = []
-    stack = ["title_bar"]
-    while stack:
-        current = stack.pop()
-        children_by_slot = dpg.get_item_children(current)
-        for slot_children in children_by_slot.values():
-            for child in slot_children:
-                descendants.append(child)
-                stack.append(child)
-    return descendants
-
-
-def _is_interactive_titlebar_item(item_tag: int | str) -> bool:
-    try:
-        item_type = dpg.get_item_info(item_tag).get("type", "")
-    except Exception:
-        return False
-
-    non_interactive = (
-        "mvGroup",
-        "mvText",
-        "mvSpacer",
-        "mvSeparator",
-        "mvChildWindow",
-        "mvDrawlist",
-    )
-    return not any(kind in item_type for kind in non_interactive)
-
-
-def _is_point_over_interactive_titlebar_item(x_pos: float, y_pos: float) -> bool:
-    for item in _iter_titlebar_descendants():
-        if not _is_interactive_titlebar_item(item):
-            continue
-        if _is_point_over_item_rect(item, x_pos, y_pos):
-            return True
-    return False
-
-
-def _get_titlebar_rect() -> tuple[float, float, float, float] | None:
-    if not dpg.does_item_exist("title_bar"):
-        return None
-    try:
-        min_x, min_y = dpg.get_item_rect_min("title_bar")
-        max_x, max_y = dpg.get_item_rect_max("title_bar")
-    except Exception:
-        return None
-    return min_x, min_y, max_x, max_y
-
-
 def _safe_item_width(item_tag: str, fallback: float = 0.0) -> float:
     if not dpg.does_item_exist(item_tag):
         return fallback
@@ -226,22 +133,6 @@ def toggle_maximize() -> None:
     _sync_max_button()
 
 
-def handle_titlebar_double_click(_sender, _app_data) -> None:
-    mouse_x, mouse_y = dpg.get_mouse_pos(local=False)
-    mouse_x, mouse_y = _screen_to_viewport_point(mouse_x, mouse_y)
-    title_rect = _get_titlebar_rect()
-    if not title_rect:
-        return
-    min_x, min_y, max_x, max_y = title_rect
-    if not (min_x <= mouse_x <= max_x and min_y <= mouse_y <= max_y):
-        return
-
-    if _is_point_over_interactive_titlebar_item(mouse_x, mouse_y):
-        return
-
-    toggle_maximize()
-
-
 def apply_vscode_style() -> None:
     with dpg.theme(tag="vscode_theme"):
         with dpg.theme_component(dpg.mvAll):
@@ -272,10 +163,9 @@ def apply_vscode_style() -> None:
 def on_viewport_resize(_sender, _app_data) -> None:
     width = dpg.get_viewport_client_width()
     height = dpg.get_viewport_client_height()
-    title_height = TITLEBAR_HEIGHT
     dpg.configure_item("root", width=width, height=height)
-    dpg.configure_item("title_bar", height=title_height)
-    dpg.configure_item("content", pos=[0, title_height + CONTENT_GAP])
+    dpg.configure_item("title_bar", height=TITLEBAR_HEIGHT)
+    dpg.configure_item("content", pos=[0, TITLEBAR_HEIGHT + CONTENT_GAP])
 
     controls_w = _safe_item_width("title_controls_group", fallback=120.0)
     controls_x = max(TITLEBAR_PAD_X, width - TITLEBAR_PAD_X - controls_w)
@@ -284,95 +174,6 @@ def on_viewport_resize(_sender, _app_data) -> None:
     search_x = _safe_item_width("title_left_before_search", fallback=260.0) + TITLEBAR_PAD_X
     available_search_w = max(80.0, controls_x - search_x - 12.0)
     dpg.configure_item("title_search", width=int(available_search_w))
-
-
-def _install_native_resize_hit_test() -> None:
-    if sys.platform != "win32":
-        return
-
-    hwnd = _get_viewport_hwnd()
-    if not hwnd or native_state["hwnd"] == hwnd:
-        return
-
-    user32.GetWindowLongPtrW.restype = ctypes.c_void_p
-    user32.GetWindowLongPtrW.argtypes = [wintypes.HWND, ctypes.c_int]
-    user32.SetWindowLongPtrW.restype = ctypes.c_void_p
-    user32.SetWindowLongPtrW.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_void_p]
-    user32.CallWindowProcW.restype = ctypes.c_ssize_t
-    user32.CallWindowProcW.argtypes = [ctypes.c_void_p, wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
-
-    orig_wndproc = user32.GetWindowLongPtrW(hwnd, GWLP_WNDPROC)
-    if not orig_wndproc:
-        return
-
-    WNDPROC = ctypes.WINFUNCTYPE(ctypes.c_ssize_t, wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM)
-
-    def _signed_word(value: int) -> int:
-        value &= 0xFFFF
-        return value - 0x10000 if value & 0x8000 else value
-
-    @WNDPROC
-    def custom_wndproc(h_wnd, msg, w_param, l_param):
-        if msg == WM_NCLBUTTONDBLCLK and w_param == HTCAPTION:
-            toggle_maximize()
-            return 0
-
-        if msg == WM_NCHITTEST:
-            is_maximized = _is_maximized()
-            default_hit = user32.CallWindowProcW(orig_wndproc, h_wnd, msg, w_param, l_param)
-            if default_hit != HTCLIENT:
-                return default_hit
-
-            x_pos = _signed_word(l_param)
-            y_pos = _signed_word(l_param >> 16)
-            rect = wintypes.RECT()
-            user32.GetWindowRect(h_wnd, ctypes.byref(rect))
-            width = rect.right - rect.left
-            rel_x = x_pos - rect.left
-            rel_y = y_pos - rect.top
-
-            near_left = x_pos <= rect.left + RESIZE_BORDER
-            near_right = x_pos >= rect.right - RESIZE_BORDER
-            near_top = y_pos <= rect.top + RESIZE_BORDER
-            near_bottom = y_pos >= rect.bottom - RESIZE_BORDER
-
-            if not is_maximized:
-                if near_top and near_left:
-                    return HTTOPLEFT
-                if near_top and near_right:
-                    return HTTOPRIGHT
-                if near_bottom and near_left:
-                    return HTBOTTOMLEFT
-                if near_bottom and near_right:
-                    return HTBOTTOMRIGHT
-                if near_left:
-                    return HTLEFT
-                if near_right:
-                    return HTRIGHT
-                if near_top:
-                    return HTTOP
-                if near_bottom:
-                    return HTBOTTOM
-
-            title_rect = _get_titlebar_rect()
-            if title_rect:
-                _min_x, title_top, _max_x, title_bottom = title_rect
-                in_title_drag_band = title_top <= rel_y <= title_bottom
-            else:
-                in_title_drag_band = RESIZE_BORDER < rel_y < TITLEBAR_HEIGHT
-            away_from_resize_edges = True if is_maximized else (RESIZE_BORDER < rel_x < (width - RESIZE_BORDER))
-            if in_title_drag_band and away_from_resize_edges:
-                if not _is_point_over_interactive_titlebar_item(rel_x, rel_y):
-                    return HTCAPTION
-
-        return user32.CallWindowProcW(orig_wndproc, h_wnd, msg, w_param, l_param)
-
-    if not user32.SetWindowLongPtrW(hwnd, GWLP_WNDPROC, custom_wndproc):
-        return
-
-    native_state["hwnd"] = hwnd
-    native_state["orig_wndproc"] = orig_wndproc
-    native_state["new_wndproc"] = custom_wndproc
 
 
 dpg.create_context()
@@ -454,13 +255,15 @@ dpg.set_viewport_resize_callback(on_viewport_resize)
 on_viewport_resize(None, None)
 _sync_max_button()
 
-with dpg.handler_registry():
-    dpg.add_mouse_double_click_handler(
-        button=dpg.mvMouseButton_Left,
-        callback=handle_titlebar_double_click,
-    )
+chrome = CustomTitleBarController(
+    window_title=WINDOW_TITLE,
+    title_bar_tag="title_bar",
+    is_maximized=_is_maximized,
+    on_caption_double_click=toggle_maximize,
+    resize_border=RESIZE_BORDER,
+)
 
 dpg.show_viewport()
-_install_native_resize_hit_test()
+chrome.install()
 dpg.start_dearpygui()
 dpg.destroy_context()
