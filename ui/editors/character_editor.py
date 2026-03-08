@@ -6,9 +6,10 @@ import dearpygui.dearpygui as dpg
 
 from core.services.character_service import CharacterService
 from core.viewmodels.character_vm import CharacterVM
-from ui.skin.infinity import InfinitySkinAssets, draw_inventory_slot_card
+from ui.core import EditorToolbar, LoadTracker, ResourceBrowserPane
+from ui.util.async_loader import AsyncLoader
+from ui.skin.infinity import InfinitySkinAssets
 from ui.skin.infinity.screen_panel import InfinityScreenPanel
-from ui.core import EditorToolbar, ResourceBrowserPane
 
 
 class CharacterEditorPanel:
@@ -22,10 +23,8 @@ class CharacterEditorPanel:
         self.top_tag = self._tag("top")
         self.body_tag = self._tag("body")
         self.right_tag = self._tag("right")
-        self.layout_combo_tag = self._tag("layout_combo")
         self.summary_tag = self._tag("summary")
         self.stats_table_tag = self._tag("stats_table")
-        self.inventory_tag = self._tag("inventory")
         self.overview_tag = self._tag("overview")
         self.raw_tree_tag = self._tag("raw_tree")
         self.raw_text_tag = self._tag("raw_text")
@@ -34,14 +33,16 @@ class CharacterEditorPanel:
 
         self._game_ids: list[str] = []
         self._character_rows: list[tuple[str, str]] = []
-        self._dynamic_texture_tags: list[str] = []
-        self._texture_counter = 0
         self._current_vm: CharacterVM | None = None
         self._current_payload: dict | None = None
         
         # Panel sizing state
         self._total_width: int = 0
         self._total_height: int = 0
+        
+        # Load tracking
+        self._load_tracker: LoadTracker | None = None
+        self.service.set_progress_callback(self._on_load_progress)
 
         self._skin_assets = InfinitySkinAssets(
             icon_loader=self.service.load_icon_by_resref,
@@ -59,19 +60,6 @@ class CharacterEditorPanel:
             no_scrollbar=True,
             no_scroll_with_mouse=True,
         ):
-            # Create toolbar with layout combo as extra control
-            def _add_layout_control(parent):
-                dpg.add_spacer(width=8, parent=parent)
-                dpg.add_text("Layout:", parent=parent)
-                dpg.add_combo(
-                    tag=self.layout_combo_tag,
-                    items=["Table", "Game Skin"],
-                    default_value="Game Skin",
-                    width=120,
-                    callback=self._on_layout_changed,
-                    parent=parent,
-                )
-
             self._toolbar = EditorToolbar(
                 parent_tag=self.root_tag,
                 games=[],
@@ -79,7 +67,6 @@ class CharacterEditorPanel:
                 on_refresh=self._on_refresh_clicked,
                 on_rebuild=self._on_rebuild_clicked,
                 tag_prefix=self._tag("toolbar"),
-                extra_controls=_add_layout_control,
             )
 
             with dpg.group(tag=self.body_tag, horizontal=True):
@@ -93,6 +80,9 @@ class CharacterEditorPanel:
 
                 with dpg.child_window(tag=self.right_tag, border=True):
                     with dpg.tab_bar():
+                        with dpg.tab(label="Game Screen"):
+                            with dpg.child_window(tag=self.screen_tab_tag, border=False, no_scrollbar=True):
+                                pass
                         with dpg.tab(label="Overview"):
                             with dpg.child_window(tag=self.overview_tag, border=False):
                                 with dpg.group(tag=self.summary_tag):
@@ -110,20 +100,12 @@ class CharacterEditorPanel:
                                 ):
                                     dpg.add_table_column(label="Stat")
                                     dpg.add_table_column(label="Value")
-                                dpg.add_separator()
-                                dpg.add_text("Inventory / Equipped")
-                                dpg.add_separator()
-                                with dpg.child_window(tag=self.inventory_tag, border=False):
-                                    dpg.add_text("No items.")
                         with dpg.tab(label="JSON Tree"):
                             with dpg.child_window(tag=self.raw_tree_tag, border=False):
                                 dpg.add_text("No character loaded.")
                         with dpg.tab(label="Raw JSON"):
                             with dpg.child_window(tag=self.raw_text_tag, border=False):
                                 dpg.add_text("No character loaded.")
-                        with dpg.tab(label="Game Screen"):
-                            with dpg.child_window(tag=self.screen_tab_tag, border=False, no_scrollbar=True):
-                                pass
 
         self._screen_panel = InfinityScreenPanel(
             parent_tag=self.screen_tab_tag,
@@ -158,6 +140,10 @@ class CharacterEditorPanel:
     def _set_status(self, text: str) -> None:
         self._toolbar.set_status(text)
 
+    def _on_load_progress(self, message: str) -> None:
+        """Handle progress updates from the service during loading."""
+        self._toolbar.update_spinner(message)
+
     def _load_games(self) -> None:
         games = self.service.list_games()
         self._game_ids = [g.game_id for g in games]
@@ -170,12 +156,15 @@ class CharacterEditorPanel:
 
     def _activate_game(self, game_id: str) -> None:
         try:
+            self._toolbar.set_loading(True, "Initializing...")
             self.service.select_game(game_id)
-            self._set_status("Loading CRE index...")
+            self._toolbar.update_spinner("Loading CRE index...")
             self.service.load_index(force_rebuild=False)
+            self._toolbar.set_loading(False)
             self._set_status(f"Loaded CRE index for {game_id}")
             self._refresh_character_list("")
         except Exception as exc:
+            self._toolbar.set_loading(False)
             self._set_status(f"Failed to select game: {exc}")
 
     def _on_game_selected(self, game_id: str) -> None:
@@ -200,14 +189,6 @@ class CharacterEditorPanel:
             self._set_status(f"Rebuild failed: {exc}")
             return
         self._refresh_character_list("")
-
-    def _on_layout_changed(self, _sender, app_data) -> None:
-        _layout = str(app_data or "Table")
-        if self._current_vm is not None and self._current_payload is not None:
-            try:
-                self._render_character(self._current_vm, self._current_payload)
-            except Exception as exc:
-                self._set_status(f"Layout render failed: {exc}")
 
     def _refresh_character_list(self, query: str) -> None:
         try:
@@ -234,10 +215,14 @@ class CharacterEditorPanel:
 
     def load_character(self, cre_resref: str) -> None:
         try:
+            self._toolbar.set_loading(True, f"Loading {cre_resref}...")
             vm, payload = self.service.load_character_with_payload(cre_resref)
+            self._toolbar.update_spinner("Rendering inventory...")
             self._render_character(vm, payload)
+            self._toolbar.set_loading(False)
             self._set_status(f"Loaded {vm.display_name} ({vm.resref})")
         except Exception as exc:
+            self._toolbar.set_loading(False)
             self._set_status(f"Load failed: {exc}")
             self._render_empty()
 
@@ -247,8 +232,6 @@ class CharacterEditorPanel:
         dpg.delete_item(self.summary_tag, children_only=True)
         dpg.add_text("No character loaded.", parent=self.summary_tag)
         dpg.delete_item(self.stats_table_tag, children_only=True, slot=1)
-        dpg.delete_item(self.inventory_tag, children_only=True)
-        dpg.add_text("No items.", parent=self.inventory_tag)
         dpg.delete_item(self.raw_tree_tag, children_only=True)
         dpg.add_text("No character loaded.", parent=self.raw_tree_tag)
         dpg.delete_item(self.raw_text_tag, children_only=True)
@@ -272,42 +255,7 @@ class CharacterEditorPanel:
                 dpg.add_text(stat.label)
                 dpg.add_text(stat.value)
 
-        self._clear_dynamic_textures()
         self._skin_assets.begin_frame()
-        dpg.delete_item(self.inventory_tag, children_only=True)
-        if not vm.inventory:
-            dpg.add_text("No equipped/inventory items.", parent=self.inventory_tag)
-            return
-        layout = str(dpg.get_value(self.layout_combo_tag) or "Table") if dpg.does_item_exist(self.layout_combo_tag) else "Table"
-        if layout == "Game Skin":
-            for slot in vm.inventory:
-                draw_inventory_slot_card(
-                    parent=self.inventory_tag,
-                    assets=self._skin_assets,
-                    slot_name=slot.slot_name,
-                    item_name=slot.item_name,
-                    item_resref=slot.item_resref,
-                    item_icon=slot.icon,
-                )
-        else:
-            for slot in vm.inventory:
-                with dpg.group(parent=self.inventory_tag, horizontal=True):
-                    if slot.icon is not None:
-                        tex = self._create_dynamic_texture(*slot.icon)
-                        width, height, _ = slot.icon
-                        draw_w = max(16, width)
-                        draw_h = max(16, height)
-                        self._add_image_with_fullsize_tooltip(
-                            texture_tag=tex,
-                            draw_width=draw_w,
-                            draw_height=draw_h,
-                            full_width=width,
-                            full_height=height,
-                        )
-                    else:
-                        dpg.add_spacer(width=16)
-                    dpg.add_text(f"{slot.slot_name}: {slot.item_name} ({slot.item_resref})")
-
         self._render_raw(payload)
         self._render_game_screen(vm)
 

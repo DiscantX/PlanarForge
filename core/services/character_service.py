@@ -4,7 +4,7 @@ import hashlib
 import json
 from enum import IntEnum
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from core.formats.cre import Alignment, Class, CreFile, Gender, Race
 from core.formats.key_biff import KeyFile, ResType
@@ -39,9 +39,19 @@ class CharacterService:
         self._key: Optional[KeyFile] = None
         self._manager: Optional[StringManager] = None
         self._character_index: list[tuple[str, str]] = []
+        self._progress_callback: Optional[Callable[[str], None]] = None
 
     def list_games(self) -> list[GameInstallation]:
         return self._finder.find_all()
+
+    def set_progress_callback(self, callback: Optional[Callable[[str], None]]) -> None:
+        """
+        Set a callback to receive progress/status updates.
+        
+        Args:
+            callback: Function that receives status messages during loading.
+        """
+        self._progress_callback = callback
 
     def select_game(self, game_id: str) -> None:
         inst = self._finder.find(game_id)
@@ -107,7 +117,9 @@ class CharacterService:
             raise ValueError(f"CRE {norm} not found.")
 
         raw = self._key.read_resource(entry, game_root=self._selected_game)
+        self._report_progress(f"Loading {norm}...")
         cre = CreFile.from_bytes(raw)
+        self._report_progress(f"Parsing {norm}...")
         h = cre.header
 
         display_name = self._resolve_strref_int(int(h.name)) or norm
@@ -126,6 +138,7 @@ class CharacterService:
         ]
 
         inventory: list[InventorySlotVM] = []
+        self._report_progress(f"Loading inventory for {norm}...")
         for slot_enum, idx in cre.slots.items():
             if idx == 0xFFFF or idx < 0 or idx >= len(cre.items):
                 continue
@@ -156,6 +169,7 @@ class CharacterService:
             stats=stats,
             inventory=inventory,
         )
+        self._report_progress(f"Serializing {norm}...")
         payload = cre.to_json()
         return vm, payload
 
@@ -364,3 +378,8 @@ class CharacterService:
             return enum_cls(value).name.replace("_", " ").title()
         except Exception:
             return str(value)
+
+    def _report_progress(self, message: str) -> None:
+        """Report progress to the callback if set."""
+        if self._progress_callback:
+            self._progress_callback(message)
