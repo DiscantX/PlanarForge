@@ -2,8 +2,10 @@ import ctypes
 
 import dearpygui.dearpygui as dpg
 
+from core.services.character_service import CharacterService
 from core.services.itm_catalog import ItmCatalog
 from ui.custom_chrome import CustomTitleBarController
+from ui.viewers.character_editor import CharacterEditorPanel
 from ui.viewers.itm_viewer import ItmViewerPanel
 
 VIEWPORT_WIDTH = 1100
@@ -183,6 +185,9 @@ def on_viewport_resize(_sender, _app_data) -> None:
     viewer = ui_state.get("itm_viewer")
     if isinstance(viewer, ItmViewerPanel):
         viewer.set_size(width=width, height=max(0, height - TITLEBAR_HEIGHT - CONTENT_GAP))
+    character = ui_state.get("character_editor")
+    if isinstance(character, CharacterEditorPanel):
+        character.set_size(width=width, height=max(0, height - TITLEBAR_HEIGHT - CONTENT_GAP))
 
 
 def show_home_view() -> None:
@@ -192,17 +197,35 @@ def show_home_view() -> None:
     viewer = ui_state.get("itm_viewer")
     if isinstance(viewer, ItmViewerPanel):
         dpg.hide_item(viewer.root_tag)
+    character = ui_state.get("character_editor")
+    if isinstance(character, CharacterEditorPanel):
+        dpg.hide_item(character.root_tag)
 
 
 def show_itm_viewer() -> None:
     ui_state["active_view"] = "itm"
     if dpg.does_item_exist("home_view"):
         dpg.hide_item("home_view")
+    character = ui_state.get("character_editor")
+    if isinstance(character, CharacterEditorPanel):
+        dpg.hide_item(character.root_tag)
 
     viewer = ui_state.get("itm_viewer")
     if isinstance(viewer, ItmViewerPanel):
         dpg.show_item(viewer.root_tag)
         viewer.refresh_results()
+
+
+def show_character_editor() -> None:
+    ui_state["active_view"] = "character"
+    if dpg.does_item_exist("home_view"):
+        dpg.hide_item("home_view")
+    viewer = ui_state.get("itm_viewer")
+    if isinstance(viewer, ItmViewerPanel):
+        dpg.hide_item(viewer.root_tag)
+    character = ui_state.get("character_editor")
+    if isinstance(character, CharacterEditorPanel):
+        dpg.show_item(character.root_tag)
 
 
 dpg.create_context()
@@ -255,6 +278,7 @@ with dpg.window(
                 dpg.add_button(tag="menu_file_btn", label="File")
                 dpg.add_button(tag="menu_edit_btn", label="Edit")
                 dpg.add_button(tag="menu_view_btn", label="View", callback=show_itm_viewer)
+                dpg.add_button(tag="menu_character_btn", label="Character", callback=show_character_editor)
                 dpg.add_spacer(width=16)
             dpg.add_input_text(
                 tag="title_search",
@@ -274,7 +298,7 @@ with dpg.window(
         with dpg.group(tag="home_view"):
             dpg.add_spacer(height=12)
             dpg.add_text("Main content area")
-            dpg.add_text("Use View to open the ITM viewer.")
+            dpg.add_text("Use View to open the ITM viewer or Character to open the CRE viewer.")
 
 dpg.bind_item_theme("root", "vscode_theme")
 dpg.bind_item_theme("min_btn", "title_control_theme")
@@ -289,6 +313,11 @@ itm_catalog = ItmCatalog()
 itm_viewer = ItmViewerPanel(parent_tag="content", catalog=itm_catalog, tag_prefix="itm")
 ui_state["itm_viewer"] = itm_viewer
 dpg.hide_item(itm_viewer.root_tag)
+
+character_service = CharacterService(itm_catalog=itm_catalog)
+character_editor = CharacterEditorPanel(parent_tag="content", service=character_service, tag_prefix="character")
+ui_state["character_editor"] = character_editor
+dpg.hide_item(character_editor.root_tag)
 show_home_view()
 on_viewport_resize(None, None)
 
@@ -301,6 +330,9 @@ chrome = CustomTitleBarController(
 )
 
 dpg.show_viewport()
+dpg.maximize_viewport()
+app_state["maximized"] = True
+_sync_max_button()
 chrome.install()
 dpg.start_dearpygui()
 dpg.destroy_context()

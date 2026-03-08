@@ -390,12 +390,14 @@ class ItmViewerPanel:
     def _render_json_node(self, parent: str | int, key: str, value: Any, *, default_open: bool) -> None:
         if isinstance(value, dict):
             with dpg.tree_node(label=key, parent=parent, default_open=default_open):
-                self._render_object(parent=dpg.last_item(), value=value, default_open=default_open)
+                node_tag = dpg.last_item()
+                self._render_object(parent=node_tag, value=value, default_open=default_open)
             return
         if isinstance(value, list):
             with dpg.tree_node(label=f"{key} [{len(value)}]", parent=parent, default_open=default_open):
+                node_tag = dpg.last_item()
                 for idx, item in enumerate(value):
-                    self._render_json_node(parent=dpg.last_item(), key=f"[{idx}]", value=item, default_open=False)
+                    self._render_json_node(parent=node_tag, key=f"[{idx}]", value=item, default_open=False)
             return
         dpg.add_text(f"{key}: {value}", parent=parent)
 

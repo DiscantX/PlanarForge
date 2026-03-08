@@ -128,26 +128,46 @@ class ItmCatalog:
         except Exception:
             return None
 
-    def load_item_icon_by_itm_resref(self, itm_resref: Any) -> tuple[int, int, list[float]] | None:
-        """Resolve an ITM ResRef and return its inventory icon preview."""
+    def load_item_name_and_icon_by_resref(self, itm_resref: Any) -> tuple[str, tuple[int, int, list[float]] | None]:
+        """Resolve ITM name and inventory icon by ITM ResRef."""
         self._ensure_runtime_handles()
         assert self._key is not None
+        assert self._manager is not None
 
         resref = self._normalize_resrefish(itm_resref)
         if not resref:
-            return None
+            return "", None
         try:
             itm_entry = self._key.find(resref, ResType.ITM)
             if itm_entry is None:
-                return None
+                return "", None
             raw_itm = self._key.read_resource(itm_entry, game_root=self._selected_game)
             parsed = self._item_parser_cls.from_bytes(raw_itm)
+
             icon_resref = self._normalize_resrefish(getattr(parsed.header, "item_icon", ""))
-            if not icon_resref:
-                return None
-            return self.load_bam_icon_by_resref(icon_resref)
+            icon = self.load_bam_icon_by_resref(icon_resref) if icon_resref else None
+
+            name = ""
+            for raw_strref in (parsed.header.identified_name, parsed.header.unidentified_name):
+                try:
+                    from core.util.strref import StrRef
+
+                    value = int(raw_strref)
+                    if value == 0xFFFFFFFF:
+                        continue
+                    name = self._manager.resolve(StrRef(value)) or ""
+                except Exception:
+                    name = ""
+                if name:
+                    break
+            return name, icon
         except Exception:
-            return None
+            return "", None
+
+    def load_item_icon_by_itm_resref(self, itm_resref: Any) -> tuple[int, int, list[float]] | None:
+        """Resolve an ITM ResRef and return its inventory icon preview."""
+        _name, icon = self.load_item_name_and_icon_by_resref(itm_resref)
+        return icon
 
     def load_bam_icon_by_resref(self, bam_resref: Any) -> tuple[int, int, list[float]] | None:
         """Load first-frame BAM/BMP icon texture by resref."""
