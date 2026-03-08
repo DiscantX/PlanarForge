@@ -164,7 +164,7 @@ class InfinityScreenPanel:
         # we need to map them into our panel without clipping any slots.
         lw = max(1, layout.window_width)
         lh = max(1, layout.window_height)
-        scale = min(w / lw, h / lh, 1.0)   # never upscale past 1:1
+        scale = min(w / lw, h / lh, 1)   # never upscale past 1:1
 
         # Build scaled layout if needed
         if scale < 0.999:
@@ -178,6 +178,9 @@ class InfinityScreenPanel:
                 )
                 for name, rect in layout.slots.items()
             }
+            # for item in layout.slots:
+            #     print(item, layout.slots[item])
+
             layout = _CL(
                 background_mos=layout.background_mos,
                 window_x=layout.window_x,

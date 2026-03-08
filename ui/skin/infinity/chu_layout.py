@@ -129,46 +129,46 @@ class ScreenControlMap:
             chu_resref="GUIINV",
             window_id=2,
             slot_control_ids={
-                # Weapon row (y=97, left-to-right)
-                "WEAPON1":       11,
-                "WEAPON2":       12,
-                "WEAPON3":       13,
-                "WEAPON4":       14,
-                "CLOAK":         62,   # top-right, same row
+                # Body slots (y=97, left-to-right)
+                "ARMOR":       11,
+                "GLOVES":       12,
+                "HELMET":       13,
+                "AMULET":       14,
+                "COLOR":         62,   # top-right, same row
                 # Quiver/ammo row (y=137)
                 "QUIVER1":       15,
                 "QUIVER2":       16,
                 "QUIVER3":       17,
                 # Body slots — left 4-wide row (y=243)
-                "HELMET":         1,
-                "ARMOUR":         2,
-                "SHIELD":         3,
-                "GLOVES":         4,
+                "WEAPON1":         1,
+                "WEAPON2":         2,
+                "WEAPON3":         3,
+                "WEAPON4":         4,
                 # Right of paperdoll (y=244)
-                "AMULET":        26,
+                "SHIELD":        26,
                 # Belt / misc (y=301)
-                "BELT":          22,   # x=217, centre-left
-                # Body slots — left 3-wide row (y=347)
-                "BOOTS":          5,
-                "RING_LEFT":      6,
-                "RING_RIGHT":     7,
-                # Below-portrait cluster (y=361)
-                "QUICK_ITEM1":   24,   # x=282
-                "QUICK_ITEM2":   25,   # x=338
-                "QUICK_ITEM3":   21,   # x=393
-                # Right panel (y=154, right side)
-                "MAGIC_WEAPON":  63,   # x=464,y=154
-                # Far-right quick item 2x4 grid
-                "QUICK_ITEM4":   68,   # x=722,y=478
-                "QUICK_ITEM5":   69,   # x=777,y=478
-                "QUICK_ITEM6":   70,   # x=722,y=532
-                "QUICK_ITEM7":   71,   # x=777,y=532
-                "QUICK_ITEM8":   72,   # x=722,y=586
-                "QUICK_ITEM9":   73,   # x=777,y=586
-                "QUICK_ITEM10":  74,   # x=722,y=640
-                "QUICK_ITEM11":  75,   # x=777,y=640
+                "RING_LEFT":          22,   # x=217, centre-left
                 # Right-side slot at y=301
-                "QUICK_ITEM12":  23,   # x=461,y=301
+                "RING_RIGHT":  23,   # x=461,y=301  
+                # Body slots — left 3-wide row (y=347)
+                "QUICK_ITEM1":          5,
+                "QUICK_ITEM2":      6,
+                "QUICK_ITEM3":     7,
+                # Below-portrait cluster (y=361)
+                "CLOAK":   24,   # x=282
+                "BOOTS":   25,   # x=338
+                "BELT":   21,   # x=393
+                # Right panel (y=154, right side)
+                "EMPTY":  63,   # x=464,y=154
+                # Far-right quick item 2x4 grid
+                "GROUND1":   68,   # x=722,y=478
+                "GROUND2":   69,   # x=777,y=478
+                "GROUND3":   70,   # x=722,y=532
+                "GROUND4":   71,   # x=777,y=532
+                "GROUND5":   72,   # x=722,y=586
+                "GROUND6":   73,   # x=777,y=586
+                "GROUND7":  74,   # x=722,y=640
+                "GROUND8":  75,   # x=777,y=640
                 # Inventory grid row 1 (y=571, left-to-right)
                 "INVENTORY_0":   30,
                 "INVENTORY_1":   32,
