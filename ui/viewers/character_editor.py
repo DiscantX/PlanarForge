@@ -43,6 +43,13 @@ class CharacterEditorPanel:
         self._texture_counter = 0
         self._current_vm: CharacterVM | None = None
         self._current_payload: dict | None = None
+        
+        # Panel resizing state
+        self._total_width: int = 0
+        self._total_height: int = 0
+        self._left_panel_width: float = 0.30  # Default 30% width (thinner)
+        self._is_dragging_divider: bool = False
+        self._last_mouse_x: int = 0
 
         self._skin_assets = InfinitySkinAssets(
             icon_loader=self.service.load_icon_by_resref,
@@ -150,10 +157,12 @@ class CharacterEditorPanel:
         return f"{self.tag_prefix}_{suffix}"
 
     def set_size(self, width: int, height: int) -> None:
+        self._total_width = width
+        self._total_height = height
         dpg.configure_item(self.root_tag, width=max(0, width), height=max(0, height))
         top_h = 34
         body_h = max(0, height - top_h - 6)
-        left_w = max(260, int(width * 0.42))
+        left_w = max(180, int(width * self._left_panel_width))
         right_w = max(260, width - left_w - 12)
         dpg.configure_item(self.left_tag, width=left_w, height=body_h)
         dpg.configure_item(self.right_tag, width=right_w, height=body_h)
@@ -434,3 +443,55 @@ class CharacterEditorPanel:
             tip_w = max(1, int(fw * scale))
             tip_h = max(1, int(fh * scale))
             dpg.add_image(texture_tag, width=tip_w, height=tip_h)
+
+    def handle_mouse_event(self) -> None:
+        """Handle mouse events for panel resizing via drag on the divider."""
+        if not dpg.does_item_exist(self.root_tag):
+            return
+        
+        mouse_x, mouse_y = dpg.get_mouse_pos()
+        
+        # Get root position (absolute position in viewport)
+        root_pos = dpg.get_item_pos(self.root_tag)
+        body_pos = dpg.get_item_pos(self.body_tag)
+        
+        # Calculate absolute position of the divider
+        # body_tag is at (0, top_h) relative to root, and left_tag is at x=0 relative to body
+        root_x = root_pos[0]
+        body_x = body_pos[0]
+        
+        left_w = max(180, int(self._total_width * self._left_panel_width))
+        
+        # Absolute divider position (accounting for the border gap)
+        divider_x = root_x + body_x + left_w
+        divider_hit_zone = 10  # pixels on each side to detect drag
+        
+        # Check if mouse is near the divider
+        on_divider = abs(mouse_x - divider_x) < divider_hit_zone
+        
+        # Track mouse button state
+        is_button_down = dpg.is_mouse_button_down(dpg.mvMouseButton_Left)
+        
+        if is_button_down:
+            if on_divider and not self._is_dragging_divider:
+                # Start dragging - record initial position
+                self._is_dragging_divider = True
+                self._last_mouse_x = mouse_x
+            elif self._is_dragging_divider and self._last_mouse_x != 0:
+                # Continue dragging - calculate delta
+                delta = mouse_x - self._last_mouse_x
+                if delta != 0:
+                    new_left_w = max(180, left_w + delta)
+                    new_right_w_min = 260
+                    # Check if this resize is valid
+                    if new_left_w + new_right_w_min + 12 <= self._total_width:
+                        # Convert back to percentage and clamp
+                        new_percentage = new_left_w / self._total_width
+                        self._left_panel_width = max(0.2, min(0.7, new_percentage))
+                        # Update positions
+                        self.set_size(self._total_width, self._total_height)
+                    self._last_mouse_x = mouse_x
+        else:
+            # Mouse button released - stop dragging
+            self._is_dragging_divider = False
+            self._last_mouse_x = 0

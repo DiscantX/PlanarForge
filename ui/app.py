@@ -329,6 +329,27 @@ chrome = CustomTitleBarController(
     resize_border=RESIZE_BORDER,
 )
 
+# Set up mouse handlers for panel resizing
+def _on_mouse_down(sender, app_data):
+    """Trigger mouse event handling when mouse button is down."""
+    viewer = ui_state.get("itm_viewer")
+    if isinstance(viewer, ItmViewerPanel) and dpg.does_item_exist(viewer.root_tag):
+        try:
+            viewer.handle_mouse_event()
+        except Exception:
+            pass  # Ignore errors during mouse handling
+    character = ui_state.get("character_editor")
+    if isinstance(character, CharacterEditorPanel) and dpg.does_item_exist(character.root_tag):
+        try:
+            character.handle_mouse_event()
+        except Exception:
+            pass  # Ignore errors during mouse handling
+
+with dpg.handler_registry():
+    dpg.add_mouse_down_handler(callback=_on_mouse_down)
+    dpg.add_mouse_move_handler(callback=_on_mouse_down)
+    dpg.add_mouse_release_handler(callback=_on_mouse_down)
+
 dpg.show_viewport()
 dpg.maximize_viewport()
 app_state["maximized"] = True
