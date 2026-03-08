@@ -108,9 +108,16 @@ class InfinityScreenPanel:
     # ------------------------------------------------------------------
 
     def set_size(self, width: int, height: int) -> None:
-        """Resize the root window; re-renders if a layout is loaded."""
-        self._panel_width  = max(64, width)
-        self._panel_height = max(64, height)
+        """Resize the root window; re-renders if a layout is loaded and size changed."""
+        new_width  = max(64, width)
+        new_height = max(64, height)
+        
+        # Only rebuild if size actually changed
+        if new_width == self._panel_width and new_height == self._panel_height:
+            return
+            
+        self._panel_width  = new_width
+        self._panel_height = new_height
         if dpg.does_item_exist(self._root_tag):
             dpg.configure_item(self._root_tag, width=self._panel_width, height=self._panel_height)
         if self._current_layout is not None:
