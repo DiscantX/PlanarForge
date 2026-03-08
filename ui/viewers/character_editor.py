@@ -8,6 +8,8 @@ from core.services.character_service import CharacterService
 from core.viewmodels.character_vm import CharacterVM
 from ui.skin.infinity import InfinitySkinAssets, draw_inventory_slot_card
 from ui.skin.infinity.screen_panel import InfinityScreenPanel
+from ui.viewers.editor_toolbar import EditorToolbar
+from ui.viewers.resource_browser_pane import ResourceBrowserPane
 
 
 class CharacterEditorPanel:
@@ -20,13 +22,8 @@ class CharacterEditorPanel:
         self.root_tag = self._tag("root")
         self.top_tag = self._tag("top")
         self.body_tag = self._tag("body")
-        self.left_tag = self._tag("left")
         self.right_tag = self._tag("right")
-        self.status_tag = self._tag("status")
-        self.game_combo_tag = self._tag("game_combo")
-        self.search_tag = self._tag("search")
         self.layout_combo_tag = self._tag("layout_combo")
-        self.character_table_tag = self._tag("character_table")
         self.summary_tag = self._tag("summary")
         self.stats_table_tag = self._tag("stats_table")
         self.inventory_tag = self._tag("inventory")
@@ -38,18 +35,14 @@ class CharacterEditorPanel:
 
         self._game_ids: list[str] = []
         self._character_rows: list[tuple[str, str]] = []
-        self._row_selectables: list[str] = []
         self._dynamic_texture_tags: list[str] = []
         self._texture_counter = 0
         self._current_vm: CharacterVM | None = None
         self._current_payload: dict | None = None
         
-        # Panel resizing state
+        # Panel sizing state
         self._total_width: int = 0
         self._total_height: int = 0
-        self._left_panel_width: float = 0.30  # Default 30% width (thinner)
-        self._is_dragging_divider: bool = False
-        self._last_mouse_x: int = 0
 
         self._skin_assets = InfinitySkinAssets(
             icon_loader=self.service.load_icon_by_resref,
@@ -67,48 +60,37 @@ class CharacterEditorPanel:
             no_scrollbar=True,
             no_scroll_with_mouse=True,
         ):
-            with dpg.group(tag=self.top_tag, horizontal=True):
-                dpg.add_text("Game:")
-                dpg.add_combo(tag=self.game_combo_tag, width=160, callback=self._on_game_selected)
-                dpg.add_spacer(width=10)
-                dpg.add_text("Find:")
-                dpg.add_input_text(
-                    tag=self.search_tag,
-                    width=260,
-                    hint="Search character by resref or name...",
-                    callback=self._on_search_changed,
-                )
-                dpg.add_spacer(width=8)
-                dpg.add_text("Layout:")
+            # Create toolbar with layout combo as extra control
+            def _add_layout_control(parent):
+                dpg.add_spacer(width=8, parent=parent)
+                dpg.add_text("Layout:", parent=parent)
                 dpg.add_combo(
                     tag=self.layout_combo_tag,
                     items=["Table", "Game Skin"],
                     default_value="Game Skin",
                     width=120,
                     callback=self._on_layout_changed,
+                    parent=parent,
                 )
-                dpg.add_button(label="Refresh", callback=self._on_refresh_clicked)
-                dpg.add_button(label="Rebuild", callback=self._on_rebuild_clicked)
-                dpg.add_spacer(width=16)
-                dpg.add_text("", tag=self.status_tag)
+
+            self._toolbar = EditorToolbar(
+                parent_tag=self.root_tag,
+                games=[],
+                on_game_selected=self._on_game_selected,
+                on_refresh=self._on_refresh_clicked,
+                on_rebuild=self._on_rebuild_clicked,
+                tag_prefix=self._tag("toolbar"),
+                extra_controls=_add_layout_control,
+            )
 
             with dpg.group(tag=self.body_tag, horizontal=True):
-                with dpg.child_window(tag=self.left_tag, border=True):
-                    dpg.add_text("Character Browser")
-                    with dpg.table(
-                        tag=self.character_table_tag,
-                        header_row=True,
-                        policy=dpg.mvTable_SizingStretchProp,
-                        row_background=True,
-                        resizable=True,
-                        borders_innerV=True,
-                        borders_outerV=True,
-                        borders_innerH=True,
-                        borders_outerH=True,
-                        height=220,
-                    ):
-                        dpg.add_table_column(label="ResRef")
-                        dpg.add_table_column(label="Name")
+                # Create the browser pane
+                self._browser = ResourceBrowserPane(
+                    parent_tag=self.body_tag,
+                    columns=["ResRef", "Name"],
+                    on_row_selected=self._on_character_selected,
+                    tag_prefix=self._tag("browser"),
+                )
 
                 with dpg.child_window(tag=self.right_tag, border=True):
                     with dpg.tab_bar():
@@ -144,14 +126,14 @@ class CharacterEditorPanel:
                             with dpg.child_window(tag=self.screen_tab_tag, border=False, no_scrollbar=True):
                                 pass
 
-        self._load_games()
-
         self._screen_panel = InfinityScreenPanel(
             parent_tag=self.screen_tab_tag,
             assets=self._skin_assets,
             tag_prefix=self._tag("ie_screen"),
             on_slot_clicked=self._on_slot_clicked,
         )
+
+        self._load_games()
 
     def _tag(self, suffix: str) -> str:
         return f"{self.tag_prefix}_{suffix}"
@@ -162,9 +144,12 @@ class CharacterEditorPanel:
         dpg.configure_item(self.root_tag, width=max(0, width), height=max(0, height))
         top_h = 34
         body_h = max(0, height - top_h - 6)
-        left_w = max(180, int(width * self._left_panel_width))
+        
+        # Update browser and right panel sizing
+        self._browser.set_size(width, body_h)
+        left_w = self._browser.get_panel_width()
         right_w = max(260, width - left_w - 12)
-        dpg.configure_item(self.left_tag, width=left_w, height=body_h)
+        
         dpg.configure_item(self.right_tag, width=right_w, height=body_h)
         # The screen tab child_window and its panel need explicit sizing too
         if dpg.does_item_exist(self.screen_tab_tag):
@@ -172,16 +157,16 @@ class CharacterEditorPanel:
         self._screen_panel.set_size(right_w - 8, body_h - 28)
 
     def _set_status(self, text: str) -> None:
-        dpg.set_value(self.status_tag, text)
+        self._toolbar.set_status(text)
 
     def _load_games(self) -> None:
         games = self.service.list_games()
         self._game_ids = [g.game_id for g in games]
-        dpg.configure_item(self.game_combo_tag, items=self._game_ids)
+        self._toolbar.set_games(self._game_ids)
         if not self._game_ids:
             self._set_status("No game installations detected.")
             return
-        dpg.set_value(self.game_combo_tag, self._game_ids[0])
+        self._toolbar.set_game(self._game_ids[0])
         self._activate_game(self._game_ids[0])
 
     def _activate_game(self, game_id: str) -> None:
@@ -194,34 +179,28 @@ class CharacterEditorPanel:
         except Exception as exc:
             self._set_status(f"Failed to select game: {exc}")
 
-    def _on_game_selected(self, _sender, app_data) -> None:
-        game_id = str(app_data or "")
+    def _on_game_selected(self, game_id: str) -> None:
         if game_id:
             self._skin_assets.invalidate_chu_cache()
             self._screen_panel.clear()
             self._activate_game(game_id)
 
-    def _on_search_changed(self, _sender, app_data) -> None:
-        self._refresh_character_list(str(app_data or ""))
-
     def _on_refresh_clicked(self) -> None:
-        query = str(dpg.get_value(self.search_tag) or "")
         try:
             self.service.load_index(force_rebuild=False)
         except Exception as exc:
             self._set_status(f"Refresh failed: {exc}")
             return
-        self._refresh_character_list(query)
+        self._refresh_character_list("")
 
     def _on_rebuild_clicked(self) -> None:
-        query = str(dpg.get_value(self.search_tag) or "")
         try:
             self._set_status("Rebuilding CRE index...")
             self.service.load_index(force_rebuild=True)
         except Exception as exc:
             self._set_status(f"Rebuild failed: {exc}")
             return
-        self._refresh_character_list(query)
+        self._refresh_character_list("")
 
     def _on_layout_changed(self, _sender, app_data) -> None:
         _layout = str(app_data or "Table")
@@ -238,37 +217,19 @@ class CharacterEditorPanel:
             self._set_status(f"Character list failed: {exc}")
             self._character_rows = []
 
-        dpg.delete_item(self.character_table_tag, children_only=True, slot=1)
-        self._row_selectables = []
+        self._browser.populate_rows(self._character_rows)
         if not self._character_rows:
             self._set_status("No matching characters.")
             return
-        for idx, (resref, name) in enumerate(self._character_rows):
-            row_tag = self._tag(f"character_row_{idx}")
-            self._row_selectables.append(row_tag)
-            with dpg.table_row(parent=self.character_table_tag):
-                dpg.add_selectable(
-                    tag=row_tag,
-                    label=resref,
-                    span_columns=True,
-                    callback=self._on_character_selected,
-                    user_data=idx,
-                    height=22,
-                )
-                dpg.add_text(name)
+        self._set_status(f"{len(self._character_rows)} character(s) found.")
+        # Auto-select first row
+        self._browser.select_row(0)
+        self._on_character_selected(0)
 
-    def _on_character_selected(self, _sender, app_data, user_data) -> None:
-        if not bool(app_data):
-            return
-        try:
-            idx = int(user_data)
-        except Exception:
-            return
+    def _on_character_selected(self, idx: int) -> None:
         if idx < 0 or idx >= len(self._character_rows):
             return
-        for i, tag in enumerate(self._row_selectables):
-            if dpg.does_item_exist(tag):
-                dpg.set_value(tag, i == idx)
+        self._browser.select_row(idx)
         resref, _name = self._character_rows[idx]
         self.load_character(resref)
 
@@ -352,7 +313,7 @@ class CharacterEditorPanel:
         self._render_game_screen(vm)
 
     def _render_game_screen(self, vm: CharacterVM) -> None:
-        game_id = str(dpg.get_value(self.game_combo_tag) or "")
+        game_id = self._toolbar.get_game()
         layout = self._skin_assets.get_chu_layout(game_id)
         slot_items = {slot.slot_name: slot for slot in vm.inventory}
         self._screen_panel.render(layout, slot_items)
@@ -449,49 +410,18 @@ class CharacterEditorPanel:
         if not dpg.does_item_exist(self.root_tag):
             return
         
-        mouse_x, mouse_y = dpg.get_mouse_pos()
-        
-        # Get root position (absolute position in viewport)
-        root_pos = dpg.get_item_pos(self.root_tag)
-        body_pos = dpg.get_item_pos(self.body_tag)
-        
-        # Calculate absolute position of the divider
-        # body_tag is at (0, top_h) relative to root, and left_tag is at x=0 relative to body
-        root_x = root_pos[0]
-        body_x = body_pos[0]
-        
-        left_w = max(180, int(self._total_width * self._left_panel_width))
-        
-        # Absolute divider position (accounting for the border gap)
-        divider_x = root_x + body_x + left_w
-        divider_hit_zone = 10  # pixels on each side to detect drag
-        
-        # Check if mouse is near the divider
-        on_divider = abs(mouse_x - divider_x) < divider_hit_zone
-        
-        # Track mouse button state
+        mouse_x, _mouse_y = dpg.get_mouse_pos()
         is_button_down = dpg.is_mouse_button_down(dpg.mvMouseButton_Left)
         
-        if is_button_down:
-            if on_divider and not self._is_dragging_divider:
-                # Start dragging - record initial position
-                self._is_dragging_divider = True
-                self._last_mouse_x = mouse_x
-            elif self._is_dragging_divider and self._last_mouse_x != 0:
-                # Continue dragging - calculate delta
-                delta = mouse_x - self._last_mouse_x
-                if delta != 0:
-                    new_left_w = max(180, left_w + delta)
-                    new_right_w_min = 260
-                    # Check if this resize is valid
-                    if new_left_w + new_right_w_min + 12 <= self._total_width:
-                        # Convert back to percentage and clamp
-                        new_percentage = new_left_w / self._total_width
-                        self._left_panel_width = max(0.2, min(0.7, new_percentage))
-                        # Update positions
-                        self.set_size(self._total_width, self._total_height)
-                    self._last_mouse_x = mouse_x
-        else:
-            # Mouse button released - stop dragging
-            self._is_dragging_divider = False
-            self._last_mouse_x = 0
+        # Let the browser pane handle its divider drag
+        self._browser.handle_divider_drag(mouse_x, is_button_down)
+        
+        # Update right panel sizing based on browser's new width
+        if self._total_width > 0 and self._total_height > 0:
+            left_w = self._browser.get_panel_width()
+            right_w = max(260, self._total_width - left_w - 12)
+            body_h = max(0, self._total_height - 34 - 6)
+            dpg.configure_item(self.right_tag, width=right_w, height=body_h)
+            if dpg.does_item_exist(self.screen_tab_tag):
+                dpg.configure_item(self.screen_tab_tag, width=right_w - 8, height=body_h - 28)
+            self._screen_panel.set_size(right_w - 8, body_h - 28)

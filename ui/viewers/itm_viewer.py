@@ -1,3 +1,5 @@
+"""ITM (item) browser and viewer."""
+
 from __future__ import annotations
 
 import json
@@ -8,6 +10,8 @@ import dearpygui.dearpygui as dpg
 
 from core.services.itm_catalog import ItmCatalog
 from core.util.resref import ResRef
+from ui.viewers.editor_toolbar import EditorToolbar
+from ui.viewers.resource_browser_pane import ResourceBrowserPane
 
 
 class ItmViewerPanel:
@@ -18,14 +22,8 @@ class ItmViewerPanel:
         self.tag_prefix = tag_prefix
 
         self.root_tag = self._tag("root")
-        self.top_bar_tag = self._tag("top")
         self.body_tag = self._tag("body")
-        self.left_tag = self._tag("left")
         self.right_tag = self._tag("right")
-        self.status_tag = self._tag("status")
-        self.game_combo_tag = self._tag("game_combo")
-        self.search_tag = self._tag("search")
-        self.table_tag = self._tag("table")
         self.structured_tag = self._tag("structured")
         self.structured_table_tag = self._tag("structured_table")
         self.raw_tree_tag = self._tag("raw_tree")
@@ -42,18 +40,12 @@ class ItmViewerPanel:
         self._results: list[Any] = []
         self._game_ids: list[str] = []
         self._selected_game_id: str | None = None
-        self._selected_index: int | None = None
-        self._row_selectables: list[str] = []
-        self._row_selectable_height = 26
         self._dynamic_texture_tags: list[str] = []
         self._texture_counter = 0
         
-        # Panel resizing state
+        # Panel sizing state
         self._total_width: int = 0
         self._total_height: int = 0
-        self._left_panel_width: float = 0.28  # Default 28% width (thinner)
-        self._is_dragging_divider: bool = False
-        self._last_mouse_x: int = 0
 
         with dpg.theme(tag=self.row_selectable_theme_tag):
             with dpg.theme_component(dpg.mvSelectable):
@@ -75,43 +67,24 @@ class ItmViewerPanel:
             no_scrollbar=True,
             no_scroll_with_mouse=True,
         ):
-            with dpg.group(tag=self.top_bar_tag, horizontal=True):
-                dpg.add_text("Game:")
-                dpg.add_combo(
-                    tag=self.game_combo_tag,
-                    width=160,
-                    callback=self._on_game_selected
-                )
-                dpg.add_button(label="Refresh", callback=self._on_refresh_clicked)
-                dpg.add_button(label="Rebuild", callback=self._on_rebuild_clicked)
-                dpg.add_spacer(width=14)
-                dpg.add_text("Search:")
-                dpg.add_input_text(
-                    tag=self.search_tag,
-                    width=380,
-                    hint="ResRef, display name, or any ITM field...",
-                    callback=self._on_search_changed,
-                )
-                dpg.add_spacer(width=14)
-                dpg.add_text("", tag=self.status_tag)
+            # Create toolbar
+            self._toolbar = EditorToolbar(
+                parent_tag=self.root_tag,
+                games=[],
+                on_game_selected=self._on_game_selected,
+                on_refresh=self._on_refresh_clicked,
+                on_rebuild=self._on_rebuild_clicked,
+                tag_prefix=self._tag("toolbar"),
+            )
 
             with dpg.group(tag=self.body_tag, horizontal=True):
-                with dpg.child_window(tag=self.left_tag, border=True):
-                    with dpg.table(
-                        tag=self.table_tag,
-                        header_row=True,
-                        policy=dpg.mvTable_SizingStretchProp,
-                        row_background=True,
-                        resizable=True,
-                        sortable=False,
-                        borders_innerV=True,
-                        borders_outerV=True,
-                        borders_innerH=True,
-                        borders_outerH=True,
-                    ):
-                        dpg.add_table_column(label="ResRef")
-                        dpg.add_table_column(label="Name")
-                        dpg.add_table_column(label="Type")
+                # Create the browser pane with 3 columns for ITM
+                self._browser = ResourceBrowserPane(
+                    parent_tag=self.body_tag,
+                    columns=["ResRef", "Name", "Type"],
+                    on_row_selected=self._on_row_selected,
+                    tag_prefix=self._tag("browser"),
+                )
 
                 with dpg.child_window(tag=self.right_tag, border=True):
                     with dpg.tab_bar():
@@ -133,35 +106,36 @@ class ItmViewerPanel:
         dpg.configure_item(self.root_tag, width=max(0, width), height=max(0, height))
         top_h = 34
         body_h = max(0, height - top_h - 6)
-        left_w = max(180, int(width * self._left_panel_width))
+        
+        # Update browser and right panel sizing
+        self._browser.set_size(width, body_h)
+        left_w = self._browser.get_panel_width()
         right_w = max(260, width - left_w - 12)
 
-        dpg.configure_item(self.top_bar_tag, pos=[0, 0])
         dpg.configure_item(self.body_tag, pos=[0, top_h])
-        dpg.configure_item(self.left_tag, width=left_w, height=body_h)
         dpg.configure_item(self.right_tag, width=right_w, height=body_h)
 
     def refresh_results(self) -> None:
-        query = dpg.get_value(self.search_tag) if dpg.does_item_exist(self.search_tag) else ""
-        self._search(query)
+        """Refresh the results list with current search."""
+        self._search("")
 
     def _tag(self, suffix: str) -> str:
         return f"{self.tag_prefix}_{suffix}"
 
     def _set_status(self, text: str) -> None:
-        dpg.set_value(self.status_tag, text)
+        self._toolbar.set_status(text)
 
     def _load_games(self) -> None:
         games = self.catalog.list_games()
         self._game_ids = [g.game_id for g in games]
-        dpg.configure_item(self.game_combo_tag, items=self._game_ids)
+        self._toolbar.set_games(self._game_ids)
 
         if not self._game_ids:
             self._set_status("No game installations detected.")
             return
 
         self._selected_game_id = self._game_ids[0]
-        dpg.set_value(self.game_combo_tag, self._selected_game_id)
+        self._toolbar.set_game(self._selected_game_id)
         self._activate_selected_game(force_rebuild=False)
 
     def _activate_selected_game(self, *, force_rebuild: bool) -> None:
@@ -172,7 +146,7 @@ class ItmViewerPanel:
             self.catalog.select_game(self._selected_game_id)
             self.catalog.load_index(force_rebuild=force_rebuild)
             self._set_status(f"Loaded ITM index for {self._selected_game_id}.")
-            self._search(dpg.get_value(self.search_tag) if dpg.does_item_exist(self.search_tag) else "")
+            self._search("")
         except Exception as exc:
             self._set_status(f"Failed to load index: {exc}")
             self._clear_rows()
@@ -187,41 +161,92 @@ class ItmViewerPanel:
             self._render_error_details(str(exc))
             return
 
-        self._clear_rows()
-        self._row_selectables = []
-        self._selected_index = None
+        # Populate browser with results
+        browser_data = [
+            (
+                str(entry.resref),
+                entry.display_name or "",
+                entry.res_type.name if hasattr(entry.res_type, "name") else str(entry.res_type),
+            )
+            for entry in self._results
+        ]
+        self._browser.populate_rows(browser_data)
+
         if not self._results:
             self._set_status("No matching ITM resources.")
             self._render_empty_details()
             return
 
         self._set_status(f"{len(self._results)} item(s) found.")
-        for idx, entry in enumerate(self._results):
-            row_tag = self._tag(f"row_{idx}")
-            self._row_selectables.append(row_tag)
-
-            with dpg.table_row(parent=self.table_tag):
-                dpg.add_selectable(
-                    tag=row_tag,
-                    label=str(entry.resref),
-                    callback=self._on_row_selected,
-                    user_data=idx,
-                    span_columns=True,
-                    height=self._row_selectable_height,
-                )
-                dpg.bind_item_theme(row_tag, self.row_selectable_theme_tag)
-                tooltip_text = self._entry_tooltip_text(entry)
-                if tooltip_text:
-                    with dpg.tooltip(parent=row_tag):
-                        dpg.bind_item_theme(dpg.last_item(), self.tooltip_theme_tag)
-                        dpg.add_text(tooltip_text, wrap=520)
-                dpg.add_text(entry.display_name or "")
-                dpg.add_text(entry.res_type.name if hasattr(entry.res_type, "name") else str(entry.res_type))
-
+        # Auto-select first item
+        self._browser.select_row(0)
         self._select_entry(0)
 
     def _clear_rows(self) -> None:
-        dpg.delete_item(self.table_tag, children_only=True, slot=1)
+        self._browser.clear_rows()
+
+    def _on_row_selected(self, idx: int) -> None:
+        self._select_entry(idx)
+
+    def _load_games(self) -> None:
+        games = self.catalog.list_games()
+        self._game_ids = [g.game_id for g in games]
+        self._toolbar.set_games(self._game_ids)
+
+        if not self._game_ids:
+            self._set_status("No game installations detected.")
+            return
+
+        self._selected_game_id = self._game_ids[0]
+        self._toolbar.set_game(self._selected_game_id)
+        self._activate_selected_game(force_rebuild=False)
+
+    def _activate_selected_game(self, *, force_rebuild: bool) -> None:
+        if not self._selected_game_id:
+            return
+        try:
+            self._set_status("Rebuilding index...")
+            self.catalog.select_game(self._selected_game_id)
+            self.catalog.load_index(force_rebuild=force_rebuild)
+            self._set_status(f"Loaded ITM index for {self._selected_game_id}.")
+            self._search("")
+        except Exception as exc:
+            self._set_status(f"Failed to load index: {exc}")
+            self._clear_rows()
+            self._render_error_details(str(exc))
+
+    def _search(self, query: str) -> None:
+        try:
+            self._results = self.catalog.search_items(query)
+        except Exception as exc:
+            self._set_status(f"Search failed: {exc}")
+            self._clear_rows()
+            self._render_error_details(str(exc))
+            return
+
+        # Populate browser with results
+        browser_data = [
+            (
+                str(entry.resref),
+                entry.display_name or "",
+                entry.res_type.name if hasattr(entry.res_type, "name") else str(entry.res_type),
+            )
+            for entry in self._results
+        ]
+        self._browser.populate_rows(browser_data)
+
+        if not self._results:
+            self._set_status("No matching ITM resources.")
+            self._render_empty_details()
+            return
+
+        self._set_status(f"{len(self._results)} item(s) found.")
+        # Auto-select first item
+        self._browser.select_row(0)
+        self._select_entry(0)
+
+    def _clear_rows(self) -> None:
+        self._browser.clear_rows()
 
     def _on_row_selected(self, _sender, app_data, user_data) -> None:
         if not bool(app_data):
@@ -235,7 +260,6 @@ class ItmViewerPanel:
     def _select_entry(self, idx: int) -> None:
         if idx < 0 or idx >= len(self._results):
             return
-        self._set_selected_index(idx)
         entry = self._results[idx]
         try:
             payload = self.catalog.load_item(entry)
@@ -248,15 +272,8 @@ class ItmViewerPanel:
         self._render_structured(payload, icon, title)
         self._render_raw(payload)
 
-    def _set_selected_index(self, idx: int) -> None:
-        self._selected_index = idx
-        for row_idx, tag in enumerate(self._row_selectables):
-            selected = row_idx == idx
-            if dpg.does_item_exist(tag):
-                dpg.set_value(tag, selected)
-
-    def _on_game_selected(self, _sender, app_data) -> None:
-        self._selected_game_id = str(app_data) if app_data else None
+    def _on_game_selected(self, game_id: str) -> None:
+        self._selected_game_id = game_id
         self._activate_selected_game(force_rebuild=False)
 
     def _on_refresh_clicked(self) -> None:
@@ -264,9 +281,6 @@ class ItmViewerPanel:
 
     def _on_rebuild_clicked(self) -> None:
         self._activate_selected_game(force_rebuild=True)
-
-    def _on_search_changed(self, _sender, app_data) -> None:
-        self._search(str(app_data or ""))
 
     def _render_empty_details(self) -> None:
         dpg.delete_item(self.structured_tag, children_only=True)
@@ -748,49 +762,15 @@ class ItmViewerPanel:
         if not dpg.does_item_exist(self.root_tag):
             return
         
-        mouse_x, mouse_y = dpg.get_mouse_pos()
-        
-        # Get root position (absolute position in viewport)
-        root_pos = dpg.get_item_pos(self.root_tag)
-        body_pos = dpg.get_item_pos(self.body_tag)
-        
-        # Calculate absolute position of the divider
-        # body_tag is at (0, top_h) relative to root, and left_tag is at x=0 relative to body
-        root_x = root_pos[0]
-        body_x = body_pos[0]
-        
-        left_w = max(180, int(self._total_width * self._left_panel_width))
-        
-        # Absolute divider position (accounting for the border gap)
-        divider_x = root_x + body_x + left_w
-        divider_hit_zone = 10  # pixels on each side to detect drag
-        
-        # Check if mouse is near the divider
-        on_divider = abs(mouse_x - divider_x) < divider_hit_zone
-        
-        # Track mouse button state
+        mouse_x, _mouse_y = dpg.get_mouse_pos()
         is_button_down = dpg.is_mouse_button_down(dpg.mvMouseButton_Left)
         
-        if is_button_down:
-            if on_divider and not self._is_dragging_divider:
-                # Start dragging - record initial position
-                self._is_dragging_divider = True
-                self._last_mouse_x = mouse_x
-            elif self._is_dragging_divider and self._last_mouse_x != 0:
-                # Continue dragging - calculate delta
-                delta = mouse_x - self._last_mouse_x
-                if delta != 0:
-                    new_left_w = max(180, left_w + delta)
-                    new_right_w_min = 260
-                    # Check if this resize is valid
-                    if new_left_w + new_right_w_min + 12 <= self._total_width:
-                        # Convert back to percentage and clamp
-                        new_percentage = new_left_w / self._total_width
-                        self._left_panel_width = max(0.2, min(0.7, new_percentage))
-                        # Update positions
-                        self.set_size(self._total_width, self._total_height)
-                    self._last_mouse_x = mouse_x
-        else:
-            # Mouse button released - stop dragging
-            self._is_dragging_divider = False
-            self._last_mouse_x = 0
+        # Let the browser pane handle its divider drag
+        self._browser.handle_divider_drag(mouse_x, is_button_down)
+        
+        # Update right panel sizing based on browser's new width
+        if self._total_width > 0 and self._total_height > 0:
+            left_w = self._browser.get_panel_width()
+            right_w = max(260, self._total_width - left_w - 12)
+            body_h = max(0, self._total_height - 34 - 6)
+            dpg.configure_item(self.right_tag, width=right_w, height=body_h)

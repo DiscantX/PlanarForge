@@ -228,6 +228,21 @@ def show_character_editor() -> None:
         dpg.show_item(character.root_tag)
 
 
+def on_global_search_changed(_sender, app_data) -> None:
+    """Handle global search bar input - route to active editor."""
+    search_query = str(app_data or "")
+    active_view = ui_state.get("active_view")
+    
+    if active_view == "itm":
+        viewer = ui_state.get("itm_viewer")
+        if isinstance(viewer, ItmViewerPanel):
+            viewer._search(search_query)
+    elif active_view == "character":
+        character = ui_state.get("character_editor")
+        if isinstance(character, CharacterEditorPanel):
+            character._refresh_character_list(search_query)
+
+
 dpg.create_context()
 with dpg.texture_registry(tag="window_icon_textures"):
     _make_icon_texture("icon_min_tex", "min")
@@ -282,8 +297,9 @@ with dpg.window(
                 dpg.add_spacer(width=16)
             dpg.add_input_text(
                 tag="title_search",
-                hint="Search files, resources, commands...",
+                hint="Search character by resref or name (Character view) / Search items (Item view)...",
                 width=420,
+                callback=on_global_search_changed,
             )
 
         with dpg.group(tag="title_controls_group", horizontal=True, pos=[TITLEBAR_PAD_X, TITLEBAR_PAD_Y]):
