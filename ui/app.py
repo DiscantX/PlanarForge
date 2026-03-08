@@ -277,7 +277,7 @@ with dpg.window(
                 dpg.add_spacer(width=10)
                 dpg.add_button(tag="menu_file_btn", label="File")
                 dpg.add_button(tag="menu_edit_btn", label="Edit")
-                dpg.add_button(tag="menu_view_btn", label="View", callback=show_itm_viewer)
+                dpg.add_button(tag="menu_view_btn", label="Item", callback=show_itm_viewer)
                 dpg.add_button(tag="menu_character_btn", label="Character", callback=show_character_editor)
                 dpg.add_spacer(width=16)
             dpg.add_input_text(

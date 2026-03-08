@@ -72,7 +72,7 @@ class CharacterEditorPanel:
                 dpg.add_combo(
                     tag=self.layout_combo_tag,
                     items=["Table", "Game Skin"],
-                    default_value="Table",
+                    default_value="Game Skin",
                     width=120,
                     callback=self._on_layout_changed,
                 )
