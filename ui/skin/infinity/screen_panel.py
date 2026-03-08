@@ -152,6 +152,10 @@ class InfinityScreenPanel:
 
     def _teardown(self) -> None:
         """Delete any previously created drawlist and overlay."""
+        # Delete any children of the overlay first to ensure themes/tooltips are cleaned up
+        if dpg.does_item_exist(self._overlay_tag):
+            dpg.delete_item(self._overlay_tag, children_only=True)
+        
         for tag in (self._drawlist_tag, self._overlay_tag):
             if dpg.does_item_exist(tag):
                 dpg.delete_item(tag)
@@ -161,8 +165,6 @@ class InfinityScreenPanel:
         layout: ChuLayout,
         slot_items: dict[str, InventorySlotVM],
     ) -> None:
-        self._teardown()
-
         w = self._panel_width
         h = self._panel_height
 
@@ -193,6 +195,15 @@ class InfinityScreenPanel:
                 window_height=int(lh * scale),
                 slots=scaled_slots,
             )
+
+        # Store old tags for deletion after new ones are built
+        old_dl = self._drawlist_tag
+        old_overlay = self._overlay_tag
+
+        # Generate new unique tags to avoid visual gaps
+        self._counter += 1
+        self._drawlist_tag = f"{self._tag_prefix}__dl_{self._counter}"
+        self._overlay_tag = f"{self._tag_prefix}__overlay_{self._counter}"
 
         # Resize the root child_window to match the panel
         dpg.configure_item(self._root_tag, width=w, height=h)
@@ -226,6 +237,13 @@ class InfinityScreenPanel:
 
         # --- Overlay: invisible selectables for hover/click ---
         self._build_overlay(layout, slot_items, w, h)
+
+        # Now that new drawlist/overlay are fully built, delete the old ones
+        if dpg.does_item_exist(old_overlay):
+            dpg.delete_item(old_overlay, children_only=True)
+        for tag in (old_dl, old_overlay):
+            if dpg.does_item_exist(tag):
+                dpg.delete_item(tag)
 
     def _draw_fallback_background(self, dl: int | str, w: int, h: int) -> None:
         """Draw a dark parchment-coloured fill when no MOS is available."""
