@@ -10,14 +10,13 @@ import dearpygui.dearpygui as dpg
 
 from core.services.itm_catalog import ItmCatalog
 from core.util.resref import ResRef
-from ui.viewers.editor_toolbar import EditorToolbar
-from ui.viewers.resource_browser_pane import ResourceBrowserPane
+from ui.core import EditorToolbar, ResourceBrowserPane
 
 
-class ItmViewerPanel:
+class ItemEditorPanel:
     """Read-only ITM browser panel with list/search and structured/raw details."""
 
-    def __init__(self, parent_tag: str, catalog: ItmCatalog, *, tag_prefix: str = "itm_viewer") -> None:
+    def __init__(self, parent_tag: str, catalog: ItmCatalog, *, tag_prefix: str = "item_editor") -> None:
         self.catalog = catalog
         self.tag_prefix = tag_prefix
 
@@ -186,75 +185,6 @@ class ItmViewerPanel:
         self._browser.clear_rows()
 
     def _on_row_selected(self, idx: int) -> None:
-        self._select_entry(idx)
-
-    def _load_games(self) -> None:
-        games = self.catalog.list_games()
-        self._game_ids = [g.game_id for g in games]
-        self._toolbar.set_games(self._game_ids)
-
-        if not self._game_ids:
-            self._set_status("No game installations detected.")
-            return
-
-        self._selected_game_id = self._game_ids[0]
-        self._toolbar.set_game(self._selected_game_id)
-        self._activate_selected_game(force_rebuild=False)
-
-    def _activate_selected_game(self, *, force_rebuild: bool) -> None:
-        if not self._selected_game_id:
-            return
-        try:
-            self._set_status("Rebuilding index...")
-            self.catalog.select_game(self._selected_game_id)
-            self.catalog.load_index(force_rebuild=force_rebuild)
-            self._set_status(f"Loaded ITM index for {self._selected_game_id}.")
-            self._search("")
-        except Exception as exc:
-            self._set_status(f"Failed to load index: {exc}")
-            self._clear_rows()
-            self._render_error_details(str(exc))
-
-    def _search(self, query: str) -> None:
-        try:
-            self._results = self.catalog.search_items(query)
-        except Exception as exc:
-            self._set_status(f"Search failed: {exc}")
-            self._clear_rows()
-            self._render_error_details(str(exc))
-            return
-
-        # Populate browser with results
-        browser_data = [
-            (
-                str(entry.resref),
-                entry.display_name or "",
-                entry.res_type.name if hasattr(entry.res_type, "name") else str(entry.res_type),
-            )
-            for entry in self._results
-        ]
-        self._browser.populate_rows(browser_data)
-
-        if not self._results:
-            self._set_status("No matching ITM resources.")
-            self._render_empty_details()
-            return
-
-        self._set_status(f"{len(self._results)} item(s) found.")
-        # Auto-select first item
-        self._browser.select_row(0)
-        self._select_entry(0)
-
-    def _clear_rows(self) -> None:
-        self._browser.clear_rows()
-
-    def _on_row_selected(self, _sender, app_data, user_data) -> None:
-        if not bool(app_data):
-            return
-        try:
-            idx = int(user_data)
-        except Exception:
-            return
         self._select_entry(idx)
 
     def _select_entry(self, idx: int) -> None:
@@ -556,7 +486,7 @@ class ItmViewerPanel:
             for field_path, value_text, resolved_strref, bam_icon in rows:
                 row_height = 24 if bam_icon is not None else 0
                 with dpg.table_row(parent=table_tag, height=row_height):
-                    dpg.add_text(ItmViewerPanel._humanize_field_path(field_path, strip_prefix=strip_prefix))
+                    dpg.add_text(ItemEditorPanel._humanize_field_path(field_path, strip_prefix=strip_prefix))
                     dpg.add_text(value_text)
                     with dpg.group(horizontal=True):
                         if bam_icon is not None:

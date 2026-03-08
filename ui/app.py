@@ -4,9 +4,8 @@ import dearpygui.dearpygui as dpg
 
 from core.services.character_service import CharacterService
 from core.services.itm_catalog import ItmCatalog
-from ui.custom_chrome import CustomTitleBarController
-from ui.viewers.character_editor import CharacterEditorPanel
-from ui.viewers.itm_viewer import ItmViewerPanel
+from ui.core import CustomTitleBarController
+from ui.editors import CharacterEditorPanel, ItemEditorPanel
 
 VIEWPORT_WIDTH = 1100
 VIEWPORT_HEIGHT = 700
@@ -183,7 +182,7 @@ def on_viewport_resize(_sender, _app_data) -> None:
     dpg.configure_item("title_search", width=int(available_search_w))
 
     viewer = ui_state.get("itm_viewer")
-    if isinstance(viewer, ItmViewerPanel):
+    if isinstance(viewer, ItemEditorPanel):
         viewer.set_size(width=width, height=max(0, height - TITLEBAR_HEIGHT - CONTENT_GAP))
     character = ui_state.get("character_editor")
     if isinstance(character, CharacterEditorPanel):
@@ -195,7 +194,7 @@ def show_home_view() -> None:
     if dpg.does_item_exist("home_view"):
         dpg.show_item("home_view")
     viewer = ui_state.get("itm_viewer")
-    if isinstance(viewer, ItmViewerPanel):
+    if isinstance(viewer, ItemEditorPanel):
         dpg.hide_item(viewer.root_tag)
     character = ui_state.get("character_editor")
     if isinstance(character, CharacterEditorPanel):
@@ -211,7 +210,7 @@ def show_itm_viewer() -> None:
         dpg.hide_item(character.root_tag)
 
     viewer = ui_state.get("itm_viewer")
-    if isinstance(viewer, ItmViewerPanel):
+    if isinstance(viewer, ItemEditorPanel):
         dpg.show_item(viewer.root_tag)
         viewer.refresh_results()
 
@@ -221,7 +220,7 @@ def show_character_editor() -> None:
     if dpg.does_item_exist("home_view"):
         dpg.hide_item("home_view")
     viewer = ui_state.get("itm_viewer")
-    if isinstance(viewer, ItmViewerPanel):
+    if isinstance(viewer, ItemEditorPanel):
         dpg.hide_item(viewer.root_tag)
     character = ui_state.get("character_editor")
     if isinstance(character, CharacterEditorPanel):
@@ -235,7 +234,7 @@ def on_global_search_changed(_sender, app_data) -> None:
     
     if active_view == "itm":
         viewer = ui_state.get("itm_viewer")
-        if isinstance(viewer, ItmViewerPanel):
+        if isinstance(viewer, ItemEditorPanel):
             viewer._search(search_query)
     elif active_view == "character":
         character = ui_state.get("character_editor")
@@ -326,7 +325,7 @@ on_viewport_resize(None, None)
 _sync_max_button()
 
 itm_catalog = ItmCatalog()
-itm_viewer = ItmViewerPanel(parent_tag="content", catalog=itm_catalog, tag_prefix="itm")
+itm_viewer = ItemEditorPanel(parent_tag="content", catalog=itm_catalog, tag_prefix="item_editor")
 ui_state["itm_viewer"] = itm_viewer
 dpg.hide_item(itm_viewer.root_tag)
 
@@ -349,7 +348,7 @@ chrome = CustomTitleBarController(
 def _on_mouse_down(sender, app_data):
     """Trigger mouse event handling when mouse button is down."""
     viewer = ui_state.get("itm_viewer")
-    if isinstance(viewer, ItmViewerPanel) and dpg.does_item_exist(viewer.root_tag):
+    if isinstance(viewer, ItemEditorPanel) and dpg.does_item_exist(viewer.root_tag):
         try:
             viewer.handle_mouse_event()
         except Exception:

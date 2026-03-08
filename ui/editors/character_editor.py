@@ -8,8 +8,7 @@ from core.services.character_service import CharacterService
 from core.viewmodels.character_vm import CharacterVM
 from ui.skin.infinity import InfinitySkinAssets, draw_inventory_slot_card
 from ui.skin.infinity.screen_panel import InfinityScreenPanel
-from ui.viewers.editor_toolbar import EditorToolbar
-from ui.viewers.resource_browser_pane import ResourceBrowserPane
+from ui.core import EditorToolbar, ResourceBrowserPane
 
 
 class CharacterEditorPanel:
@@ -50,7 +49,7 @@ class CharacterEditorPanel:
             bam_loader=self.service.load_bam_by_resref,
             chu_loader=self.service.load_chu_by_resref,
         )
-        manifest_path = Path("ui/skin/infinity/manifest_default.json")
+        manifest_path = Path("ui/skin/infinity/data/manifest_default.json")
         self._skin_assets.load_manifest_file(manifest_path)
 
         with dpg.child_window(

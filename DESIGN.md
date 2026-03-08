@@ -778,3 +778,161 @@ PVRTC decoder handles:
 Result: INVENTOR and other MOS V2 backgrounds now display as actual textures
 instead of generating errors or placeholders.
 
+---
+
+## 2026-03 — UI Architecture Restructuring: Layered Composition with Semantic Naming
+
+The original UI implementation had duplicate toolbars and browser panes in each editor.
+A restructuring established a semantic, layered architecture that scales to new editor
+types without code repetition.
+
+**Architecture Layers:**
+
+```
+ui/
+├── core/                        # Reusable, generic UI components
+│   ├── __init__.py              # Exports core components
+│   ├── titlebar.py              # CustomTitleBarController — frameless window chrome
+│   ├── editor_toolbar.py        # EditorToolbar — game selector, status, buttons
+│   └── resource_browser_pane.py # ResourceBrowserPane — searchable left panel
+│
+├── editors/                     # Concrete editor implementations
+│   ├── __init__.py              # Exports CharacterEditorPanel, ItemEditorPanel
+│   ├── character_editor.py      # CharacterEditorPanel — CRE viewer/editor
+│   └── item_editor.py           # ItemEditorPanel — ITM viewer (renamed from ItmViewerPanel)
+│
+├── skin/                        # Visual theme and domain-specific UI
+│   ├── infinity/                # Infinity Engine skin layer
+│   │   ├── __init__.py
+│   │   ├── assets.py             # InfinitySkinAssets — icon loader, CHU layout
+│   │   ├── manifest_default.json # Configuration (moved to data/ subdirectory)
+│   │   ├── screen_panel.py       # InfinityScreenPanel — game screen renderer
+│   │   ├── components/           # Visual component definitions
+│   │   │   └── __init__.py
+│   │   └── data/                 # Configuration and manifest files
+│   │       ├── __init__.py
+│   │       └── manifest_default.json
+│   │
+│   └── <other_skins>/           # Additional skins (deferred)
+│
+└── app.py                       # Application root, viewport, routing
+```
+
+**Key Design Principles:**
+
+1. **Semantic Naming (not structural):**
+   - `EditorToolbar` — what the component IS (a toolbar for editors)
+   - `ResourceBrowserPane` — what it IS (a pane that browses resources)
+   - `CharacterEditorPanel` — what it IS (an editor panel for characters)
+   - NOT `ToolbarContainer`, `LeftPanel`, `Screen1`, `Panel2` (describes container/position)
+
+2. **Component Composition:**
+   - Each editor owns an `EditorToolbar` and `ResourceBrowserPane` (composition, not inheritance)
+   - Editors are stateful; core components are stateless containers
+   - Customization via callbacks (`extra_controls`, `on_row_selected`, `on_game_selected`)
+
+3. **Separation of Concerns:**
+   - **core/** — generic, editor-agnostic UI utilities (toolbars, panels, window control)
+   - **editors/** — concrete implementations (character editor, item editor)
+   - **skin/** — Infinity-specific visuals (CHU layouts, pixel art rendering, colors)
+
+4. **Global Search Routing:**
+   - All editors use a global search bar in `app.py`
+   - `on_global_search_changed()` routes the query to the active editor's `_search()` or `_refresh_character_list()`
+   - Each editor implements its own search semantics (no assumed interface)
+
+5. **DPG Tag-Based Item Management:**
+   - Every DPG item gets a prefixed tag: `"{tag_prefix}_{suffix}"`
+   - Editors pass `tag_prefix` to their components, which extend it: `f"{tag_prefix}_toolbar_*"`
+   - This prevents tag collisions when multiple editors are instantiated
+   - Panel resizing and divider dragging are owned by `ResourceBrowserPane`
+
+6. **Configuration in data/ Subdirectory:**
+   - Non-code data files (JSON, manifests) belong in `skin/infinity/data/`
+   - `manifest_default.json` moved from root infinity/ to data/manifest_default.json
+   - Keeps code and configuration clearly separated
+
+**Module Responsibilities:**
+
+- **CustomTitleBarController** (`ui/core/titlebar.py`)
+  - Manages frameless window chrome (Windows WM_NCHITTEST, WM_NCLBUTTONDBLCLK)
+  - Handles maximize/restore/minimize button callbacks
+  - Zero knowledge of editor content
+
+- **EditorToolbar** (`ui/core/editor_toolbar.py`)
+  - Game selection combo (dropdown of installed games)
+  - Refresh / Rebuild buttons (index rebuild)
+  - Status display line
+  - Optional extra controls (via `extra_controls` callback)
+  - Fixed height (34px); width fills available space
+  - No editor-specific logic
+
+- **ResourceBrowserPane** (`ui/core/resource_browser_pane.py`)
+  - Table with configurable columns (["ResRef", "Name"] for characters; ["ResRef", "Name", "Type"] for items)
+  - Left panel with divider-drag resizing (30% default, 180px minimum, 10px hit zone)
+  - Row selection callback (`on_row_selected(idx)`)
+  - Methods: `populate_rows()`, `select_row()`, `set_size()`, `get_panel_width()`, `handle_divider_drag()`
+  - No knowledge of resource parsing or semantics
+
+- **CharacterEditorPanel** (`ui/editors/character_editor.py`)
+  - Uses `EditorToolbar` + `ResourceBrowserPane` for layout
+  - Uses `InfinitySkinAssets` + `InfinityScreenPanel` for rendering
+  - Game screen tab with viewport animation
+  - Inventory display (toggle between table and game skin layouts)
+  - Call `_load_games()` AFTER `_screen_panel` initialization (prevents missing attribute errors)
+
+- **ItemEditorPanel** (`ui/editors/item_editor.py`, renamed from ItmViewerPanel)
+  - Uses `EditorToolbar` + `ResourceBrowserPane` for layout
+  - Structured view: header, extended headers, feature blocks
+  - Raw JSON tree and plain JSON text views
+  - Dynamic texture management for icons and BAM previews
+  - Title font loading (Segoe UI Bold or Arial Bold fallback)
+
+- **InfinitySkinAssets** (`ui/skin/infinity/assets.py`)
+  - Loads icons, MOSes, BAM sequences, CHU layouts
+  - Manages texture caching and CHU→screen_panel coordination
+  - Configuration via `manifest_default.json` (empty defaults; allows custom slot frame icons)
+
+- **app.py** (application root)
+  - Creates viewport, title bar, and root window
+  - Instantiates both editors (both are always running; hidden when inactive)
+  - Routes global search bar input to active editor
+  - Manages resize events and panel sizing
+  - Mouse event handlers for divider dragging
+
+**Import Dependencies in Editors:**
+
+```python
+# OLD (before restructuring)
+from ui.viewers.editor_toolbar import EditorToolbar
+from ui.viewers.resource_browser_pane import ResourceBrowserPane
+
+# NEW (after restructuring)
+from ui.core import EditorToolbar, ResourceBrowserPane
+```
+
+**Adding New Editor Types:**
+
+1. Create `ui/editors/my_editor.py` with class `MyEditorPanel`
+2. Implement `__init__`, `set_size()`, `handle_mouse_event()`, `_search(query)`
+3. Compose `EditorToolbar` and `ResourceBrowserPane` (or only as needed)
+4. Optionally subclass from Infinity skin (`InfinitySkinAssets`, `InfinityScreenPanel`)
+5. Export from `ui/editors/__init__.py`
+6. Instantiate in `ui/app.py` and add to `ui_state` dict
+7. Add routing case to `on_global_search_changed()`
+
+**Manifest Configuration:**
+
+`ui/skin/infinity/data/manifest_default.json` is an active configuration file, not a template.
+It is loaded and parsed at runtime by `InfinitySkinAssets.load_manifest_file()`.
+Current structure:
+```json
+{
+  "slot_frame_icon_resref": "",
+  "slot_frame_mos_resref": ""
+}
+```
+
+Users can override default slot frame graphics by populating these fields with custom ResRefs.
+The file is required and must exist; provide sensible defaults (empty strings = use engine defaults).
+
