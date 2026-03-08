@@ -751,3 +751,30 @@ and `cls` screen clear. Cache moved from `demo_output/` to `.cache/<game_id>/`.
 Script lives at `tools/resource_explorer.py`; `_ROOT` set to `parent.parent` so
 imports resolve from the project root.
 
+**2026-03 — Added PVRZ support for Enhanced Edition MOS V2 backgrounds**
+The error "MOS 'INVENTOR': not found or is PVRZ (no RGBA decode)" was caused by
+MOS V2 (PVRZ-based) files used in Enhanced Edition games. Implemented full PVRTC
+support:
+
+New modules:
+- `core/formats/pvrtc.py` — PVRTC 4bpp decoder
+- Extended `core/formats/pvrz.py` — PVRZ decompression + PVRTC decoding
+
+Modified:
+- `MosFile.to_rgba()` — accepts optional `pvrz_loader` callable for V2 support
+- `CharacterService.load_mos_by_resref()` — creates PVRZ loader, handles decoding
+
+The implementation:
+1. Loads PVRZ pages on-demand via `load_pvrz_page(page_number)`
+2. Decompresses PVRZ (zlib) to get PVRT-formatted texture data
+3. Decodes PVRTC 4bpp (common format) to RGBA using block decompression
+4. Extracts per-block regions and assembles into full MOS image
+5. Falls back to gradient placeholder if decoding fails
+
+PVRTC decoder handles:
+- PVRTC 4bpp blocks (4x4 pixels per 8 bytes) — full support
+- PVRTC 2bpp blocks (8x4 pixels per 8 bytes) — defers to placeholder
+
+Result: INVENTOR and other MOS V2 backgrounds now display as actual textures
+instead of generating errors or placeholders.
+

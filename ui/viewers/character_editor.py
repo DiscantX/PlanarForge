@@ -7,6 +7,7 @@ import dearpygui.dearpygui as dpg
 from core.services.character_service import CharacterService
 from core.viewmodels.character_vm import CharacterVM
 from ui.skin.infinity import InfinitySkinAssets, draw_inventory_slot_card
+from ui.skin.infinity.screen_panel import InfinityScreenPanel
 
 
 class CharacterEditorPanel:
@@ -33,6 +34,7 @@ class CharacterEditorPanel:
         self.raw_tree_tag = self._tag("raw_tree")
         self.raw_text_tag = self._tag("raw_text")
         self.raw_json_textbox_tag = self._tag("raw_json_textbox")
+        self.screen_tab_tag = self._tag("screen_tab")
 
         self._game_ids: list[str] = []
         self._character_rows: list[tuple[str, str]] = []
@@ -45,6 +47,7 @@ class CharacterEditorPanel:
         self._skin_assets = InfinitySkinAssets(
             icon_loader=self.service.load_icon_by_resref,
             mos_loader=self.service.load_mos_by_resref,
+            chu_loader=self.service.load_chu_by_resref,
         )
         manifest_path = Path("ui/skin/infinity/manifest_default.json")
         self._skin_assets.load_manifest_file(manifest_path)
@@ -58,16 +61,24 @@ class CharacterEditorPanel:
         ):
             with dpg.group(tag=self.top_tag, horizontal=True):
                 dpg.add_text("Game:")
-                dpg.add_combo(tag=self.game_combo_tag, width=160, callback=self._on_game_selected)
-                dpg.add_spacer(width=10)
-                dpg.add_text("Find:")
+                dpg.add_combo(
+                    tag=self.game_combo_tag,
+                    width=160,
+                    callback=self._on_game_selected
+                )
+                dpg.add_button(label="Refresh", callback=self._on_refresh_clicked)
+                dpg.add_button(label="Rebuild", callback=self._on_rebuild_clicked)
+                dpg.add_spacer(width=14)
+                dpg.add_text("Search:")
                 dpg.add_input_text(
                     tag=self.search_tag,
-                    width=260,
-                    hint="Search character by resref or name...",
+                    width=380,
+                    hint="ResRef, display name, or any CRE field...",
                     callback=self._on_search_changed,
                 )
-                dpg.add_spacer(width=8)
+                dpg.add_spacer(width=14)
+                dpg.add_text("", tag=self.status_tag)
+                dpg.add_spacer(width=10)
                 dpg.add_text("Layout:")
                 dpg.add_combo(
                     tag=self.layout_combo_tag,
@@ -76,10 +87,6 @@ class CharacterEditorPanel:
                     width=120,
                     callback=self._on_layout_changed,
                 )
-                dpg.add_button(label="Refresh", callback=self._on_refresh_clicked)
-                dpg.add_button(label="Rebuild", callback=self._on_rebuild_clicked)
-                dpg.add_spacer(width=16)
-                dpg.add_text("", tag=self.status_tag)
 
             with dpg.group(tag=self.body_tag, horizontal=True):
                 with dpg.child_window(tag=self.left_tag, border=True):
@@ -101,6 +108,9 @@ class CharacterEditorPanel:
 
                 with dpg.child_window(tag=self.right_tag, border=True):
                     with dpg.tab_bar():
+                        with dpg.tab(label="Game Screen"):
+                            with dpg.child_window(tag=self.screen_tab_tag, border=False, no_scrollbar=True):
+                                pass
                         with dpg.tab(label="Overview"):
                             with dpg.child_window(tag=self.overview_tag, border=False):
                                 with dpg.group(tag=self.summary_tag):
@@ -130,7 +140,15 @@ class CharacterEditorPanel:
                             with dpg.child_window(tag=self.raw_text_tag, border=False):
                                 dpg.add_text("No character loaded.")
 
+
         self._load_games()
+
+        self._screen_panel = InfinityScreenPanel(
+            parent_tag=self.screen_tab_tag,
+            assets=self._skin_assets,
+            tag_prefix=self._tag("ie_screen"),
+            on_slot_clicked=self._on_slot_clicked,
+        )
 
     def _tag(self, suffix: str) -> str:
         return f"{self.tag_prefix}_{suffix}"
@@ -143,6 +161,10 @@ class CharacterEditorPanel:
         right_w = max(260, width - left_w - 12)
         dpg.configure_item(self.left_tag, width=left_w, height=body_h)
         dpg.configure_item(self.right_tag, width=right_w, height=body_h)
+        # The screen tab child_window and its panel need explicit sizing too
+        if dpg.does_item_exist(self.screen_tab_tag):
+            dpg.configure_item(self.screen_tab_tag, width=right_w - 8, height=body_h - 28)
+        self._screen_panel.set_size(right_w - 8, body_h - 28)
 
     def _set_status(self, text: str) -> None:
         dpg.set_value(self.status_tag, text)
@@ -170,6 +192,8 @@ class CharacterEditorPanel:
     def _on_game_selected(self, _sender, app_data) -> None:
         game_id = str(app_data or "")
         if game_id:
+            self._skin_assets.invalidate_chu_cache()
+            self._screen_panel.clear()
             self._activate_game(game_id)
 
     def _on_search_changed(self, _sender, app_data) -> None:
@@ -320,6 +344,18 @@ class CharacterEditorPanel:
                     dpg.add_text(f"{slot.slot_name}: {slot.item_name} ({slot.item_resref})")
 
         self._render_raw(payload)
+        self._render_game_screen(vm)
+
+    def _render_game_screen(self, vm: CharacterVM) -> None:
+        game_id = str(dpg.get_value(self.game_combo_tag) or "")
+        layout = self._skin_assets.get_chu_layout(game_id)
+        slot_items = {slot.slot_name: slot for slot in vm.inventory}
+        self._screen_panel.render(layout, slot_items)
+
+    def _on_slot_clicked(self, slot_name: str, vm) -> None:
+        self._set_status(f"Clicked: {slot_name}" + (
+            f" → {vm.item_name} ({vm.item_resref})" if vm else " (empty)"
+        ))
 
     def _render_raw(self, payload: dict) -> None:
         dpg.delete_item(self.raw_tree_tag, children_only=True)

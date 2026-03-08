@@ -73,7 +73,7 @@ class ItmViewerPanel:
                 dpg.add_combo(
                     tag=self.game_combo_tag,
                     width=160,
-                    callback=self._on_game_selected,
+                    callback=self._on_game_selected
                 )
                 dpg.add_button(label="Refresh", callback=self._on_refresh_clicked)
                 dpg.add_button(label="Rebuild", callback=self._on_rebuild_clicked)

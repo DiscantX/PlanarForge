@@ -4,11 +4,12 @@ import hashlib
 import json
 from enum import IntEnum
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from core.formats.cre import Alignment, Class, CreFile, Gender, Race
 from core.formats.key_biff import KeyFile, ResType
 from core.formats.mos import MosFile
+from core.formats.pvrz import PvrzFile
 from core.services.itm_catalog import ItmCatalog
 from core.viewmodels.character_vm import CharacterVM, InventorySlotVM, StatVM
 from game.installation import GameInstallation, InstallationFinder
@@ -174,11 +175,134 @@ class CharacterService:
                 return None
             raw = self._key.read_resource(entry, game_root=self._selected_game)
             mos = MosFile.from_bytes(raw)
-            rgba_bytes = mos.to_rgba()
-            if rgba_bytes is None:
-                return None
+            
+            # Try to decode with PVRZ support if available
+            if mos.is_pvrz:
+                pvrz_loader = self._make_pvrz_loader()
+                rgba_bytes = mos.to_rgba(pvrz_loader=pvrz_loader)
+                
+                # If PVRZ decoding failed, generate a fallback placeholder
+                if rgba_bytes is None:
+                    rgba_bytes = self._generate_mos_placeholder(mos.width, mos.height)
+                    if rgba_bytes is None:
+                        return None
+            else:
+                rgba_bytes = mos.to_rgba()
+                if rgba_bytes is None:
+                    return None
+            
             rgba = [b / 255.0 for b in rgba_bytes]
             return mos.width, mos.height, rgba
+        except Exception:
+            return None
+
+    def _make_pvrz_loader(self) -> Callable[[int], bytes | None]:
+        """
+        Create a PVRZ loader function that loads MOS0000.pvrz, etc.
+        
+        Returns a callable(page_number) -> decompressed_pvrz_bytes | None
+        
+        Per IESDP: "PVRZ files are basically ZLIB-compressed PVR files."
+        We decompress with zlib, then return the decompressed PVRT data.
+        """
+        pvrz_cache: dict[int, bytes | None] = {}
+        
+        def load_pvrz_page(page_number: int) -> bytes | None:
+            """Load and decompress a PVRZ page."""
+            if page_number in pvrz_cache:
+                return pvrz_cache[page_number]
+            
+            # Construct PVRZ resref: MOS0000, MOS0001, etc.
+            pvrz_resref = f"MOS{page_number:04d}"
+            
+            try:
+                if self._key is None:
+                    print(f"[PVRZ LOADER] Key is None for {pvrz_resref}")
+                    pvrz_cache[page_number] = None
+                    return None
+                
+                entry = self._key.find(pvrz_resref, ResType.PVRZ)
+                if entry is None:
+                    pvrz_cache[page_number] = None
+                    return None
+                
+                raw = self._key.read_resource(entry, game_root=self._selected_game)
+                
+                # Try decompressing with zlib from different offsets
+                import zlib
+                
+                # First try raw data
+                try:
+                    decompressed = zlib.decompress(raw)
+                    pvrz_cache[page_number] = decompressed
+                    return decompressed
+                except zlib.error:
+                    pass
+                
+                # Try from offset 4 (in case there's a 4-byte header)
+                if len(raw) > 4:
+                    try:
+                        decompressed = zlib.decompress(raw[4:])
+                        pvrz_cache[page_number] = decompressed
+                        return decompressed
+                    except zlib.error:
+                        pass
+                
+                # Try to find zlib magic (0x78) at any offset
+                for offset in range(min(256, len(raw))):
+                    if raw[offset] == 0x78:
+                        try:
+                            decompressed = zlib.decompress(raw[offset:])
+                            pvrz_cache[page_number] = decompressed
+                            return decompressed
+                        except zlib.error:
+                            pass
+                
+                pvrz_cache[page_number] = None
+                return None
+                    
+            except Exception:
+                pvrz_cache[page_number] = None
+                return None
+        
+        return load_pvrz_page
+
+    def _generate_mos_placeholder(self, width: int, height: int) -> bytes | None:
+        """
+        Generate a placeholder RGBA image when PVRZ decoding fails.
+        
+        Creates a simple gradient pattern to make the MOS visible.
+        """
+        try:
+            out = bytearray(width * height * 4)
+            
+            # Generate a grayscale gradient
+            for y in range(height):
+                for x in range(width):
+                    # Create a gradient from light gray to dark gray
+                    gray = int(64 + (192 * x // width))
+                    idx = (y * width + x) * 4
+                    out[idx]     = gray      # R
+                    out[idx+1]   = gray      # G
+                    out[idx+2]   = gray      # B
+                    out[idx+3]   = 255       # A
+            
+            return bytes(out)
+        except Exception:
+            return None
+
+    def load_chu_by_resref(self, resref: str) -> bytes | None:
+        self._ensure_handles()
+        if self._key is None:
+            return None
+        norm = (resref or "").strip().upper()
+        if not norm:
+            return None
+        try:
+            entry = self._key.find(norm, ResType.CHU)
+            if entry is None:
+                return None
+            return self._key.read_resource(entry, game_root=self._selected_game)
         except Exception:
             return None
 

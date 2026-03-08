@@ -38,9 +38,10 @@ from __future__ import annotations
 import zlib
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Callable, List, Optional, Tuple
 
 from core.util.binary import BinaryReader, BinaryWriter, SignatureMismatch
+from core.formats.pvrz import PvrzFile
 
 
 # ---------------------------------------------------------------------------
@@ -228,16 +229,30 @@ class MosFile:
     # Pixel decoding
     # ------------------------------------------------------------------
 
-    def to_rgba(self) -> Optional[bytes]:
+    def to_rgba(self, pvrz_loader: Optional[Callable[[int], bytes | None]] = None) -> Optional[bytes]:
         """
         Convert to a flat RGBA byte array (width×height×4 bytes).
 
         Works for palette MOS (V1/MOSC) without any external libraries.
-        Returns ``None`` for PVRZ-based MOS (V2).
+        For PVRZ-based MOS (V2), requires a pvrz_loader callable that returns
+        the decompressed PVRZ texture data given a page number.
+
+        Args:
+            pvrz_loader: Optional callable(page_number) -> decompressed_pvrz_bytes | None
+                         If None and MOS is PVRZ-based, returns None.
+
+        Returns:
+            RGBA byte array or None if decoding is not possible.
         """
         if self.is_pvrz:
-            return None
+            if pvrz_loader is None:
+                return None
+            return self._to_rgba_pvrz(pvrz_loader)
+        else:
+            return self._to_rgba_palette()
 
+    def _to_rgba_palette(self) -> Optional[bytes]:
+        """Convert palette-based MOS to RGBA."""
         out = bytearray(self.width * self.height * 4)
 
         for block_row in range(self.rows):
@@ -266,6 +281,86 @@ class MosFile:
                         out[dst+3] = a
 
         return bytes(out)
+
+    def _to_rgba_pvrz(self, pvrz_loader: Callable[[int], bytes | None]) -> Optional[bytes]:
+        """
+        Convert PVRZ-based MOS to RGBA using external PVRZ texture pages.
+
+        Each block in a PVRZ MOS references (page, x, y, width, height) coordinates
+        within a PVRZ texture file.  This method:
+        1. Loads each unique PVRZ page via pvrz_loader
+        2. Decodes the PVRTC texture data
+        3. Extracts rectangle regions from those pages
+        4. Assembles them into the output image
+
+        Args:
+            pvrz_loader: Callable(page_number) -> decompressed_pvrz_bytes | None
+
+        Returns:
+            RGBA byte array or None if decoding fails
+        """
+        try:
+            out = bytearray(self.width * self.height * 4)
+            pvrz_cache: dict[int, PvrzFile | None] = {}
+            blocks_decoded = 0
+            blocks_failed = 0
+
+            # MOS V2 blocks are stored individually, not in a grid
+            # Iterate through the actual block list
+            for block_idx, block in enumerate(self.blocks):
+                # Get or load PVRZ page for this block
+                page_num = block.page
+                if page_num not in pvrz_cache:
+                    pvrz_bytes = pvrz_loader(page_num)
+                    if pvrz_bytes is None:
+                        pvrz_cache[page_num] = None
+                    else:
+                        try:
+                            # pvrz_loader returns decompressed PVRZ data
+                            pvrz_cache[page_num] = PvrzFile.from_decompressed(pvrz_bytes)
+                        except Exception as e:
+                            print(f"[MOS PVRZ] Failed to parse PVRZ page {page_num}: {e}")
+                            pvrz_cache[page_num] = None
+
+                pvrz = pvrz_cache[page_num]
+                if pvrz is None:
+                    blocks_failed += 1
+                    continue
+
+                # Extract region from PVRZ page
+                region_rgba = pvrz.get_region_rgba(
+                    block.x, block.y, block.width, block.height
+                )
+                if region_rgba is None:
+                    blocks_failed += 1
+                    continue
+
+                blocks_decoded += 1
+
+                # Copy region into output image
+                # MOS V2 blocks are placed at explicit (x,y) coordinates
+                for local_y in range(block.height):
+                    for local_x in range(block.width):
+                        src_idx = (local_y * block.width + local_x) * 4
+                        dst_x = block.x + local_x
+                        dst_y = block.y + local_y
+
+                        if dst_x >= self.width or dst_y >= self.height:
+                            continue
+
+                        dst_idx = (dst_y * self.width + dst_x) * 4
+
+                        # Copy RGBA pixel
+                        for c in range(4):
+                            out[dst_idx + c] = region_rgba[src_idx + c]
+
+            if blocks_decoded == 0:
+                return None
+            
+            return bytes(out)
+
+        except Exception:
+            return None
 
     def to_image(self):
         """
