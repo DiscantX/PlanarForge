@@ -905,6 +905,7 @@ ui/
    - Editors pass `tag_prefix` to their components, which extend it: `f"{tag_prefix}_toolbar_*"`
    - This prevents tag collisions when multiple editors are instantiated
    - Panel resizing and divider dragging are owned by `ResourceBrowserPane`
+   - Editor panels pass `right_pane_x` and `gap_width` to `handle_divider_drag()` for spacing-aware behavior
 
 6. **Configuration in data/ Subdirectory:**
    - Non-code data files (JSON, manifests) belong in `skin/infinity/data/`
@@ -928,9 +929,10 @@ ui/
 
 - **ResourceBrowserPane** (`ui/core/resource_browser_pane.py`)
   - Table with configurable columns (["ResRef", "Name"] for characters; ["ResRef", "Name", "Type"] for items)
-  - Left panel with divider-drag resizing (30% default, 180px minimum, 10px hit zone)
+  - Left panel with spacing-aware divider-drag resizing (30% default, 180px minimum)
+  - Drag detection: by default uses 4px hit zone; when `right_pane_x` is provided, allows dragging anywhere in the gap between panes (robust to spacing changes)
   - Row selection callback (`on_row_selected(idx)`)
-  - Methods: `populate_rows()`, `select_row()`, `set_size()`, `get_panel_width()`, `handle_divider_drag()`
+  - Methods: `populate_rows()`, `select_row()`, `set_size()`, `get_panel_width()`, `handle_divider_drag(mouse_x, is_button_down, *, right_pane_x=None, right_pane_min_width=260, gap_width=12)`
   - No knowledge of resource parsing or semantics
 
 - **CharacterEditorPanel** (`ui/editors/character_editor.py`)
@@ -957,7 +959,7 @@ ui/
   - Instantiates both editors (both are always running; hidden when inactive)
   - Routes global search bar input to active editor
   - Manages resize events and panel sizing
-  - Mouse event handlers for divider dragging
+  - Global mouse event handlers (down/move/release) forward to each editor's `handle_mouse_event()` method
 
 **Import Dependencies in Editors:**
 

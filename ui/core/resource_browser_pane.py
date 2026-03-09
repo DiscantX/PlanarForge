@@ -180,13 +180,30 @@ class ResourceBrowserPane:
         except Exception:
             pass
 
-    def handle_divider_drag(self, mouse_x: int, is_button_down: bool) -> bool:
+    def handle_divider_drag(
+        self,
+        mouse_x: int,
+        is_button_down: bool,
+        *,
+        right_pane_x: int | None = None,
+        right_pane_min_width: int = 260,
+        gap_width: int = 12,
+    ) -> bool:
         """
         Handle mouse events for panel resizing via divider drag.
+        
+        Allows dragging anywhere in the space between the left and right panes.
+        For robust, spacing-independent behavior, pass right_pane_x.
+        If not provided, uses a small fixed hit zone as fallback.
         
         Args:
             mouse_x: Current mouse X position
             is_button_down: Whether left mouse button is pressed
+            right_pane_x: Optional X position where the right pane starts.
+                         If provided, allows dragging anywhere from left pane edge to this position.
+                         Makes the behavior robust to spacing changes.
+            right_pane_min_width: Minimum width to maintain for the right pane (default: 260).
+            gap_width: Width of the gap between panes (default: 12). Used for validation.
             
         Returns:
             True if currently dragging the divider
@@ -195,10 +212,17 @@ class ResourceBrowserPane:
             return False
 
         divider_x = self.get_divider_x()
-        divider_hit_zone = 10  # pixels on each side to detect drag
 
-        # Check if mouse is near the divider
-        on_divider = abs(mouse_x - divider_x) < divider_hit_zone
+        # Calculate valid drag zone
+        if right_pane_x is not None:
+            # Robust mode: allow dragging anywhere from left pane edge to right pane start
+            drag_zone_left = divider_x
+            drag_zone_right = right_pane_x
+            on_divider = drag_zone_left <= mouse_x <= drag_zone_right
+        else:
+            # Fallback mode: small fixed hit zone
+            divider_hit_zone = 4  # pixels on each side
+            on_divider = abs(mouse_x - divider_x) < divider_hit_zone
 
         if is_button_down:
             if on_divider and not self._is_dragging_divider:
@@ -211,10 +235,10 @@ class ResourceBrowserPane:
                 if delta != 0:
                     current_w = self.get_panel_width()
                     new_w = max(180, current_w + delta)
-                    new_right_w_min = 260
                     
-                    # Check if resize is valid
-                    if new_w + new_right_w_min + 12 <= self._total_width:
+                    # Validate: new left width + gap + min right width must fit in total width
+                    available_right_w = self._total_width - gap_width - new_w
+                    if new_w >= 180 and available_right_w >= right_pane_min_width:
                         new_percentage = new_w / self._total_width
                         self._panel_width = max(0.2, min(0.7, new_percentage))
                         self.set_size(self._total_width, self._total_height)

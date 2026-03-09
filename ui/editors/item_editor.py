@@ -698,12 +698,21 @@ class ItemEditorPanel:
         mouse_x, _mouse_y = dpg.get_mouse_pos()
         is_button_down = dpg.is_mouse_button_down(dpg.mvMouseButton_Left)
         
-        # Let the browser pane handle its divider drag
-        self._browser.handle_divider_drag(mouse_x, is_button_down)
+        # Calculate right pane position for robust divider dragging
+        gap_width = 12
+        right_pane_x = self._browser.get_divider_x() + gap_width
+        
+        # Let the browser pane handle its divider drag with spacing awareness
+        self._browser.handle_divider_drag(
+            mouse_x,
+            is_button_down,
+            right_pane_x=right_pane_x,
+            gap_width=gap_width,
+        )
         
         # Update right panel sizing based on browser's new width
         if self._total_width > 0 and self._total_height > 0:
             left_w = self._browser.get_panel_width()
-            right_w = max(260, self._total_width - left_w - 12)
+            right_w = max(260, self._total_width - left_w - gap_width)
             body_h = max(0, self._total_height - 34 - 6)
             dpg.configure_item(self.right_tag, width=right_w, height=body_h)
