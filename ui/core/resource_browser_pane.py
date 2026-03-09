@@ -311,25 +311,27 @@ class ResourceBrowserPane:
         if not show:
             return
 
-        # Compute position in viewport coordinates.
-        # get_divider_x() returns panel_width since root_tag is at x=0 in its
-        # parent group, so divider_x == panel_width in viewport coords.
+        # root_tag y is relative to its immediate parent (body group).
+        # The body group's y is a duplicate of the same editor-toolbar offset,
+        # so we skip it and use the grandparent's y (the app-level container
+        # whose pos=[0, app_toolbar_height]) instead.
         try:
-            rx, ry = dpg.get_item_pos(self.root_tag)
+            _, ry = dpg.get_item_pos(self.root_tag)
             parent = dpg.get_item_parent(self.root_tag)
-            px, py = dpg.get_item_pos(parent) if parent else (0, 0)
+            grandparent = dpg.get_item_parent(parent) if parent else None
+            _, gy = dpg.get_item_pos(grandparent) if grandparent else (0, 0)
+            x0 = self.get_panel_width()
+            y0 = ry + gy
         except Exception:
             return
 
-        x0 = rx + px + self.get_panel_width()
-        y0 = ry + py
         x1 = x0 + gap_width
         y1 = y0 + max(1, self._total_height)
 
         dpg.draw_rectangle(
             (x0, y0), (x1, y1),
             color=(0, 0, 0, 0),
-            fill=(0, 120, 212, 80),
+            fill=(0, 120, 212, 255),
             tag=rect_tag,
             parent=drawlist_tag,
         )
