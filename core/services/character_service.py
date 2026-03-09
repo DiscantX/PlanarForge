@@ -257,7 +257,7 @@ class CharacterService:
                 return None
             raw = self._key.read_resource(entry, game_root=self._selected_game)
             from core.formats.bam import decode_cycle_frame_rgba, decode_first_frame_rgba
-            pvrz_loader = self._make_pvrz_loader()
+            pvrz_loader = self._make_pvrz_loader_for_bam()
             try:
                 result = decode_cycle_frame_rgba(raw, cycle=cycle, frame=frame, pvrz_loader=pvrz_loader)
                 print(f"[BAM] {norm!r} cycle={cycle} frame={frame} decoded OK {result[0]}x{result[1]}")
@@ -402,7 +402,7 @@ class CharacterService:
         except Exception:
             return str(value)
 
-    def _make_pvrz_loader(self):
+    def _make_pvrz_loader_for_bam(self):
         """Return a callable that loads a PVRZ page by page number for BAM V2 decoding."""
         from core.formats.pvrz import PvrzFile
         from core.formats.key_biff import ResType
