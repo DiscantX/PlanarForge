@@ -281,8 +281,10 @@ def _indices_to_rgba(
             rgba.extend((0.0, 0.0, 0.0, 0.0))
             continue
         r, g, b = palette[idx]
-        a = 0.0 if (r == 0 and g == 255 and b == 0) else 1.0
-        rgba.extend((r / 255.0, g / 255.0, b / 255.0, a))
+        if r == 0 and g == 255 and b == 0:
+            rgba.extend((0.0, 0.0, 0.0, 0.0))
+        else:
+            rgba.extend((r / 255.0, g / 255.0, b / 255.0, 1.0))
     return width, height, rgba
 
 
@@ -305,8 +307,10 @@ def _decode_24bpp(
         for x in range(width):
             px = row_start + x * 3
             b, g, r = struct.unpack_from("<BBB", raw, px)
-            a = 0.0 if (r == 0 and g == 255 and b == 0) else 1.0
-            rgba.extend((r / 255.0, g / 255.0, b / 255.0, a))
+            if r == 0 and g == 255 and b == 0:
+                rgba.extend((0.0, 0.0, 0.0, 0.0))
+            else:
+                rgba.extend((r / 255.0, g / 255.0, b / 255.0, 1.0))
     return width, height, rgba
 
 
@@ -329,7 +333,10 @@ def _decode_32bpp(
         for x in range(width):
             px = row_start + x * 4
             b, g, r, a = struct.unpack_from("<BBBB", raw, px)
-            if a == 0 and (r != 0 or g != 0 or b != 0):
-                a = 255
-            rgba.extend((r / 255.0, g / 255.0, b / 255.0, a / 255.0))
+            if r == 0 and g == 255 and b == 0:
+                rgba.extend((0.0, 0.0, 0.0, 0.0))
+            else:
+                if a == 0 and (r != 0 or g != 0 or b != 0):
+                    a = 255
+                rgba.extend((r / 255.0, g / 255.0, b / 255.0, a / 255.0))
     return width, height, rgba

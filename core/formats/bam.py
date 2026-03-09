@@ -333,8 +333,10 @@ def _indices_to_rgba(
     rgba: list[float] = []
     for idx in pixels:
         b, g, r, _ = palette[idx]
-        a = 0.0 if idx == transparent_idx else 1.0
-        rgba.extend((r / 255.0, g / 255.0, b / 255.0, a))
+        if idx == transparent_idx:
+            rgba.extend((0.0, 0.0, 0.0, 0.0))   # zero out RGB on transparent pixels
+        else:
+            rgba.extend((r / 255.0, g / 255.0, b / 255.0, 1.0))
     return rgba
 
 

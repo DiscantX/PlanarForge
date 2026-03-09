@@ -997,3 +997,23 @@ Current structure:
 Users can override default slot frame graphics by populating these fields with custom ResRefs.
 The file is required and must exist; provide sensible defaults (empty strings = use engine defaults).
 
+**2026-03 — BAM/BMP transparent pixel RGB must be zeroed (pre-multiplied alpha)**
+BAM V1 and BMP icons use a green colour key (R=0, G=255, B=0) for transparency.
+When decoded, transparent pixels must be emitted as `(0.0, 0.0, 0.0, 0.0)` — not
+`(0.0, 1.0, 0.0, 0.0)`. DearPyGui's GPU renderer uses bilinear interpolation when
+a texture is drawn at a size other than its native dimensions. If transparent pixels
+retain their green RGB values, interpolation along opaque edges bleeds green into
+adjacent semi-transparent samples, producing a visible green outline around icons.
+
+Affected decoders and the fix location:
+- `core/formats/bam.py` — `_indices_to_rgba()`: zero RGB when `idx == transparent_idx`
+- `core/formats/bmp.py` — `_indices_to_rgba()`: zero RGB when colour key matches
+- `core/formats/bmp.py` — `_decode_24bpp()`: same colour-key zero-out
+- `core/formats/bmp.py` — `_decode_32bpp()`: colour-key check must run *before*
+  the existing `a==0, non-zero RGB → force a=255` workaround, otherwise the
+  workaround re-opaqifies a pixel that should be transparent
+
+The outline does not appear when icons are rendered at native size (no interpolation).
+That is why the Item Editor heading icon was unaffected while the Game Screen and
+tooltip icons (both rescaled) showed the artefact. BMP icons in IE games are almost
+always 8bpp palette-based, so `_decode_32bpp` is rarely exercised in practice.
