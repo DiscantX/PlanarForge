@@ -78,6 +78,7 @@ class PvrzFile:
         self.pixel_fmt   = pixel_fmt
         self.pixel_data  = pixel_data
         self.source_path = source_path
+        self._rgba_cache: Optional[bytes] = None  # Lazy decode cache
 
     # ------------------------------------------------------------------
     # Construction
@@ -140,13 +141,21 @@ class PvrzFile:
     # ------------------------------------------------------------------
 
     def to_rgba(self) -> Optional[bytes]:
-        """Decode the full texture to a flat RGBA byte array."""
+        """Decode the full texture to a flat RGBA byte array (cached after first call)."""
+        if self._rgba_cache is not None:
+            return self._rgba_cache
+        
         if self.pixel_fmt == FMT_DXT5:
-            return _decode_dxt5(self.pixel_data, self.width, self.height)
-        if self.pixel_fmt == FMT_DXT1:
-            return _decode_dxt1(self.pixel_data, self.width, self.height)
-        # DXT3 and others: unsupported
-        return None
+            result = _decode_dxt5(self.pixel_data, self.width, self.height)
+        elif self.pixel_fmt == FMT_DXT1:
+            result = _decode_dxt1(self.pixel_data, self.width, self.height)
+        else:
+            # DXT3 and others: unsupported
+            result = None
+        
+        if result is not None:
+            self._rgba_cache = result
+        return result
 
     def get_region_rgba(
         self, x: int, y: int, width: int, height: int

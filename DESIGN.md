@@ -778,6 +778,30 @@ PVRTC decoder handles:
 Result: INVENTOR and other MOS V2 backgrounds now display as actual textures
 instead of generating errors or placeholders.
 
+**2026-03 — PVRZ Decoding Performance Optimization**
+
+Initial implementation decoded entire PVRZ textures on every region extract.
+Performance bottleneck:
+- `PvrzFile.get_region_rgba()` called `to_rgba()` which decoded full DXT5 texture
+  (10-40 MB per page) even for tiny 52×52 regions
+- Same PVRZ pages decoded repeatedly:
+  - STONSLOT (4 animation cycles) → same page decoded 4×
+  - MOS background → pages 181-182 decoded once per block
+  - Total: ~100-400 MB unnecessary decoding per inventory screen load
+
+Solution — Two-level caching:
+1. **PvrzFile internal cache**: `to_rgba()` caches decoded RGBA in `_rgba_cache`
+   - First region extract triggers full decode, subsequent calls reuse cached decode
+   - Instant for multiple region extracts from same page
+2. **CharacterService shared PVRZ cache**: `_pvrz_cache` dict by page number
+   - Raw PVRZ bytes cached after KEY load
+   - Reused by BAM and MOS loaders across all resources
+   - Cleared on game selection change
+
+Impact: ~5-10× faster loading for multi-resource screens (inventory + background
+using same PVRZ pages). Future: Could pre-cache PVRZ pages at game load time for
+guaranteed instant UI response.
+
 ---
 
 ## 2026-03 — UI Architecture Restructuring: Layered Composition with Semantic Naming

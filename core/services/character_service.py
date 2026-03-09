@@ -40,6 +40,7 @@ class CharacterService:
         self._manager: Optional[StringManager] = None
         self._character_index: list[tuple[str, str]] = []
         self._progress_callback: Optional[Callable[[str], None]] = None
+        self._pvrz_cache: dict[int, object] = {}  # page_num -> PvrzFile (shared across all resources)
 
     def list_games(self) -> list[GameInstallation]:
         return self._finder.find_all()
@@ -61,6 +62,7 @@ class CharacterService:
         self._key = None
         self._manager = None
         self._character_index = []
+        self._pvrz_cache.clear()  # Clear PVRZ cache when switching games
         self._itm_catalog.select_game(game_id)
         self._itm_catalog.load_index(force_rebuild=False)
 
@@ -208,7 +210,7 @@ class CharacterService:
         """
         key   = self._key
         game  = self._selected_game
-        cache: dict[int, bytes | None] = {}
+        cache = self._pvrz_cache  # Use shared PVRZ cache
 
         def _load(page: int) -> bytes | None:
             if page in cache:
@@ -403,21 +405,34 @@ class CharacterService:
             return str(value)
 
     def _make_pvrz_loader_for_bam(self):
-        """Return a callable that loads a PVRZ page by page number for BAM V2 decoding."""
+        """Return a callable that loads and caches PVRZ pages as PvrzFile objects."""
         from core.formats.pvrz import PvrzFile
         from core.formats.key_biff import ResType
 
+        key = self._key
+        game = self._selected_game
+        cache = self._pvrz_cache  # Use shared PVRZ cache
+
         def loader(page: int):
-            if self._key is None:
-                return None
+            if page in cache:
+                return cache[page]
+            
             try:
                 resref = f"MOS{page:04d}"
-                entry = self._key.find(resref, ResType.PVRZ)
+                entry = key.find(resref, ResType.PVRZ)
                 if entry is None:
+                    cache[page] = None
                     return None
-                raw = self._key.read_resource(entry, game_root=self._selected_game)
-                return PvrzFile.from_bytes(raw)
+                raw = key.read_resource(entry, game_root=game)
+                try:
+                    pvrz = PvrzFile.from_bytes(raw)
+                    cache[page] = pvrz
+                    return pvrz
+                except Exception:
+                    cache[page] = None
+                    return None
             except Exception:
+                cache[page] = None
                 return None
 
         return loader
