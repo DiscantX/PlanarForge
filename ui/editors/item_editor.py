@@ -694,6 +694,9 @@ class ItemEditorPanel:
         """Handle mouse events for panel resizing via drag on the divider."""
         if not dpg.does_item_exist(self.root_tag):
             return
+        if not dpg.get_item_configuration(self.root_tag).get("show", True):
+            self._browser.hide_divider_highlight()
+            return
         
         mouse_x, _mouse_y = dpg.get_mouse_pos()
         is_button_down = dpg.is_mouse_button_down(dpg.mvMouseButton_Left)
