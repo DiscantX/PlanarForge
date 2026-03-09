@@ -49,9 +49,6 @@ _ICON_INSET = 4
 # RGBA colour for the slot hover highlight (gold tint, semi-transparent).
 _HOVER_COLOUR = (220, 190, 80, 120)
 
-# RGBA colour for an empty slot indicator border.
-_EMPTY_COLOUR = (80, 80, 80, 100)
-
 
 class InfinityScreenPanel:
     """
@@ -295,13 +292,7 @@ class InfinityScreenPanel:
             )
 
         if vm is None or vm.item_resref == "":
-            # Empty slot — draw a subtle dot to indicate it's interactive
-            cx, cy = rect.centre
-            dpg.draw_circle(
-                center=(cx, cy), radius=3,
-                color=_EMPTY_COLOUR, fill=_EMPTY_COLOUR,
-                parent=dl,
-            )
+            # Empty slot — no icon to draw
             return
 
         # Item icon (or placeholder when icon data is unavailable)
