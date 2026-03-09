@@ -23,6 +23,7 @@ class CustomTitleBarController:
         is_maximized: Callable[[], bool],
         on_caption_double_click: Callable[[], None],
         resize_border: int = 10,
+        divider_hit_test_callback: Callable[[int, int], bool] | None = None,
     ) -> None:
         """Initialize a controller for one viewport/title-bar pair.
 
@@ -32,12 +33,19 @@ class CustomTitleBarController:
             is_maximized: Callback that returns current maximized state.
             on_caption_double_click: Callback invoked on native caption double-click.
             resize_border: Edge thickness (pixels) for resize hit zones.
+            divider_hit_test_callback: Optional callable (screen_x, screen_y) -> bool.
+                Called from WM_NCHITTEST when the hit would be HTCLIENT. If it returns
+                True, the horizontal-resize cursor (IDC_SIZEWE ↔) is set immediately
+                inside the message handler before Windows can reset it, and HTCLIENT is
+                still returned so normal DPG mouse events continue to fire. Must be fast
+                and allocation-free (runs in WndProc).
         """
         self.window_title = window_title
         self.title_bar_tag = title_bar_tag
         self.is_maximized = is_maximized
         self.on_caption_double_click = on_caption_double_click
         self.resize_border = resize_border
+        self._divider_hit_test_callback = divider_hit_test_callback
 
         self._hwnd: int | None = None
         self._orig_wndproc = None
@@ -59,6 +67,21 @@ class CustomTitleBarController:
             self._HTBOTTOM = 15
             self._HTBOTTOMLEFT = 16
             self._HTBOTTOMRIGHT = 17
+            # Pre-load cursors once so the WndProc has zero-latency access.
+            self._cursor_arrow  = self._user32.LoadCursorW(None, 32512)   # IDC_ARROW
+            self._cursor_sizewe = self._user32.LoadCursorW(None, 32644)   # IDC_SIZEWE ↔
+
+    def set_divider_hit_test_callback(
+        self, callback: Callable[[int, int], bool] | None
+    ) -> None:
+        """Replace (or clear) the divider hit-test callback at runtime.
+
+        The callback receives screen coordinates (x, y) and must return True
+        when the cursor is over a resizable pane divider. It is called from
+        the Windows message handler so it must be fast and must not call any
+        DPG APIs. Typically it does nothing more than compare two integers.
+        """
+        self._divider_hit_test_callback = callback
 
     def install(self) -> None:
         """Install the native window-proc hook if running on Windows."""
@@ -148,6 +171,18 @@ class CustomTitleBarController:
                 away_from_edges = True if maximized else (self.resize_border < rel_x < (width - self.resize_border))
                 if in_title_band and away_from_edges and not self._is_point_over_interactive_titlebar_item(rel_x, rel_y):
                     return self._HTCAPTION
+
+                # Client area — check for pane divider before returning HTCLIENT.
+                # Setting the cursor here (inside WM_NCHITTEST) runs at a higher
+                # priority than DPG's event loop, so Windows cannot reset it.
+                cb = self._divider_hit_test_callback
+                if cb is not None:
+                    try:
+                        if cb(x_pos, y_pos):
+                            self._user32.SetCursor(self._cursor_sizewe)
+                            return self._HTCLIENT
+                    except Exception:
+                        pass  # never propagate out of a WndProc
 
             return self._user32.CallWindowProcW(orig_wndproc, h_wnd, msg, w_param, l_param)
 

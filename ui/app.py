@@ -370,5 +370,24 @@ dpg.maximize_viewport()
 app_state["maximized"] = True
 _sync_max_button()
 chrome.install()
+
+def _divider_hit_test(screen_x: int, screen_y: int) -> bool:
+    """Called from WM_NCHITTEST — must be fast, no DPG calls."""
+    active = ui_state.get("active_view")
+    try:
+        if active == "itm":
+            viewer = ui_state.get("itm_viewer")
+            if isinstance(viewer, ItemEditorPanel):
+                return viewer._browser.check_divider_hover(screen_x, screen_y)
+        elif active == "character":
+            character = ui_state.get("character_editor")
+            if isinstance(character, CharacterEditorPanel):
+                return character._browser.check_divider_hover(screen_x, screen_y)
+    except Exception:
+        pass
+    return False
+
+chrome.set_divider_hit_test_callback(_divider_hit_test)
+
 dpg.start_dearpygui()
 dpg.destroy_context()

@@ -104,6 +104,36 @@ class ResourceBrowserPane:
         root_pos = dpg.get_item_pos(self.root_tag)
         return root_pos[0] + self.get_panel_width()
 
+    def check_divider_hover(self, screen_x: int, screen_y: int) -> bool:
+        """Return True if the given screen coordinates are over the divider gap.
+
+        Designed to be called from titlebar.py's WM_NCHITTEST handler, which
+        operates in screen coordinates. Converts to viewport-local coordinates
+        internally using Win32 ClientToScreen. Must be fast and allocation-free.
+        """
+        try:
+            import ctypes
+            import ctypes.wintypes as wt
+            user32 = ctypes.windll.user32
+            hwnd = user32.FindWindowW(None, dpg.get_viewport_title())
+            if not hwnd:
+                return False
+            pt = wt.POINT(0, 0)
+            user32.ClientToScreen(hwnd, ctypes.byref(pt))
+            client_x = screen_x - pt.x
+            client_y = screen_y - pt.y
+        except Exception:
+            return False
+
+        if client_y < 0 or client_y > self._total_height:
+            return False
+
+        divider_x = self.get_divider_x()
+        if self._total_width > 0:
+            right_pane_x = divider_x + 12  # matches gap_width default
+            return divider_x <= client_x <= right_pane_x
+        return abs(client_x - divider_x) < 4
+
     def populate_rows(
         self,
         items: list[tuple[str, ...]],
@@ -249,4 +279,52 @@ class ResourceBrowserPane:
             self._is_dragging_divider = False
             self._last_mouse_x = 0
 
+        # ── Divider highlight (VS Code style blue tint) ───────────────────────
+        is_hovering = on_divider and not is_button_down
+        is_active   = self._is_dragging_divider
+        self._update_divider_highlight(is_hovering or is_active, gap_width)
+
         return self._is_dragging_divider
+
+    def _update_divider_highlight(self, show: bool, gap_width: int) -> None:
+        """Draw or hide the blue highlight rectangle over the divider gap.
+
+        Uses a viewport drawlist so the rectangle renders on top of all windows
+        regardless of the DPG item hierarchy.
+        """
+        highlight_tag = self._tag("divider_highlight")
+        draw_tag      = self._tag("divider_draw")
+
+        if not show:
+            if dpg.does_item_exist(highlight_tag):
+                dpg.configure_item(highlight_tag, show=False)
+            return
+
+        # get_item_rect_min returns viewport-local coordinates of the browser
+        # panel's top-left corner, which is exactly where the divider starts.
+        try:
+            _rx, ry = dpg.get_item_rect_min(self.root_tag)
+        except Exception:
+            return
+
+        panel_w = self.get_panel_width()
+        x0 = panel_w           # left edge of gap in viewport coords
+        y0 = int(ry)
+        x1 = x0 + gap_width
+        y1 = y0 + max(1, self._total_height)
+
+        if not dpg.does_item_exist(highlight_tag):
+            # front=True renders above all Dear PyGui windows
+            dpg.add_viewport_drawlist(tag=highlight_tag, front=True)
+            dpg.draw_rectangle(
+                (x0, y0),
+                (x1, y1),
+                color=(0, 0, 0, 0),
+                fill=(0, 120, 212, 80),   # VS Code blue, ~31 % opacity
+                tag=draw_tag,
+                parent=highlight_tag,
+            )
+        else:
+            dpg.configure_item(highlight_tag, show=True)
+            if dpg.does_item_exist(draw_tag):
+                dpg.configure_item(draw_tag, pmin=(x0, y0), pmax=(x1, y1))
