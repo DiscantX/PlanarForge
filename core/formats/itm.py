@@ -185,7 +185,7 @@ class TargetType(IntEnum):
 
 
 class EffectTarget(IntEnum):
-    """Feature block target (offset 0x20 in feature block)."""
+    """Feature block target type (offset 0x02 in feature block)."""
     NONE            = 0
     SELF            = 1
     PRESET_TARGET   = 2
@@ -199,17 +199,18 @@ class EffectTarget(IntEnum):
 
 
 class EffectTiming(IntEnum):
-    """Feature block timing mode (offset 0x22 in feature block)."""
-    DURATION        = 0   # lasts for duration
-    PERMANENT_UNSAVED = 1 # permanent, not saved
-    WHILE_EQUIPPED  = 2   # active only while item equipped
-    DELAYED         = 3   # delayed, then duration
-    DELAYED_PERMANENT = 4
-    DELAYED_UNSAVED = 5
-    DURATION_AFTER_DEATH = 6
-    PERMANENT_AFTER_DEATH = 7
-    INDEPENDENT    = 8    # not related to casting
-    PERMANENT_SAVED = 9   # permanent, saved
+    """Feature block timing mode (offset 0x0C in feature block)."""
+    DURATION             = 0
+    PERMANENT            = 1
+    WHILE_EQUIPPED       = 2
+    DELAYED_DURATION     = 3
+    DELAYED              = 4
+    DELAYED_TRANSFORMS   = 5
+    DURATION_2           = 6
+    PERMANENT_2          = 7
+    PERMANENT_UNSAVED    = 8
+    PERMANENT_AFTER_DEATH = 9
+    TRIGGER              = 10
 
 
 # ---------------------------------------------------------------------------
@@ -226,22 +227,22 @@ class FeatureBlock:
     Both extended headers (ability effects) and the equipping effect list
     use the same 48-byte structure.
     """
-    opcode:         int = 0       # uint16  — which effect (see IESDP opcodes)
-    target:         int = 0       # uint8   — EffectTarget
-    power:          int = 0       # uint8   — caster/item level required
-    parameter1:     int = 0       # int32
-    parameter2:     int = 0       # int32
-    timing_mode:    int = 0       # uint8   — EffectTiming
-    dispel_resist:  int = 0       # uint8
-    duration:       int = 0       # uint32  — in ticks (15 ticks/sec)
-    probability1:   int = 100     # uint8   — high byte of probability
-    probability2:   int = 0       # uint8   — low byte  (combined = uint16)
-    resource:       ResRef = ResRef("")   # ResRef  — resource used by effect
-    dice_count:     int = 0       # int32
-    dice_sides:     int = 0       # int32
-    saving_throw:   int = 0       # uint32  — saving throw flags
-    save_bonus:     int = 0       # int32
-    special:        int = 0       # uint32  — effect-specific
+    opcode:         int = 0       # uint16 0x00 — Opcode number
+    target:         int = 0       # uint8  0x02 — Target type
+    power:          int = 0       # uint8  0x03 — Power
+    parameter1:     int = 0       # int32  0x04 — Parameter 1
+    parameter2:     int = 0       # int32  0x08 — Parameter 2
+    timing_mode:    int = 0       # uint8  0x0C — Timing mode
+    resistance:     int = 0       # uint8  0x0D — Resistance
+    duration:       int = 0       # uint32 0x0E — Duration
+    probability1:   int = 100     # uint8  0x12 — Probability 1
+    probability2:   int = 0       # uint8  0x13 — Probability 2
+    resource:       ResRef = ResRef("")   # resref 0x14 — Resource
+    dice_thrown:     int = 0       # int32  0x1C — Dice thrown
+    dice_sides:     int = 0       # int32  0x20 — Dice sides
+    saving_throw:   int = 0       # uint32 0x24 — Saving throw type
+    save_bonus:     int = 0       # int32  0x28 — Saving throw bonus
+    special:        int = 0       # uint32 0x2C — Special
 
     # ------------------------------------------------------------------
     # Binary I/O
@@ -255,12 +256,12 @@ class FeatureBlock:
         parameter1    = r.read_int32()
         parameter2    = r.read_int32()
         timing_mode   = r.read_uint8()
-        dispel_resist = r.read_uint8()
+        resistance    = r.read_uint8()
         duration      = r.read_uint32()
         probability1  = r.read_uint8()
         probability2  = r.read_uint8()
         resource      = ResRef(r.read_resref())
-        dice_count    = r.read_int32()
+        dice_thrown    = r.read_int32()
         dice_sides    = r.read_int32()
         saving_throw  = r.read_uint32()
         save_bonus    = r.read_int32()
@@ -268,10 +269,10 @@ class FeatureBlock:
         return cls(
             opcode=opcode, target=target, power=power,
             parameter1=parameter1, parameter2=parameter2,
-            timing_mode=timing_mode, dispel_resist=dispel_resist,
+            timing_mode=timing_mode, resistance=resistance,
             duration=duration, probability1=probability1,
             probability2=probability2, resource=resource,
-            dice_count=dice_count, dice_sides=dice_sides,
+            dice_thrown=dice_thrown, dice_sides=dice_sides,
             saving_throw=saving_throw, save_bonus=save_bonus,
             special=special,
         )
@@ -283,12 +284,12 @@ class FeatureBlock:
         w.write_int32(self.parameter1)
         w.write_int32(self.parameter2)
         w.write_uint8(self.timing_mode)
-        w.write_uint8(self.dispel_resist)
+        w.write_uint8(self.resistance)
         w.write_uint32(self.duration)
         w.write_uint8(self.probability1)
         w.write_uint8(self.probability2)
         w.write_resref(str(self.resource))
-        w.write_int32(self.dice_count)
+        w.write_int32(self.dice_thrown)
         w.write_int32(self.dice_sides)
         w.write_uint32(self.saving_throw)
         w.write_int32(self.save_bonus)
@@ -300,42 +301,42 @@ class FeatureBlock:
 
     def to_json(self) -> dict:
         d: dict = {"opcode": self.opcode}
-        if self.target:         d["target"]        = self.target
-        if self.power:          d["power"]         = self.power
-        if self.parameter1:     d["parameter1"]    = self.parameter1
-        if self.parameter2:     d["parameter2"]    = self.parameter2
-        if self.timing_mode:    d["timing_mode"]   = self.timing_mode
-        if self.dispel_resist:  d["dispel_resist"] = self.dispel_resist
-        if self.duration:       d["duration"]      = self.duration
-        if self.probability1 != 100: d["probability1"] = self.probability1
-        if self.probability2:   d["probability2"]  = self.probability2
-        if self.resource:       d["resource"]      = self.resource.to_json()
-        if self.dice_count:     d["dice_count"]    = self.dice_count
-        if self.dice_sides:     d["dice_sides"]    = self.dice_sides
-        if self.saving_throw:   d["saving_throw"]  = self.saving_throw
-        if self.save_bonus:     d["save_bonus"]    = self.save_bonus
-        if self.special:        d["special"]       = self.special
+        if self.target:              d["target"]        = self.target
+        if self.power:               d["power"]         = self.power
+        if self.parameter1:          d["parameter1"]    = self.parameter1
+        if self.parameter2:          d["parameter2"]    = self.parameter2
+        if self.timing_mode:         d["timing_mode"]   = self.timing_mode
+        if self.resistance:          d["resistance"]    = self.resistance
+        if self.duration:            d["duration"]      = self.duration
+        if self.probability1 != 100: d["probability1"]  = self.probability1
+        if self.probability2:        d["probability2"]  = self.probability2
+        if self.resource:            d["resource"]      = self.resource.to_json()
+        if self.dice_thrown:          d["dice_thrown"]    = self.dice_thrown
+        if self.dice_sides:          d["dice_sides"]    = self.dice_sides
+        if self.saving_throw:        d["saving_throw"]  = self.saving_throw
+        if self.save_bonus:          d["save_bonus"]    = self.save_bonus
+        if self.special:             d["special"]       = self.special
         return d
 
     @classmethod
     def from_json(cls, d: dict) -> "FeatureBlock":
         return cls(
-            opcode        = d.get("opcode", 0),
-            target        = d.get("target", 0),
-            power         = d.get("power", 0),
-            parameter1    = d.get("parameter1", 0),
-            parameter2    = d.get("parameter2", 0),
-            timing_mode   = d.get("timing_mode", 0),
-            dispel_resist = d.get("dispel_resist", 0),
-            duration      = d.get("duration", 0),
+            opcode        = d.get("opcode",       0),
+            target        = d.get("target",       0),
+            power         = d.get("power",        0),
+            parameter1    = d.get("parameter1",   0),
+            parameter2    = d.get("parameter2",   0),
+            timing_mode   = d.get("timing_mode",  0),
+            resistance    = d.get("resistance",   0),
+            duration      = d.get("duration",     0),
             probability1  = d.get("probability1", 100),
             probability2  = d.get("probability2", 0),
             resource      = ResRef.from_json(d.get("resource", "")),
-            dice_count    = d.get("dice_count", 0),
-            dice_sides    = d.get("dice_sides", 0),
+            dice_thrown    = d.get("dice_thrown",   0),
+            dice_sides    = d.get("dice_sides",   0),
             saving_throw  = d.get("saving_throw", 0),
-            save_bonus    = d.get("save_bonus", 0),
-            special       = d.get("special", 0),
+            save_bonus    = d.get("save_bonus",   0),
+            special       = d.get("special",      0),
         )
 
 
@@ -354,34 +355,37 @@ class ExtendedHeader:
     blocks for each header are stored in the global feature block array;
     this struct records the slice via *feature_offset* + *feature_count*.
     """
-    attack_type:       int = AttackType.NONE    # uint8
-    id_req:            int = 0                  # uint8  — identification required
-    location:          int = 0                  # uint8  — where in the UI this appears
-    alt_dice_sides:    int = 0                  # uint8
-    use_icon:          ResRef = ResRef("")              # ResRef — icon shown in quick-slot
-    target_type:       int = TargetType.INVALID # uint8
-    target_count:      int = 1                  # uint8
-    range:             int = 0                  # uint16 — in feet
-    projectile_type:   int = 0                  # uint16
-    alt_dice_count:    int = 0                  # int16
-    speed:             int = 0                  # int8   — attack speed factor
-    alt_damage_bonus:  int = 0                  # int8
-    thac0_bonus:       int = 0                  # int16
-    dice_sides:        int = 0                  # uint8
-    primary_type:      int = 0                  # uint8  — school / magic type
-    dice_count:        int = 0                  # uint8
-    secondary_type:    int = 0                  # uint8
-    damage_bonus:      int = 0                  # int16
-    damage_type:       int = 0                  # uint16
-    feature_count:     int = 0                  # uint16 — number of feature blocks
-    feature_offset:    int = 0                  # uint16 — index into global feature array
-    charges:           int = 0                  # uint16
-    charge_depletion:  int = 0                  # uint16
-    flags:             int = 0                  # uint32
-    projectile_anim:   int = 0                  # uint16
-    melee_anim:        List[int] = field(default_factory=lambda: [0, 0, 0])  # 3×uint16
-    bow_arrow_qual:    int = 0                  # uint16
-    arrow_unknown:     int = 0                  # uint16 — padding/unknown
+    # IESDP V1/V1.1 Extended Header layout (56 bytes total).
+    # Offsets are relative to the start of the extended header struct.
+    attack_type:       int = AttackType.NONE    # uint8  0x00 — Attack type
+    id_req:            int = 0                  # uint8  0x01 — ID Req.
+    location:          int = 0                  # uint8  0x02 — Location
+    alt_dice_sides:    int = 0                  # uint8  0x03 — Alternate dice sides
+    use_icon:          ResRef = ResRef("")       # resref 0x04 — Use icon (BAM)
+    target_type:       int = TargetType.INVALID # uint8  0x0C — Target type
+    target_count:      int = 0                  # uint8  0x0D — Target count
+    range:             int = 0                  # uint16 0x0E — Range
+    projectile_type:     int = 0                  # uint8  0x10 — Projectile type (0=None,1=Arrow,2=Bolt,3=Bullet)
+    alt_dice_thrown:    int = 0                  # uint8  0x11 — Alternative dice thrown
+    speed:             int = 0                  # uint8  0x12 — Speed
+    alt_damage_bonus:  int = 0                  # int8   0x13 — Alternative damage bonus
+    thac0_bonus:       int = 0                  # int16  0x14 — THAC0 bonus
+    dice_sides:        int = 0                  # uint8  0x16 — Dice sides
+    primary_type:      int = 0                  # uint8  0x17 — Primary type
+    dice_thrown:        int = 0                  # uint8  0x18 — Dice thrown
+    secondary_type:    int = 0                  # uint8  0x19 — Secondary type
+    damage_bonus:      int = 0                  # int16  0x1A — Damage bonus
+    damage_type:       int = 0                  # uint16 0x1C — Damage type
+    feature_count:     int = 0                  # uint16 0x1E — Count of feature blocks
+    feature_offset:    int = 0                  # uint16 0x20 — Index into feature blocks
+    charges:           int = 0                  # uint16 0x22 — Charges
+    charge_depletion:  int = 0                  # uint16 0x24 — Charge depletion behaviour
+    flags:             int = 0                  # uint32 0x26 — Flags
+    projectile_anim:   int = 0                  # uint16 0x2A — Projectile animation
+    melee_anim:        List[int] = field(default_factory=lambda: [0, 0, 0])  # 3×uint16 0x2C–0x31
+    unused_0x32:      int = 0                  # uint16 0x32 — Unused (IESDP V1/V1.1)
+    unused_0x34:      int = 0                  # uint16 0x34 — Unused (IESDP V1/V1.1)
+    unused_0x36:      int = 0                  # uint16 0x36 — Unused (IESDP V1/V1.1)
 
     # Feature blocks belonging to this header (populated after full parse)
     features: List[FeatureBlock] = field(default_factory=list)
@@ -392,82 +396,87 @@ class ExtendedHeader:
 
     @classmethod
     def _read(cls, r: BinaryReader) -> "ExtendedHeader":
-        attack_type      = r.read_uint8()
-        id_req           = r.read_uint8()
-        location         = r.read_uint8()
-        alt_dice_sides   = r.read_uint8()
-        use_icon         = ResRef(r.read_resref())
-        target_type      = r.read_uint8()
-        target_count     = r.read_uint8()
-        rng              = r.read_uint16()
-        projectile_type  = r.read_uint16()
-        alt_dice_count   = r.read_int16()
-        speed            = r.read_int8()
-        alt_damage_bonus = r.read_int8()
-        thac0_bonus      = r.read_int16()
-        dice_sides       = r.read_uint8()
-        primary_type     = r.read_uint8()
-        dice_count       = r.read_uint8()
-        secondary_type   = r.read_uint8()
-        damage_bonus     = r.read_int16()
-        damage_type      = r.read_uint16()
-        feature_count    = r.read_uint16()
-        feature_offset   = r.read_uint16()
-        charges          = r.read_uint16()
-        charge_depletion = r.read_uint16()
-        flags            = r.read_uint32()
-        projectile_anim  = r.read_uint16()
-        melee_anim       = [r.read_uint16() for _ in range(3)]
-        bow_arrow_qual   = r.read_uint16()
-        arrow_unknown    = r.read_uint16()
+        # IESDP V1/V1.1 offsets (struct-relative):
+        attack_type      = r.read_uint8()          # 0x00
+        id_req           = r.read_uint8()          # 0x01
+        location         = r.read_uint8()          # 0x02
+        alt_dice_sides   = r.read_uint8()          # 0x03
+        use_icon         = ResRef(r.read_resref()) # 0x04–0x0B
+        target_type      = r.read_uint8()          # 0x0C
+        target_count     = r.read_uint8()          # 0x0D
+        rng              = r.read_uint16()         # 0x0E–0x0F
+        projectile_type    = r.read_uint8()          # 0x10 — Projectile type
+        alt_dice_thrown   = r.read_uint8()          # 0x11 — Alternative dice thrown
+        speed            = r.read_uint8()          # 0x12 — Speed
+        alt_damage_bonus = r.read_int8()           # 0x13 — Alternative damage bonus
+        thac0_bonus      = r.read_int16()          # 0x14–0x15 — THAC0 bonus
+        dice_sides       = r.read_uint8()          # 0x16
+        primary_type     = r.read_uint8()          # 0x17
+        dice_thrown       = r.read_uint8()          # 0x18 — Dice thrown
+        secondary_type   = r.read_uint8()          # 0x19
+        damage_bonus     = r.read_int16()          # 0x1A–0x1B
+        damage_type      = r.read_uint16()         # 0x1C–0x1D
+        feature_count    = r.read_uint16()         # 0x1E–0x1F
+        feature_offset   = r.read_uint16()         # 0x20–0x21
+        charges          = r.read_uint16()         # 0x22–0x23
+        charge_depletion = r.read_uint16()         # 0x24–0x25
+        flags            = r.read_uint32()         # 0x26–0x29
+        projectile_anim  = r.read_uint16()         # 0x2A–0x2B
+        melee_anim       = [r.read_uint16() for _ in range(3)]  # 0x2C–0x31
+        unused_0x32     = r.read_uint16()         # 0x32–0x33
+        unused_0x34     = r.read_uint16()         # 0x34–0x35
+        unused_0x36     = r.read_uint16()         # 0x36–0x37
         return cls(
             attack_type=attack_type, id_req=id_req, location=location,
             alt_dice_sides=alt_dice_sides, use_icon=use_icon,
             target_type=target_type, target_count=target_count,
             range=rng, projectile_type=projectile_type,
-            alt_dice_count=alt_dice_count, speed=speed,
+            alt_dice_thrown=alt_dice_thrown, speed=speed,
             alt_damage_bonus=alt_damage_bonus, thac0_bonus=thac0_bonus,
             dice_sides=dice_sides, primary_type=primary_type,
-            dice_count=dice_count, secondary_type=secondary_type,
+            dice_thrown=dice_thrown, secondary_type=secondary_type,
             damage_bonus=damage_bonus, damage_type=damage_type,
             feature_count=feature_count, feature_offset=feature_offset,
             charges=charges, charge_depletion=charge_depletion,
             flags=flags, projectile_anim=projectile_anim,
-            melee_anim=melee_anim, bow_arrow_qual=bow_arrow_qual,
-            arrow_unknown=arrow_unknown,
+            melee_anim=melee_anim,
+            unused_0x32=unused_0x32,
+            unused_0x34=unused_0x34,
+            unused_0x36=unused_0x36,
         )
 
     def _write(self, w: BinaryWriter, feature_offset: int) -> None:
         """Write the 56-byte struct.  *feature_offset* is the global index."""
-        w.write_uint8(self.attack_type)
-        w.write_uint8(self.id_req)
-        w.write_uint8(self.location)
-        w.write_uint8(self.alt_dice_sides)
-        w.write_resref(str(self.use_icon))
-        w.write_uint8(self.target_type)
-        w.write_uint8(self.target_count)
-        w.write_uint16(self.range)
-        w.write_uint16(self.projectile_type)
-        w.write_int16(self.alt_dice_count)
-        w.write_int8(self.speed)
-        w.write_int8(self.alt_damage_bonus)
-        w.write_int16(self.thac0_bonus)
-        w.write_uint8(self.dice_sides)
-        w.write_uint8(self.primary_type)
-        w.write_uint8(self.dice_count)
-        w.write_uint8(self.secondary_type)
-        w.write_int16(self.damage_bonus)
-        w.write_uint16(self.damage_type)
-        w.write_uint16(len(self.features))
-        w.write_uint16(feature_offset)
-        w.write_uint16(self.charges)
-        w.write_uint16(self.charge_depletion)
-        w.write_uint32(self.flags)
-        w.write_uint16(self.projectile_anim)
+        w.write_uint8(self.attack_type)           # 0x00
+        w.write_uint8(self.id_req)                # 0x01
+        w.write_uint8(self.location)              # 0x02
+        w.write_uint8(self.alt_dice_sides)        # 0x03
+        w.write_resref(str(self.use_icon))        # 0x04–0x0B
+        w.write_uint8(self.target_type)           # 0x0C
+        w.write_uint8(self.target_count)          # 0x0D
+        w.write_uint16(self.range)                # 0x0E–0x0F
+        w.write_uint8(self.projectile_type)         # 0x10
+        w.write_uint8(self.alt_dice_thrown)        # 0x11
+        w.write_uint8(self.speed)                 # 0x12
+        w.write_int8(self.alt_damage_bonus)       # 0x13
+        w.write_int16(self.thac0_bonus)           # 0x14–0x15
+        w.write_uint8(self.dice_sides)            # 0x16
+        w.write_uint8(self.primary_type)          # 0x17
+        w.write_uint8(self.dice_thrown)            # 0x18
+        w.write_uint8(self.secondary_type)        # 0x19
+        w.write_int16(self.damage_bonus)          # 0x1A–0x1B
+        w.write_uint16(self.damage_type)          # 0x1C–0x1D
+        w.write_uint16(len(self.features))        # 0x1E–0x1F
+        w.write_uint16(feature_offset)            # 0x20–0x21
+        w.write_uint16(self.charges)              # 0x22–0x23
+        w.write_uint16(self.charge_depletion)     # 0x24–0x25
+        w.write_uint32(self.flags)                # 0x26–0x29
+        w.write_uint16(self.projectile_anim)      # 0x2A–0x2B
         for v in (self.melee_anim + [0, 0, 0])[:3]:
-            w.write_uint16(v)
-        w.write_uint16(self.bow_arrow_qual)
-        w.write_uint16(self.arrow_unknown)
+            w.write_uint16(v)                     # 0x2C–0x31
+        w.write_uint16(self.unused_0x32)         # 0x32–0x33
+        w.write_uint16(self.unused_0x34)         # 0x34–0x35
+        w.write_uint16(self.unused_0x36)         # 0x36–0x37
 
     # ------------------------------------------------------------------
     # JSON
@@ -480,27 +489,30 @@ class ExtendedHeader:
             "range":        self.range,
             "charges":      self.charges,
         }
-        if self.use_icon:          d["use_icon"]          = self.use_icon.to_json()
-        if self.id_req:            d["id_req"]            = self.id_req
-        if self.location:          d["location"]          = self.location
-        if self.target_count != 1: d["target_count"]      = self.target_count
-        if self.projectile_type:   d["projectile_type"]   = self.projectile_type
-        if self.alt_dice_count:    d["alt_dice_count"]    = self.alt_dice_count
-        if self.alt_dice_sides:    d["alt_dice_sides"]    = self.alt_dice_sides
-        if self.alt_damage_bonus:  d["alt_damage_bonus"]  = self.alt_damage_bonus
-        if self.speed:             d["speed"]             = self.speed
-        if self.thac0_bonus:       d["thac0_bonus"]       = self.thac0_bonus
-        if self.dice_count:        d["dice_count"]        = self.dice_count
-        if self.dice_sides:        d["dice_sides"]        = self.dice_sides
-        if self.damage_bonus:      d["damage_bonus"]      = self.damage_bonus
-        if self.damage_type:       d["damage_type"]       = self.damage_type
-        if self.primary_type:      d["primary_type"]      = self.primary_type
-        if self.secondary_type:    d["secondary_type"]    = self.secondary_type
-        if self.charge_depletion:  d["charge_depletion"]  = self.charge_depletion
-        if self.flags:             d["flags"]             = self.flags
-        if self.projectile_anim:   d["projectile_anim"]   = self.projectile_anim
-        if any(self.melee_anim):   d["melee_anim"]        = self.melee_anim
-        if self.bow_arrow_qual:    d["bow_arrow_qual"]    = self.bow_arrow_qual
+        if self.use_icon:           d["use_icon"]          = self.use_icon.to_json()
+        if self.id_req:             d["id_req"]            = self.id_req
+        if self.location:           d["location"]          = self.location
+        if self.target_count:       d["target_count"]      = self.target_count
+        if self.projectile_type:      d["projectile_type"]     = self.projectile_type
+        if self.alt_dice_thrown:     d["alt_dice_thrown"]    = self.alt_dice_thrown
+        if self.alt_dice_sides:     d["alt_dice_sides"]    = self.alt_dice_sides
+        if self.speed:              d["speed"]             = self.speed
+        if self.alt_damage_bonus:   d["alt_damage_bonus"]  = self.alt_damage_bonus
+        if self.thac0_bonus:        d["thac0_bonus"]       = self.thac0_bonus
+        if self.dice_thrown:         d["dice_thrown"]        = self.dice_thrown
+        if self.dice_sides:         d["dice_sides"]        = self.dice_sides
+        if self.damage_bonus:       d["damage_bonus"]      = self.damage_bonus
+        if self.damage_type:        d["damage_type"]       = self.damage_type
+        if self.primary_type:       d["primary_type"]      = self.primary_type
+        if self.secondary_type:     d["secondary_type"]    = self.secondary_type
+        if self.charge_depletion:   d["charge_depletion"]  = self.charge_depletion
+        if self.flags:              d["flags"]             = self.flags
+        if self.projectile_anim:    d["projectile_anim"]   = self.projectile_anim
+        if any(self.melee_anim):    d["melee_anim"]        = self.melee_anim
+        if self.unused_0x32:       d["unused_0x32"]      = self.unused_0x32
+        if self.unused_0x34:       d["unused_0x34"]      = self.unused_0x34
+        if self.unused_0x36:       d["unused_0x36"]      = self.unused_0x36
+        if self.feature_offset:     d["feature_offset"]    = self.feature_offset
         if self.features:
             d["features"] = [f.to_json() for f in self.features]
         return d
@@ -508,31 +520,34 @@ class ExtendedHeader:
     @classmethod
     def from_json(cls, d: dict) -> "ExtendedHeader":
         eh = cls(
-            attack_type      = d.get("attack_type", AttackType.NONE),
-            id_req           = d.get("id_req", 0),
-            location         = d.get("location", 0),
-            alt_dice_sides   = d.get("alt_dice_sides", 0),
+            attack_type      = d.get("attack_type",      AttackType.NONE),
+            id_req           = d.get("id_req",           0),
+            location         = d.get("location",         0),
+            alt_dice_sides   = d.get("alt_dice_sides",   0),
             use_icon         = ResRef.from_json(d.get("use_icon", "")),
-            target_type      = d.get("target_type", TargetType.INVALID),
-            target_count     = d.get("target_count", 1),
-            range            = d.get("range", 0),
-            projectile_type  = d.get("projectile_type", 0),
-            alt_dice_count   = d.get("alt_dice_count", 0),
-            speed            = d.get("speed", 0),
+            target_type      = d.get("target_type",      TargetType.INVALID),
+            target_count     = d.get("target_count",     0),
+            range            = d.get("range",            0),
+            projectile_type    = d.get("projectile_type",    0),
+            alt_dice_thrown   = d.get("alt_dice_thrown",   0),
+            speed            = d.get("speed",            0),
             alt_damage_bonus = d.get("alt_damage_bonus", 0),
-            thac0_bonus      = d.get("thac0_bonus", 0),
-            dice_sides       = d.get("dice_sides", 0),
-            primary_type     = d.get("primary_type", 0),
-            dice_count       = d.get("dice_count", 0),
-            secondary_type   = d.get("secondary_type", 0),
-            damage_bonus     = d.get("damage_bonus", 0),
-            damage_type      = d.get("damage_type", 0),
-            charges          = d.get("charges", 0),
+            thac0_bonus      = d.get("thac0_bonus",      0),
+            dice_sides       = d.get("dice_sides",       0),
+            primary_type     = d.get("primary_type",     0),
+            dice_thrown       = d.get("dice_thrown",       0),
+            secondary_type   = d.get("secondary_type",   0),
+            damage_bonus     = d.get("damage_bonus",     0),
+            damage_type      = d.get("damage_type",      0),
+            charges          = d.get("charges",          0),
             charge_depletion = d.get("charge_depletion", 0),
-            flags            = d.get("flags", 0),
-            projectile_anim  = d.get("projectile_anim", 0),
-            melee_anim       = d.get("melee_anim", [0, 0, 0]),
-            bow_arrow_qual   = d.get("bow_arrow_qual", 0),
+            flags            = d.get("flags",            0),
+            projectile_anim  = d.get("projectile_anim",  0),
+            melee_anim       = d.get("melee_anim",       [0, 0, 0]),
+            unused_0x32     = d.get("unused_0x32",     0),
+            unused_0x34     = d.get("unused_0x34",     0),
+            unused_0x36     = d.get("unused_0x36",     0),
+            feature_offset  = d.get("feature_offset",  0),
         )
         eh.features = [FeatureBlock.from_json(f) for f in d.get("features", [])]
         return eh
@@ -752,7 +767,7 @@ class ItmFile:
 
         itm = ItmFile.from_file("SW1H01.itm")
         eh = itm.extended_headers[0]
-        print(eh.dice_count, "d", eh.dice_sides, "+", eh.damage_bonus)
+        print(eh.dice_thrown, "d", eh.dice_sides, "+", eh.damage_bonus)
         for fb in itm.equip_features:
             print("equip fx:", fb.opcode)
     """
@@ -986,11 +1001,15 @@ class ItmFile:
         feature_blocks = [
             FeatureBlock.from_json(f) for f in d.get("feature_blocks", [])
         ]
-        # Reattach feature views to extended headers
+        # Reattach feature views to extended headers.
+        # If the extended header JSON had an embedded "features" list (the normal
+        # case), eh.features is already populated by ExtendedHeader.from_json.
+        # Only use the flat feature_blocks slice when the embedded list was absent.
         for eh in ext_headers:
-            eh.features = feature_blocks[
-                eh.feature_offset : eh.feature_offset + eh.feature_count
-            ]
+            if not eh.features and feature_blocks:
+                eh.features = feature_blocks[
+                    eh.feature_offset : eh.feature_offset + eh.feature_count
+                ]
 
         return cls(header, ext_headers, feature_blocks, version=version)
 
