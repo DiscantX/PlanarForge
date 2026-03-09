@@ -228,8 +228,22 @@ class CharacterService:
 
         return _load
 
-    def load_bam_by_resref(self, resref: str) -> tuple[int, int, list[float]] | None:
-        """Load a BAM file and decode its first frame to an RGBA texture tuple."""
+    def load_bam_by_resref(
+        self,
+        resref: str,
+        *,
+        cycle: int = 0,
+        frame: int = 0,
+    ) -> tuple[int, int, list[float]] | None:
+        """Load a BAM file and decode a specific cycle/frame to an RGBA texture tuple.
+
+        Args:
+            resref: BAM resource name.
+            cycle:  Cycle index (from ButtonControl.anim_cycle).
+            frame:  Frame index within the cycle (from ButtonControl.frame_unpressed).
+
+        Falls back to decode_first_frame_rgba if cycle/frame resolution fails.
+        """
         self._ensure_handles()
         if self._key is None:
             return None
@@ -239,11 +253,20 @@ class CharacterService:
         try:
             entry = self._key.find(norm, ResType.BAM)
             if entry is None:
+                print(f"[BAM] {norm!r} not found in KEY")
                 return None
             raw = self._key.read_resource(entry, game_root=self._selected_game)
-            from core.formats.bam import decode_first_frame_rgba
-            return decode_first_frame_rgba(raw)
-        except Exception:
+            from core.formats.bam import decode_cycle_frame_rgba, decode_first_frame_rgba
+            pvrz_loader = self._make_pvrz_loader()
+            try:
+                result = decode_cycle_frame_rgba(raw, cycle=cycle, frame=frame, pvrz_loader=pvrz_loader)
+                print(f"[BAM] {norm!r} cycle={cycle} frame={frame} decoded OK {result[0]}x{result[1]}")
+                return result
+            except Exception as e:
+                print(f"[BAM] {norm!r} cycle={cycle} frame={frame} decode_cycle failed: {e}, trying first_frame")
+                return decode_first_frame_rgba(raw, pvrz_loader=pvrz_loader)
+        except Exception as e:
+            print(f"[BAM] {norm!r} unexpected error: {e}")
             return None
 
     def load_chu_by_resref(self, resref: str) -> bytes | None:
@@ -378,6 +401,26 @@ class CharacterService:
             return enum_cls(value).name.replace("_", " ").title()
         except Exception:
             return str(value)
+
+    def _make_pvrz_loader(self):
+        """Return a callable that loads a PVRZ page by page number for BAM V2 decoding."""
+        from core.formats.pvrz import PvrzFile
+        from core.formats.key_biff import ResType
+
+        def loader(page: int):
+            if self._key is None:
+                return None
+            try:
+                resref = f"MOS{page:04d}"
+                entry = self._key.find(resref, ResType.PVRZ)
+                if entry is None:
+                    return None
+                raw = self._key.read_resource(entry, game_root=self._selected_game)
+                return PvrzFile.from_bytes(raw)
+            except Exception:
+                return None
+
+        return loader
 
     def _report_progress(self, message: str) -> None:
         """Report progress to the callback if set."""

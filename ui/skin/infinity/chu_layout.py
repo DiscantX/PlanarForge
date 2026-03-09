@@ -44,6 +44,11 @@ class SlotRect:
     y:      int
     width:  int
     height: int
+    # BAM art for the slot frame, read from the CHU ButtonControl.
+    # Empty string means no CHU data available (fallback will be used).
+    bam_resref:      str = ""
+    anim_cycle:      int = 0   # which BAM cycle holds the button frames
+    frame_unpressed: int = 0   # frame index within that cycle for unpressed state
 
     @property
     def pmin(self) -> tuple[int, int]:
@@ -326,12 +331,30 @@ class ChuLayout:
             ctrl = window.find_control(ctrl_id)
             if ctrl is None:
                 continue
+            bam_resref = ""
+            anim_cycle = 0
+            frame_unpressed = 0
+            if isinstance(ctrl, ButtonControl):
+                bam_resref = str(ctrl.bam_resref).strip().upper()
+                anim_cycle = int(ctrl.anim_cycle)
+                frame_unpressed = int(ctrl.frame_unpressed)
+            else:
+                print(f"[ChuLayout] slot {slot_name!r} ctrl_id={ctrl_id}: expected ButtonControl, got {type(ctrl).__name__} (type={ctrl.type})")
             slots[slot_name] = SlotRect(
                 x=ctrl.x,
                 y=ctrl.y,
                 width=ctrl.width,
                 height=ctrl.height,
+                bam_resref=bam_resref,
+                anim_cycle=anim_cycle,
+                frame_unpressed=frame_unpressed,
             )
+
+        bam_found = sum(1 for r in slots.values() if r.bam_resref)
+        print(f"[ChuLayout] from_chu: {len(slots)} slots resolved, {bam_found} with bam_resref")
+        if bam_found:
+            sample = next(r for r in slots.values() if r.bam_resref)
+            print(f"[ChuLayout]   sample: bam_resref={sample.bam_resref!r} cycle={sample.anim_cycle} frame={sample.frame_unpressed}")
 
         return cls(
             background_mos=window.background_mos,

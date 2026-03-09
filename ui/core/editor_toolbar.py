@@ -51,11 +51,9 @@ class EditorToolbar:
         self.refresh_btn_tag = self._tag("refresh_btn")
         self.rebuild_btn_tag = self._tag("rebuild_btn")
         self.status_tag = self._tag("status")
-        self.loading_ind_tag = self._tag("loading_ind")
 
         # Loading state
         self._is_loading = False
-        self._spinner_frame = 0
 
         # Create the toolbar UI
         with dpg.group(tag=self.root_tag, parent=parent_tag, horizontal=True):
@@ -83,7 +81,6 @@ class EditorToolbar:
                 extra_controls(self.root_tag)
 
             dpg.add_spacer(width=8)
-            dpg.add_text("", tag=self.loading_ind_tag, color=(150, 200, 255))
             dpg.add_text("", tag=self.status_tag)
 
     def _tag(self, suffix: str) -> str:
@@ -121,40 +118,18 @@ class EditorToolbar:
     def set_loading(self, is_loading: bool, message: str = "") -> None:
         """
         Set loading state with optional message.
-        
+
         Args:
-            is_loading: True to show loading spinner, False to hide it.
-            message: Optional message to display with spinner.
+            is_loading: True to indicate loading, False to hide it.
+            message: Optional message to display in status when done.
         """
         self._is_loading = is_loading
-        self._spinner_frame = 0
-        if is_loading:
-            self._update_spinner(message)
-        else:
-            if dpg.does_item_exist(self.loading_ind_tag):
-                dpg.set_value(self.loading_ind_tag, "")
-            if message:
-                self.set_status(message)
-
-    def _update_spinner(self, message: str = "") -> None:
-        """Update the spinner animation frame."""
-        if not self._is_loading or not dpg.does_item_exist(self.loading_ind_tag):
-            return
-        
-        frame_char = _SPINNER_FRAMES[self._spinner_frame % len(_SPINNER_FRAMES)]
-        display = f"{frame_char} {message}" if message else frame_char
-        dpg.set_value(self.loading_ind_tag, display)
-        self._spinner_frame += 1
+        if not is_loading and message:
+            self.set_status(message)
 
     def update_spinner(self, message: str = "") -> None:
-        """
-        Call this each frame to animate the spinner.
-        
-        Args:
-            message: Optional loading message to display next to spinner.
-        """
-        if self._is_loading:
-            self._update_spinner(message)
+        """No-op stub retained for API compatibility."""
+        pass
 
     def _on_game_combo_changed(self, _sender: Any, app_data: str) -> None:
         """Handle game combo change."""

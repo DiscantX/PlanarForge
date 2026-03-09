@@ -184,6 +184,9 @@ class InfinityScreenPanel:
                     y=int(rect.y * scale),
                     width=max(8, int(rect.width * scale)),
                     height=max(8, int(rect.height * scale)),
+                    bam_resref=rect.bam_resref,
+                    anim_cycle=rect.anim_cycle,
+                    frame_unpressed=rect.frame_unpressed,
                 )
                 for name, rect in layout.slots.items()
             }
@@ -272,8 +275,8 @@ class InfinityScreenPanel:
     ) -> None:
         x, y, sw, sh = rect.x, rect.y, rect.width, rect.height
 
-        # Slot background frame
-        frame = self._assets.get_slot_frame_texture()
+        # Slot background frame — use the BAM resref/cycle/frame from the CHU data
+        frame = self._assets.get_slot_frame_texture_for_slot(rect)
         if frame is not None:
             frame_tag, fw, fh = frame
             dpg.draw_image(
@@ -301,25 +304,28 @@ class InfinityScreenPanel:
             )
             return
 
-        # Item icon
+        # Item icon (or placeholder when icon data is unavailable)
         if vm.icon is not None:
             icon_tag, iw, ih = self._assets.texture_for_icon(vm.icon)
-            inset = _ICON_INSET
-            # Scale to fit inside the slot with inset, preserving aspect ratio
-            avail_w = max(1, sw - inset * 2)
-            avail_h = max(1, sh - inset * 2)
-            scale = min(avail_w / max(1, iw), avail_h / max(1, ih))
-            scale = max(scale, 0.5)
-            draw_w = max(1, int(iw * scale))
-            draw_h = max(1, int(ih * scale))
-            ox = x + inset + (avail_w - draw_w) // 2
-            oy = y + inset + (avail_h - draw_h) // 2
-            dpg.draw_image(
-                icon_tag,
-                pmin=(ox, oy),
-                pmax=(ox + draw_w, oy + draw_h),
-                parent=dl,
-            )
+        else:
+            icon_tag, iw, ih = self._assets.get_default_icon_texture()
+
+        inset = _ICON_INSET
+        # Scale to fit inside the slot with inset, preserving aspect ratio
+        avail_w = max(1, sw - inset * 2)
+        avail_h = max(1, sh - inset * 2)
+        scale = min(avail_w / max(1, iw), avail_h / max(1, ih))
+        scale = max(scale, 0.5)
+        draw_w = max(1, int(iw * scale))
+        draw_h = max(1, int(ih * scale))
+        ox = x + inset + (avail_w - draw_w) // 2
+        oy = y + inset + (avail_h - draw_h) // 2
+        dpg.draw_image(
+            icon_tag,
+            pmin=(ox, oy),
+            pmax=(ox + draw_w, oy + draw_h),
+            parent=dl,
+        )
 
     def _build_overlay(
         self,

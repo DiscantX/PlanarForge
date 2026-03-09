@@ -15,7 +15,7 @@ from typing import Callable, Optional
 
 import dearpygui.dearpygui as dpg
 
-from ui.skin.infinity.chu_layout import ChuLayout, ScreenControlMap
+from ui.skin.infinity.chu_layout import ChuLayout, ScreenControlMap, SlotRect
 
 
 class InfinitySkinAssets:
@@ -89,15 +89,21 @@ class InfinitySkinAssets:
     # Slot frame texture (persistent)
     # ------------------------------------------------------------------
 
-    def get_slot_frame_texture(self, bam_resref: str = "STONSLOT") -> tuple[str, int, int] | None:
+    def get_slot_frame_texture(
+        self,
+        bam_resref: str = "STONSLOT",
+        *,
+        cycle: int = 0,
+        frame: int = 0,
+    ) -> tuple[str, int, int] | None:
         """
         Load the slot frame texture.  Tries (in order):
-          1. Named BAM (default STONSLOT — the standard CHU button graphic)
+          1. Named BAM at the given cycle/frame (default STONSLOT cycle=0 frame=0)
           2. Manifest slot_frame_icon_resref (BAM icon)
           3. Manifest slot_frame_mos_resref  (MOS)
           4. Programmatic fallback frame
         """
-        cache_key = f"slot_frame_{bam_resref}"
+        cache_key = f"slot_frame_{bam_resref}_{cycle}_{frame}"
         cached = self._persistent_tags.get(cache_key)
         if cached is not None and dpg.does_item_exist(cached[0]):
             return cached
@@ -105,7 +111,15 @@ class InfinitySkinAssets:
         icon: tuple[int, int, list[float]] | None = None
 
         if bam_resref and self._bam_loader is not None:
-            icon = self._bam_loader(bam_resref)
+            try:
+                icon = self._bam_loader(bam_resref, cycle=cycle, frame=frame)
+            except TypeError:
+                # bam_loader doesn't support cycle/frame kwargs — fall back
+                icon = self._bam_loader(bam_resref)
+            if icon is None:
+                print(f"[SlotFrame] bam_loader returned None for {bam_resref!r} cycle={cycle} frame={frame}")
+        elif bam_resref:
+            print(f"[SlotFrame] no bam_loader available, skipping {bam_resref!r}")
 
         if icon is None:
             icon_resref = self._manifest.get("slot_frame_icon_resref", "").strip().upper()
@@ -124,6 +138,26 @@ class InfinitySkinAssets:
             icon[0], icon[1], icon[2], persistent_key=cache_key
         )
         return tag, width, height
+
+    def get_slot_frame_texture_for_slot(
+        self,
+        rect: SlotRect | None,
+    ) -> tuple[str, int, int] | None:
+        """
+        Convenience wrapper: load the slot frame using BAM info from a SlotRect.
+
+        Falls back to the default STONSLOT if rect has no bam_resref.
+        Import of SlotRect is deferred to avoid a circular import.
+        """
+        if rect is not None and rect.bam_resref:
+            print(f"[SlotFrame] slot bam_resref={rect.bam_resref!r} cycle={rect.anim_cycle} frame={rect.frame_unpressed}")
+            return self.get_slot_frame_texture(
+                rect.bam_resref,
+                cycle=rect.anim_cycle,
+                frame=rect.frame_unpressed,
+            )
+        print(f"[SlotFrame] no bam_resref on rect ({rect!r}), using default STONSLOT")
+        return self.get_slot_frame_texture()
 
     # ------------------------------------------------------------------
     # MOS background texture (persistent, keyed by resref)
@@ -157,6 +191,49 @@ class InfinitySkinAssets:
     def texture_for_icon(self, icon: tuple[int, int, list[float]]) -> tuple[str, int, int]:
         width, height, rgba = icon
         tag, w, h = self._add_texture(width, height, rgba, persistent_key=None)
+        return tag, w, h
+
+    # ------------------------------------------------------------------
+    # Default icon texture (persistent)
+    # ------------------------------------------------------------------
+
+    def get_default_icon_texture(self) -> tuple[str, int, int]:
+        """
+        Return a persistent 'no icon' placeholder texture (question-mark glyph).
+
+        Generated once and cached for the lifetime of the assets instance.
+        Used by the Game Screen panel when an item has no BAM icon set.
+        """
+        cached = self._persistent_tags.get("default_icon")
+        if cached is not None and dpg.does_item_exist(cached[0]):
+            return cached
+
+        size = 32
+        bg: tuple[float, float, float, float] = (0.15, 0.15, 0.15, 1.0)
+        fg: tuple[float, float, float, float] = (0.85, 0.85, 0.85, 1.0)
+        pixels: list[list[float]] = [list(bg) for _ in range(size * size)]
+
+        def _set(x: int, y: int) -> None:
+            if 0 <= x < size and 0 <= y < size:
+                pixels[y * size + x] = list(fg)
+
+        def _rect(x0: int, y0: int, x1: int, y1: int) -> None:
+            for yy in range(y0, y1 + 1):
+                for xx in range(x0, x1 + 1):
+                    _set(xx, yy)
+
+        # Question-mark glyph at 32x32
+        # Top arc of the '?'
+        _rect(10, 6, 21, 7)    # top horizontal bar
+        _rect(8, 8, 9, 9)      # top-left corner
+        _rect(22, 8, 23, 11)   # right vertical of arc
+        _rect(18, 12, 21, 13)  # arc curves down to centre
+        _rect(15, 14, 17, 19)  # vertical stem descending from arc
+        # Dot below the stem
+        _rect(14, 23, 17, 26)
+
+        flat = [c for px in pixels for c in px]
+        tag, w, h = self._add_texture(size, size, flat, persistent_key="default_icon")
         return tag, w, h
 
     # ------------------------------------------------------------------
