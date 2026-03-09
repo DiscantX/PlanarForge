@@ -154,7 +154,7 @@ def apply_vscode_style() -> None:
             dpg.add_theme_color(dpg.mvThemeCol_FrameBgActive, (84, 84, 87, 255))
             dpg.add_theme_style(dpg.mvStyleVar_FrameRounding, 6)
             dpg.add_theme_style(dpg.mvStyleVar_WindowPadding, 0, 0)
-            dpg.add_theme_style(dpg.mvStyleVar_ItemSpacing, 8, 6)
+            dpg.add_theme_style(dpg.mvStyleVar_ItemSpacing, 0, 0)
             dpg.add_theme_style(dpg.mvStyleVar_FramePadding, 8, 5)
 
     with dpg.theme(tag="title_control_theme"):

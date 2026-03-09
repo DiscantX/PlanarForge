@@ -49,6 +49,7 @@ class ResourceBrowserPane:
         self._panel_width: float = 0.30  # Default 30% of parent width
         self._is_dragging_divider: bool = False
         self._last_mouse_x: int = 0
+        self._gap_width: int = 12  # Width of the divider gap between panes
 
         # Create the UI
         with dpg.child_window(
@@ -129,7 +130,7 @@ class ResourceBrowserPane:
             return False
 
         divider_x = self.get_divider_x()
-        right_pane_x = divider_x + 12
+        right_pane_x = divider_x + self._gap_width
         return divider_x <= client_x <= right_pane_x
 
     def populate_rows(
@@ -231,13 +232,15 @@ class ResourceBrowserPane:
                          If provided, allows dragging anywhere from left pane edge to this position.
                          Makes the behavior robust to spacing changes.
             right_pane_min_width: Minimum width to maintain for the right pane (default: 260).
-            gap_width: Width of the gap between panes (default: 12). Used for validation.
+            gap_width: Width of the gap between panes (default: 12).
             
         Returns:
             True if currently dragging the divider
         """
         if not dpg.does_item_exist(self.root_tag):
             return False
+
+        self._gap_width = gap_width  # Keep in sync for cursor/highlight use
 
         divider_x = self.get_divider_x()
 
@@ -286,7 +289,7 @@ class ResourceBrowserPane:
 
     def hide_divider_highlight(self) -> None:
         """Unconditionally hide the divider highlight."""
-        self._update_divider_highlight(False, 12)
+        self._update_divider_highlight(False, self._gap_width)
 
     def _update_divider_highlight(self, show: bool, gap_width: int) -> None:
         """Draw or erase the blue highlight rectangle over the divider gap.
@@ -325,7 +328,8 @@ class ResourceBrowserPane:
         except Exception:
             return
 
-        x1 = x0 + gap_width
+        # TODO: Use correct gap width and rename it to something more fitting such as 
+        x1 = x0 + gap_width - 7 # A small offset to cover the divider area without being too wide (adjust as needed).
         y1 = y0 + max(1, self._total_height)
 
         dpg.draw_rectangle(
