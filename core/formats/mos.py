@@ -245,17 +245,17 @@ class MosFile:
     # Pixel decoding
     # ------------------------------------------------------------------
 
-    def to_rgba(self, pvrz_loader: Optional[Callable[[int], bytes | None]] = None) -> Optional[bytes]:
+    def to_rgba(self, pvrz_loader: Optional[Callable[[int], object]] = None) -> Optional[bytes]:
         """
         Convert to a flat RGBA byte array (width×height×4 bytes).
 
         Works for palette MOS (V1/MOSC) without any external libraries.
         For PVRZ-based MOS (V2), requires a pvrz_loader callable that returns
-        the decompressed PVRZ texture data given a page number.
+        PvrzFile objects given a page number.
 
         Args:
-            pvrz_loader: Optional callable(page_number) -> raw_pvrz_bytes | None
-                         Raw (still zlib-compressed) PVRZ data as stored in the KEY.
+            pvrz_loader: Optional callable(page_number) -> PvrzFile | None
+                         Loader that returns a PvrzFile object for a given page number.
                          If None and MOS is PVRZ-based, returns None.
 
         Returns:
@@ -299,7 +299,7 @@ class MosFile:
 
         return bytes(out)
 
-    def _to_rgba_pvrz(self, pvrz_loader: Callable[[int], bytes | None]) -> Optional[bytes]:
+    def _to_rgba_pvrz(self, pvrz_loader: Callable[[int], object]) -> Optional[bytes]:
         """
         Convert PVRZ-based MOS to RGBA using external PVRZ texture pages.
 
@@ -308,34 +308,34 @@ class MosFile:
 
         src_x/src_y  — source offset within the PVRZ page texture
         dst_x/dst_y  — explicit pixel destination in the output image
+        
+        The pvrz_loader callable should return PvrzFile objects and handle caching.
         """
         try:
             out = bytearray(self.width * self.height * 4)
-            pvrz_cache: dict[int, PvrzFile | None] = {}
             blocks_decoded = 0
 
             for block in self.blocks:
-                # Load and cache PVRZ page
+                # Load PVRZ page via loader (which caches internally at CharacterService level)
                 page_num = block.page
-                if page_num not in pvrz_cache:
-                    pvrz_bytes = pvrz_loader(page_num)
-                    if pvrz_bytes is None:
-                        pvrz_cache[page_num] = None
-                    else:
-                        try:
-                            pvrz_cache[page_num] = PvrzFile.from_bytes(pvrz_bytes)
-                        except Exception as e:
-                            print(f"[MOS PVRZ] Failed to parse PVRZ page {page_num}: {e}")
-                            pvrz_cache[page_num] = None
+                try:
+                    pvrz = pvrz_loader(page_num)
+                except Exception as e:
+                    print(f"[MOS PVRZ] Failed to load PVRZ page {page_num}: {e}")
+                    pvrz = None
 
-                pvrz = pvrz_cache[page_num]
                 if pvrz is None:
                     continue
 
                 # Extract source rectangle from PVRZ page
-                region_rgba = pvrz.get_region_rgba(
-                    block.x, block.y, block.width, block.height
-                )
+                try:
+                    region_rgba = pvrz.get_region_rgba(
+                        block.x, block.y, block.width, block.height
+                    )
+                except Exception as e:
+                    print(f"[MOS PVRZ] Failed to extract region from PVRZ page {page_num}: {e}")
+                    region_rgba = None
+
                 if region_rgba is None:
                     continue
 

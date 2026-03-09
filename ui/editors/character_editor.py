@@ -6,8 +6,7 @@ import dearpygui.dearpygui as dpg
 
 from core.services.character_service import CharacterService
 from core.viewmodels.character_vm import CharacterVM
-from ui.core import EditorToolbar, LoadTracker, ResourceBrowserPane
-from ui.util.async_loader import AsyncLoader
+from ui.core import EditorProgressHandler, EditorToolbar, ResourceBrowserPane
 from ui.skin.infinity import InfinitySkinAssets
 from ui.skin.infinity.screen_panel import InfinityScreenPanel
 
@@ -40,9 +39,9 @@ class CharacterEditorPanel:
         self._total_width: int = 0
         self._total_height: int = 0
         
-        # Load tracking
-        self._load_tracker: LoadTracker | None = None
-        self.service.set_progress_callback(self._on_load_progress)
+        # Progress tracking
+        self._progress_handler = EditorProgressHandler(self._set_status)
+        self.service.set_progress_callback(self._progress_handler.on_progress)
 
         self._skin_assets = InfinitySkinAssets(
             icon_loader=self.service.load_icon_by_resref,
@@ -140,10 +139,6 @@ class CharacterEditorPanel:
     def _set_status(self, text: str) -> None:
         self._toolbar.set_status(text)
 
-    def _on_load_progress(self, message: str) -> None:
-        """Handle progress updates from the service during loading."""
-        self._toolbar.update_spinner(message)
-
     def _load_games(self) -> None:
         games = self.service.list_games()
         self._game_ids = [g.game_id for g in games]
@@ -156,15 +151,13 @@ class CharacterEditorPanel:
 
     def _activate_game(self, game_id: str) -> None:
         try:
-            self._toolbar.set_loading(True, "Initializing...")
+            self._set_status("Initializing...")
             self.service.select_game(game_id)
-            self._toolbar.update_spinner("Loading CRE index...")
+            self._set_status("Loading CRE index...")
             self.service.load_index(force_rebuild=False)
-            self._toolbar.set_loading(False)
             self._set_status(f"Loaded CRE index for {game_id}")
             self._refresh_character_list("")
         except Exception as exc:
-            self._toolbar.set_loading(False)
             self._set_status(f"Failed to select game: {exc}")
 
     def _on_game_selected(self, game_id: str) -> None:
@@ -215,14 +208,12 @@ class CharacterEditorPanel:
 
     def load_character(self, cre_resref: str) -> None:
         try:
-            self._toolbar.set_loading(True, f"Loading {cre_resref}...")
+            self._set_status(f"Loading {cre_resref}...")
             vm, payload = self.service.load_character_with_payload(cre_resref)
-            self._toolbar.update_spinner("Rendering inventory...")
+            self._set_status("Rendering...")
             self._render_character(vm, payload)
-            self._toolbar.set_loading(False)
             self._set_status(f"Loaded {vm.display_name} ({vm.resref})")
         except Exception as exc:
-            self._toolbar.set_loading(False)
             self._set_status(f"Load failed: {exc}")
             self._render_empty()
 

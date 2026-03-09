@@ -794,13 +794,48 @@ Solution — Two-level caching:
    - First region extract triggers full decode, subsequent calls reuse cached decode
    - Instant for multiple region extracts from same page
 2. **CharacterService shared PVRZ cache**: `_pvrz_cache` dict by page number
-   - Raw PVRZ bytes cached after KEY load
-   - Reused by BAM and MOS loaders across all resources
-   - Cleared on game selection change
+   - PvrzFile objects cached after first load from KEY and parse
+   - Single unified `_make_pvrz_loader()` used by both BAM V2 and MOS V2 decoders
+   - Cleared on game selection change to prevent stale resources
 
 Impact: ~5-10× faster loading for multi-resource screens (inventory + background
-using same PVRZ pages). Future: Could pre-cache PVRZ pages at game load time for
-guaranteed instant UI response.
+using same PVRZ pages) thanks to:
+- Unified loader prevents mixed-type cache (both BAM and MOS work with PvrzFile objects)
+- No redundant KEY lookups (page-based caching reused across all resources)
+- No redundant full-texture decodes (PvrzFile internal RGBA cache persists across regions)
+
+Future: Could pre-cache PVRZ pages at game load time for guaranteed instant UI response.
+
+**2026-03 — Reusable Progress Tracking for All Editors**
+
+Created `EditorProgressHandler` (ui/core/progress_handler.py) as a lightweight,
+reusable component for all editors to report progress during long operations.
+This replaces the spinner-based approach which was incompatible with blocking
+operations.
+
+Design:
+- Single responsibility: forward status messages to toolbar
+- Editors instantiate with `EditorProgressHandler(toolbar.set_status)`
+- Services call `_report_progress(message)` at key points
+- Messages automatically appear in blue text on toolbar (no spinner animation needed)
+- Same pattern works for all editors (character, item, spell, etc.)
+- Optional AsyncLoader (ui/util/async_loader.py) for CPU-bound ops needing background threading
+
+Benefits:
+- Simple, copy-paste setup for new editors (3 lines: import, create, wire)
+- No spinner logic to maintain
+- Real-time status visibility
+- Straightforward to add background threading later if needed
+- Extensible for other UI feedback mechanisms (logging, popups, etc.)
+
+Pattern for new editors:
+```python
+from ui.core import EditorProgressHandler
+# In __init__:
+self._progress_handler = EditorProgressHandler(self._set_status)
+service.set_progress_callback(self._progress_handler.on_progress)
+```
+Services then call `_report_progress()` and messages flow through automatically.
 
 ---
 

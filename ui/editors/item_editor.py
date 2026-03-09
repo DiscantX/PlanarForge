@@ -10,7 +10,7 @@ import dearpygui.dearpygui as dpg
 
 from core.services.itm_catalog import ItmCatalog
 from core.util.resref import ResRef
-from ui.core import EditorToolbar, ResourceBrowserPane
+from ui.core import EditorProgressHandler, EditorToolbar, ResourceBrowserPane
 
 
 class ItemEditorPanel:
@@ -45,6 +45,9 @@ class ItemEditorPanel:
         # Panel sizing state
         self._total_width: int = 0
         self._total_height: int = 0
+        
+        # Progress tracking
+        self._progress_handler = EditorProgressHandler(self._set_status)
 
         with dpg.theme(tag=self.row_selectable_theme_tag):
             with dpg.theme_component(dpg.mvSelectable):

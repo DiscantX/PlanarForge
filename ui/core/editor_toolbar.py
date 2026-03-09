@@ -52,9 +52,6 @@ class EditorToolbar:
         self.rebuild_btn_tag = self._tag("rebuild_btn")
         self.status_tag = self._tag("status")
 
-        # Loading state
-        self._is_loading = False
-
         # Create the toolbar UI
         with dpg.group(tag=self.root_tag, parent=parent_tag, horizontal=True):
             dpg.add_text("Game:")
@@ -114,22 +111,6 @@ class EditorToolbar:
         if dpg.does_item_exist(self.status_tag):
             return str(dpg.get_value(self.status_tag) or "")
         return ""
-
-    def set_loading(self, is_loading: bool, message: str = "") -> None:
-        """
-        Set loading state with optional message.
-
-        Args:
-            is_loading: True to indicate loading, False to hide it.
-            message: Optional message to display in status when done.
-        """
-        self._is_loading = is_loading
-        if not is_loading and message:
-            self.set_status(message)
-
-    def update_spinner(self, message: str = "") -> None:
-        """No-op stub retained for API compatibility."""
-        pass
 
     def _on_game_combo_changed(self, _sender: Any, app_data: str) -> None:
         """Handle game combo change."""

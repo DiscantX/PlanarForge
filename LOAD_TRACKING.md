@@ -4,138 +4,169 @@ LOAD TRACKING IMPLEMENTATION SUMMARY
 
 Overview
 --------
-This document outlines the load tracking and visual progress indicator system
-added to PlanarForge to help identify performance bottlenecks when switching
-games and loading characters.
+When switching games (BGEE → BG2EE) or loading characters, PlanarForge now displays
+real-time status messages in the toolbar showing what operation is currently running.
+This provides visibility into what's happening during long-running operations and helps
+identify where time is being spent.
 
-Components Added
-================
+The implementation uses background threading to allow the UI to remain responsive and
+update status messages in real-time.
 
-1. ui/core/load_tracker.py (NEW MODULE)
-   - LoadTracker: Simple timing/progress tracking class
-   - Tracks elapsed time from start
-   - Records step timings for each operation
+Components
+==========
+
+1. ui/core/progress_handler.py (NEW - Reusable for all editors)
+   - EditorProgressHandler: Simple callback interface for status updates
+   - Used by editors to wire service operations to toolbar display
    - Methods:
-     * step(message) - Record a progress point with elapsed time
-     * mark(message) - Alias for step()
-     * elapsed() - Get total elapsed time
-     * get_step_times() - Get dictionary of all recorded steps
-
+     * on_progress(message) - Called during operation (intermediate steps)
+     * on_complete(message) - Called when operation finishes
+     * on_error(message) - Called on error
 
 2. ui/core/editor_toolbar.py (UPDATED)
-   - Added animated spinner visual indicator
-   - Spinner frames: ["|", "/", "-", "\\"] rotating continuously
-   - New methods:
-     * set_loading(is_loading, message="") - Show/hide spinner
-     * update_spinner(message="") - Animate spinner frame
-   - Display format: "[spinner_frame] [message]" in blue text (150, 200, 255)
-   - Spinner updates on each call to update_spinner()
-
+   - Simplified to only manage game selection, buttons, and status text
+   - Status text displayed in blue (150, 200, 255) at right end of toolbar
+   - Methods:
+     * set_status(message) - Update toolbar status display
+     * get_status() - Get current status
 
 3. core/services/character_service.py (UPDATED)
-   - Added progress callback support
-   - New method: set_progress_callback(callback)
-   - Callback is called with status messages during character loading
-   - Progress tracking points in load_character_with_payload():
+   - Added progress callback support for tracking operations
+   - set_progress_callback(callback) - Register progress reporter
+   - Progress points in load_character_with_payload():
      * "Loading {resref}..."
      * "Parsing {resref}..."
      * "Loading inventory for {resref}..."
      * "Serializing {resref}..."
 
-
 4. ui/editors/character_editor.py (UPDATED)
-   - Integrated load tracking into character loading flow
-   - Progress callback wired to toolbar spinner animation
-   - Spinner starts on game selection and character load
-   - Two main tracked flows:
+   - Uses EditorProgressHandler to wire service callbacks to toolbar
+   - Handler created in __init__:
+     ```python
+     self._progress_handler = EditorProgressHandler(self._set_status)
+     self.service.set_progress_callback(self._progress_handler.on_progress)
+     ```
+   - Services call handler.on_progress() during operations
+   - Messages appear immediately in blue text
 
-     a) Game Selection (_activate_game):
-        - Spinner: "Initializing..."
-        - Spinner: "Loading CRE index..."
-        - Displays total CRE count when done
-
-     b) Character Load (load_character):
-        - Spinner: "Loading {cre_resref}..."
-        - Service provides status updates (parsing, inventory, etc)
-        - Spinner: "Rendering inventory..."
-        - Displays final status with character name
+5. ui/util/async_loader.py (NEW - Optional for CPU-bound operations)
+   - AsyncLoader: Runs long operations in background thread
+   - Allows spinner/animations to work during blocking operations
+   - Thread-safe result retrieval
 
 
-Usage / How to Analyze Performance
-===================================
+Using Progress Tracking in New Editors
+======================================
 
-The visual spinner provides real-time feedback of what's happening:
-- Spinner indicates UI is NOT frozen
-- Messages tell you exactly which step is running
-- You can now see where time is being spent
+To add progress tracking to a new editor (e.g., ItemEditorPanel):
 
-To Measure Performance:
-1. Watch the status messages as you switch games/load characters
-2. Note which step takes longest before next update
-3. The steps are:
-   - Loading CRE index (initial game selection)
-   - Loading CRE file from archives
-   - Parsing CRE binary format
-   - Loading inventory (item icon lookups)
-   - Serializing to JSON/viewmodel
-   - Rendering game screen UI
-
-Next Steps for Optimization
-============================
-
-Based on the tracking, focus on:
-
-1. Inventory Loading - If "Loading inventory..." takes long:
-   - Profile itm_catalog.load_item_name_and_icon_by_resref()
-   - Consider parallel loading of item icons
-   - Cache loaded item data between characters
-
-2. Game Screen Rendering - If "Rendering inventory..." takes long:
-   - Profile InfinityScreenPanel._rebuild()
-   - Check if it's dpg.add_image() calls that are slow
-   - Consider batch/deferred rendering
-
-3. CRE Parsing - If "Parsing {resref}..." takes long:
-   - CreFile.from_bytes() may be the bottleneck
-   - Check for expensive calculations
-   - Profile binary unpacking
-
-To Add More Tracking:
-
-1. Service-level progress:
+1. Import EditorProgressHandler:
    ```python
-   service.set_progress_callback(lambda msg: print(f"Progress: {msg}"))
+   from ui.core import EditorProgressHandler
    ```
 
-2. Custom tracking in editor:
+2. Create handler in __init__:
    ```python
-   self._toolbar.set_loading(True, "Custom message")
-   # ... do work ...
-   self._toolbar.update_spinner("New message")
-   # ... more work ...
-   self._toolbar.set_loading(False, "Done!")
+   self._progress_handler = EditorProgressHandler(self._set_status)
    ```
 
-3. To add tracking to skin_assets or screen_panel:
-   - Add progress_callback parameter to __init__
-   - Call callback at key points
-   - Wire callback from character_editor like we did for service
+3. Wire to your service:
+   ```python
+   service.set_progress_callback(self._progress_handler.on_progress)
+   ```
+
+4. Add progress points in your service (same as CharacterService):
+   ```python
+   def load_item(self, itm_resref: str):
+       self._report_progress(f"Loading {itm_resref}...")
+       # ... do work ...
+       self._report_progress(f"Parsing {itm_resref}...")
+       # ... more work ...
+   ```
+
+5. The status text automatically updates in the toolbar.
+
+That's it! No spinner management, no threading code needed in the editor.
 
 
-Performance Hints
+How the System Works
+====================
+
+**Synchronous (Blocking) Operation:**
+- Editor calls service.load_character()
+- Service calls _report_progress() at key points
+- Progress messages appear immediately in toolbar
+- UI updates are "live" but may feel blocky during heavy operations
+
+**Background Threading (Optional - for UI responsiveness):**
+- Use AsyncLoader to offload long operations to background thread
+- Example:
+  ```python
+  def _load_character_async(self, resref):
+      loader = AsyncLoader(
+          operation=self.service.load_character_with_payload,
+          on_progress=self._progress_handler.on_progress,
+          on_complete=self._on_character_loaded,
+          on_error=self._on_load_error,
+      )
+      loader.start(resref)
+  ```
+- Main thread can render spinner, animations, or respond to input
+- Operation runs in background, callbacks fired when events occur
+
+**Message Flow:**
+1. Service._report_progress(msg) called
+2. Calls registered callback (progress_handler.on_progress)
+3. Handler calls toolbar.set_status(msg)
+4. DearPyGui updates text immediately
+5. UI thread continues rendering
+
+Performance Notes
 =================
 
-The slowness on first load is typical because:
-1. CRE files must be unpacked from CHITIN.KEY archives
-2. Item data must be loaded from ITM catalog
-3. Game screen layout must be loaded from CHU data
-4. Icon textures must be loaded from BAM files
+All progress tracking is synchronous and happens on the calling thread (service).
+Progress callbacks are fast (just a text update), so overhead is minimal.
 
-Subsequent loads are fast because of caching:
-- CRE index is cached
-- Item catalog is cached
-- CHU layouts are cached in InfinitySkinAssets._chu_layout_cache
-- Textures are cached
+**Current Implementation:**
+- Messages update ~immediately as service operations complete
+- Operations still block the UI when called synchronously
+- Good for: Visibility of what's happening, identifying slow operations
 
-The spinner and messages now make this behavior visible to the user.
+**Future Optimization Path:**
+- Wrap slow operations (load_character, load_index) with AsyncLoader
+- Run in background threads with real-time progress updates
+- UI stays responsive, user can cancel if needed
+
+**Bottlenecks to Profile:**
+Based on tracking, investigate these areas if still slow:
+1. "Loading {resref}..." - CHITIN.KEY archive read time
+2. "Parsing {resref}..." - CreFile.from_bytes() binary parsing
+3. "Loading inventory..." - Item icon lookups (itm_catalog)
+4. "Rendering..." - UI element creation and layouting
+5. MOS/PVRZ texture loading (if backgrounds take long)
+
+
+Example: Adding Tracking to a New Service Method
+=================================================
+
+```python
+def load_spell_description(self, spl_resref: str) -> SpellVM:
+    self._report_progress(f"Finding {spl_resref}...")
+    entry = self._key.find(spl_resref, ResType.SPL)
+    
+    self._report_progress(f"Reading from archive...")
+    raw = self._key.read_resource(entry, game_root=self._selected_game)
+    
+    self._report_progress(f"Parsing {spl_resref}...")
+    spl = SplFile.from_bytes(raw)
+    
+    self._report_progress(f"Resolving strings...")
+    vm = SpellVM.from_spl(spl, self._manager)
+    
+    return vm
+
+# Editor wires this automatically:
+# handler.on_progress() → toolbar.set_status()
+# User sees: "Finding FIREBALL..." → "Reading from archive..." → etc.
+```
 """

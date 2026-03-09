@@ -202,19 +202,24 @@ class CharacterService:
 
     def _make_pvrz_loader(self):
         """
-        Return a callable(page_number) -> raw_pvrz_bytes | None.
-
-        The MOS V2 decoder calls this to load each texture page on demand.
-        We pass raw KEY bytes directly — PvrzFile.from_bytes handles
-        zlib decompression and PVR3 header parsing internally.
+        Return a callable that loads PVRZ pages as PvrzFile objects.
+        
+        Used by both BAM V2 and MOS V2 decoders. Returns PvrzFile objects
+        which have internal RGBA decoding caches to avoid re-decoding.
+        Caches PvrzFile objects at CharacterService level to avoid reloading
+        from KEY when multiple resources need the same page.
         """
-        key   = self._key
-        game  = self._selected_game
-        cache = self._pvrz_cache  # Use shared PVRZ cache
+        from core.formats.pvrz import PvrzFile
+        from core.formats.key_biff import ResType
 
-        def _load(page: int) -> bytes | None:
+        key = self._key
+        game = self._selected_game
+        cache = self._pvrz_cache
+
+        def loader(page: int):
             if page in cache:
                 return cache[page]
+            
             resref = f"MOS{page:04d}"
             try:
                 entry = key.find(resref, ResType.PVRZ)
@@ -222,13 +227,20 @@ class CharacterService:
                     cache[page] = None
                     return None
                 raw = key.read_resource(entry, game_root=game)
-                cache[page] = raw
-                return raw
-            except Exception:
+                try:
+                    pvrz = PvrzFile.from_bytes(raw)
+                    cache[page] = pvrz
+                    return pvrz
+                except Exception as e:
+                    print(f"[PVRZ] Failed to parse PVRZ page {page}: {e}")
+                    cache[page] = None
+                    return None
+            except Exception as e:
+                print(f"[PVRZ] Failed to load PVRZ page {page} from KEY: {e}")
                 cache[page] = None
                 return None
 
-        return _load
+        return loader
 
     def load_bam_by_resref(
         self,
@@ -259,7 +271,7 @@ class CharacterService:
                 return None
             raw = self._key.read_resource(entry, game_root=self._selected_game)
             from core.formats.bam import decode_cycle_frame_rgba, decode_first_frame_rgba
-            pvrz_loader = self._make_pvrz_loader_for_bam()
+            pvrz_loader = self._make_pvrz_loader()
             try:
                 result = decode_cycle_frame_rgba(raw, cycle=cycle, frame=frame, pvrz_loader=pvrz_loader)
                 print(f"[BAM] {norm!r} cycle={cycle} frame={frame} decoded OK {result[0]}x{result[1]}")
@@ -403,39 +415,6 @@ class CharacterService:
             return enum_cls(value).name.replace("_", " ").title()
         except Exception:
             return str(value)
-
-    def _make_pvrz_loader_for_bam(self):
-        """Return a callable that loads and caches PVRZ pages as PvrzFile objects."""
-        from core.formats.pvrz import PvrzFile
-        from core.formats.key_biff import ResType
-
-        key = self._key
-        game = self._selected_game
-        cache = self._pvrz_cache  # Use shared PVRZ cache
-
-        def loader(page: int):
-            if page in cache:
-                return cache[page]
-            
-            try:
-                resref = f"MOS{page:04d}"
-                entry = key.find(resref, ResType.PVRZ)
-                if entry is None:
-                    cache[page] = None
-                    return None
-                raw = key.read_resource(entry, game_root=game)
-                try:
-                    pvrz = PvrzFile.from_bytes(raw)
-                    cache[page] = pvrz
-                    return pvrz
-                except Exception:
-                    cache[page] = None
-                    return None
-            except Exception:
-                cache[page] = None
-                return None
-
-        return loader
 
     def _report_progress(self, message: str) -> None:
         """Report progress to the callback if set."""
