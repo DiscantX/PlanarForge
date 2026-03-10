@@ -1,5 +1,7 @@
 # Planar Forge — Unofficial Infinity Engine Development Suite
 
+<img width="1366" height="768" alt="image" src="https://github.com/user-attachments/assets/cbb0f4fa-cc5b-44b5-91c6-c0e3e794ad88" />
+
 A modern GUI for modding [Infinity Engine](https://en.wikipedia.org/wiki/Infinity_Engine) resources. The aim of this project is to provide an easy-to-use, fully featured suite of tools that allows the user to modify game resources for the Infinity Engine, which was used for games such as Baldur's Gate, Icewind Dale, Planescape Torment, as well as their sequels, expansions, and remastered versions (EE).
 
 When it is complete, it should allow for easy creation of mods for the Infinity Engine games, or even full game conversion mods.
