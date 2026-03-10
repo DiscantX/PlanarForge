@@ -37,6 +37,7 @@ infinity_editor/
 │   │   ├── __init__.py
 │   │   ├── tlk.py               # String table parser
 │   │   ├── key_biff.py          # CHITIN.KEY + BIFF archive reader
+│   │   ├── ids.py               # IDS file parser → IdsTable
 │   │   ├── are.py               # Area master file
 │   │   ├── wed.py               # Tileset & wall polygons
 │   │   ├── tis.py               # Tile graphics
@@ -56,34 +57,51 @@ infinity_editor/
 │   │   ├── mod_structure.py     # WeiDU .tp2 + .tra generation
 │   │   └── undo_redo.py         # Command pattern undo/redo stack
 │   │
+│   ├── services/                # Runtime services over bundled or indexed data
+│   │   ├── __init__.py
+│   │   ├── character_service.py
+│   │   ├── itm_catalog.py
+│   │   └── opcode_registry.py   # Loads data/opcodes/*.json; resolves opcode → name/desc
+│   │
 │   └── index.py                 # Resource index — build, search, resolve
 │   │
-│   └── util/                    # Shared helpers
+│   └── util/                    # Shared helpers and primitive types
 │       ├── __init__.py
 │       ├── binary.py            # struct read/write helpers
+│       ├── enums.py             # All IntEnum / IntFlag definitions (centralised)
 │       ├── resref.py            # ResRef type (8-char resource names)
-│       └── strref.py            # StrRef type (uint32 TLK reference)
+│       ├── strref.py            # StrRef type (uint32 TLK reference)
+│       └── idsref.py            # IdsRef type (integer + IDS file name)
 │
-├── game/                        # Game installation interface
-│   │                            # NOTE: may be renamed/reorganised later
+├── game/                        # Game installation interface ONLY
+│   │                            # Reserve for files that deal with game installations.
+│   │                            # NOTE: installation.py → installation_manager.py (todo)
 │   ├── __init__.py
 │   ├── installation.py          # Locate game dir, read CHITIN.KEY
-│   └── string_manager.py        # .tlk lookup with fallback + override
+│   ├── string_manager.py        # .tlk lookup with fallback + override
+│   └── ids_manager.py           # Lazy-loads IdsTable objects from installation on demand
 │
-├── ui/                          # All Dear PyGui code (NOT YET IMPLEMENTED)
+├── ui/                          # All Dear PyGui code
 │   ├── __init__.py
 │   ├── app.py
-│   ├── panels/
-│   │   ├── file_browser.py
-│   │   ├── properties.py
-│   │   └── log.py
+│   ├── core/
+│   │   ├── __init__.py
+│   │   ├── titlebar.py
+│   │   ├── editor_toolbar.py
+│   │   ├── resource_browser_pane.py
+│   │   └── progress_handler.py
 │   ├── editors/
-│   │   ├── area_editor.py
-│   │   ├── creature_editor.py
-│   │   ├── item_editor.py
-│   │   ├── spell_editor.py
-│   │   ├── dialog_editor.py
-│   │   └── script_editor.py
+│   │   ├── __init__.py
+│   │   ├── character_editor.py
+│   │   └── item_editor.py
+│   ├── skin/
+│   │   └── infinity/
+│   │       ├── __init__.py
+│   │       ├── assets.py
+│   │       ├── screen_panel.py
+│   │       ├── components/
+│   │       └── data/
+│   │           └── manifest_default.json
 │   └── widgets/
 │       ├── resref_picker.py
 │       ├── strref_picker.py
@@ -102,6 +120,10 @@ infinity_editor/
 │   │   ├── bg2.json
 │   │   ├── iwd.json
 │   │   └── pst.json
+│   ├── opcodes/                 # Bundled opcode tables (int → name + description)
+│   │   ├── bgee.json            # BGEE / BG2EE opcodes (~300 entries from IESDP)
+│   │   ├── iwd.json             # IWD variant opcodes (where they differ)
+│   │   └── pst.json             # PST variant opcodes (where they differ)
 │   └── icons/
 │
 ├── tests/
@@ -219,94 +241,6 @@ available, falls back to `string_manager` for live references.
 TLK, no need to ship it); snapshots and authored strings emit `@N` WeiDU
 placeholders (N assigned during export pass from `.tra` file).
 
-**JSON representation:**
-```json
-// Live reference
-{"strref": 15324}
-
-// Imported snapshot
-{"strref": 15324, "strings": {"en_US": "The Sword of Chaos", "fr_FR": "L\'Épée du Chaos"}}
-
-// Project-authored
-{"strings": {"en_US": "My New Item", "fr_FR": "Mon Nouvel Objet"}}
-```
-
----
-
-## Cross-game imports and multi-language string handling
-
-When importing a resource from any game (primary or secondary):
-
-1. The resource binary is parsed and its JSON representation stored under
-   `imported/<game_id>/<type>/`.
-2. Every StrRef field is resolved against **all available languages** for
-   that game installation. `StringManager.resolve_all_languages(ref, inst)`
-   returns `dict[str, str]`. Only installed languages are captured — if the
-   user only has English installed, only English is in the map.
-3. The resulting `ProjectStrRef` is either:
-   - A **live reference** if the resource comes from the primary game and
-     the string has not been modified.
-   - An **imported snapshot** if the resource comes from a secondary game
-     (its StrRef indices are meaningless in the primary game's TLK) or if
-     the user has modified the string.
-4. At export time, snapshots and authored strings are written to `.tra` files
-   (one per language). Live references are emitted as raw integer strrefs.
-
-`StringManager.resolve_all_languages(ref, inst)` iterates all language
-subdirectories under `inst.install_path/lang/` (EE games) or returns a
-single `{"default": text}` for original games with one TLK.
-
----
-
-## Dependency rules
-
-These are strict. Violating them creates circular imports or inappropriate
-coupling.
-
-```
-core/util/binary.py       — no project imports
-core/util/resref.py       — no project imports
-core/util/strref.py       — no project imports at runtime
-                          — imports core/formats/tlk TYPE_CHECKING only
-                            (for TlkFile type hint in resolve())
-
-core/formats/*.py         — may import: core/util/binary, core/util/resref
-                          — may NOT import: core/game/*, core/project/*, ui/*
-
-game/installation.py      — may import: stdlib only
-                          — may NOT import: core/formats/* (avoids circular deps)
-                          — NOTE: package name (game/) is provisional and may change
-
-game/string_manager.py    — may import: core/formats/tlk, core/util/strref
-                          — imports core/formats/tlk at call time inside
-                            from_installation() to avoid top-level circular deps
-                          — imports game/installation TYPE_CHECKING only
-
-core/formats/key_biff.py  — imports game/installation TYPE_CHECKING only
-                            (for GameRoot type hint — not a runtime import)
-
-core/index.py             — may import: core/formats/*, core/util/*,
-                            game/string_manager, game/installation
-                          — game/* imports are TYPE_CHECKING only
-
-core/project/strref.py    — may import: core/util/strref (TYPE_CHECKING only),
-                            core/formats/tlk (TYPE_CHECKING only)
-                          — no runtime project imports
-
-core/project/importer.py  — may import: core/formats/*, core/util/*,
-                            game/string_manager, game/installation
-
-core/project/*            — may import: core/formats/*, core/util/*,
-                            game/string_manager, game/installation
-                          — may NOT import: ui/*
-
-ui/*                      — may import anything in core/
-```
-
-**The one-way rule:** `core/formats/` does not know about `core/game/`. The
-`game_root` parameter in `key_biff.py` accepts a `GameInstallation` via duck
-typing (`hasattr(game_root, "install_path")`), not via a runtime import.
-
 ---
 
 ## Module contracts
@@ -354,55 +288,90 @@ typing (`hasattr(game_root, "install_path")`), not via a runtime import.
 - `StrRefError(ValueError)` on invalid input
 - No runtime project imports — `TlkFile` is TYPE_CHECKING only
 
+### core/util/idsref.py
+- `IdsRef(value: int, ids_name: str)` — wraps a raw integer with the name of
+  the IDS file it resolves against
+- `ids_name` is the IDS basename: uppercase, no extension, max 8 chars
+  (e.g. `"WPROF"`, `"EA"`, `"RACE"`, `"PROJECTL"`)
+- `ref.value` — the raw integer stored on disk
+- `ref.ids_name` — the IDS file to resolve against
+- `ref.resolve(table: IdsTable) -> str` — returns the symbolic name, or
+  `"UNKNOWN(N)"` if the value is not in the table
+- `ref.to_json() -> dict` — serialises as `{"value": N, "ids": "NAME"}`
+- `IdsRef.from_json(d: dict) -> IdsRef`
+- `IdsRef.NONE` — sentinel for "no value" where appropriate (value=0, ids_name="")
+- No runtime project imports; `IdsTable` is TYPE_CHECKING only
+
+### core/util/enums.py
+- Single centralised module for **all** `IntEnum` and `IntFlag` definitions
+  used anywhere in the project
+- Covers format-specific enums (previously scattered across `itm.py`, `spl.py`,
+  `are.py`, `cre.py`) and any future additions
+- Rationale: one location is easier to find than hunting across dozens of format
+  files; enums are not file formats and do not belong in `core/formats/`
+- All format modules import their enums from here:
+  `from core.util.enums import ItemType, ItemFlag, AttackType, ...`
+- Standard import line for format files that use enums:
+  `from core.util.enums import <EnumName>, ...`
+
+### core/formats/ids.py
+- `IdsTable` — resolved lookup table for one IDS file
+  - `IdsTable(name: str, entries: dict[int, str])` — constructed from parsed data
+  - `table.name` — IDS basename (e.g. `"WPROF"`)
+  - `table.resolve(value: int) -> str` — returns symbolic name or `"UNKNOWN(N)"`
+  - `table.entries` — the raw `dict[int, str]` mapping
+  - `table.to_json() -> dict` — serialises for caching
+  - `IdsTable.from_json(d: dict) -> IdsTable`
+- `IdsFile` — parser for `.ids` binary/text files
+  - `IdsFile.from_bytes(data: bytes) -> IdsTable` — parses and returns table
+  - `IdsFile.from_file(path) -> IdsTable`
+  - Handles both plain-text and encrypted IDS files
+  - Header lines (IDS / IDS V1.0 + entry count) are consumed but not validated
+    strictly (count line is often wrong per IESDP)
+
 ### core/formats/ — all parsers
 All format modules follow this contract without exception:
 
 - `XxxFile.from_bytes(data: bytes) -> XxxFile` — parse from raw bytes
-- `XxxFile.from_file(path) -> XxxFile` — read file then parse
+- `XxxFile.from_file(path) -> XxxFile` — read file and delegate to `from_bytes()`
 - `XxxFile.to_bytes() -> bytes` — serialise back to binary
-- `XxxFile.to_file(path)` — serialise and write
-- `XxxFile.to_json() -> dict` — serialise to JSON-safe dict
+- `XxxFile.to_file(path) -> None` — write binary to file
+- `XxxFile.to_json() -> dict` — serialise to JSON-compatible dict
 - `XxxFile.from_json(d: dict) -> XxxFile` — deserialise from dict
-- Frozen dataclasses for all data-holding types
-- Latin-1 encoding for all strings
-- StrRef fields use `StrRef.NONE` (0xFFFFFFFF) for absent string references
-  (replaces the old bare `STRREF_NONE = 0xFFFFFFFF` integer constant)
-- `0xFFFF` sentinel for absent item slot references
 
-### game/installation.py  (path is provisional — may be renamed)
-- `InstallationFinder` — lazy-scanning, cached after first call
-  - `find_all() -> List[GameInstallation]`
-  - `find(game_id: str) -> Optional[GameInstallation]`
-  - `find_chitin(game_id: str) -> Optional[Path]`
-  - `rescan()` — clears cache, forces fresh scan on next access
-- `GameInstallation` — frozen dataclass: `game_id, display_name, install_path,
-  chitin_key, source`
-  - `from_path(game_id, path, source="manual")` — safe constructor, returns
-    None if no chitin.key found
-- Discovery order (first match wins per game_id): Steam → GOG → Beamdog →
-  classic registry
-- All registry access is guarded by `sys.platform == "win32"` so the module
-  loads on Linux/macOS
-- Steam discovery parses `libraryfolders.vdf` to find all library roots, not
-  just the default Steam path
+All format modules must have explicit imports for every symbol used from `core.util`:
 
-### game/string_manager.py
-- `StringManager(base_male, base_female=None, mod_male=None, mod_female=None)`
-  — direct constructor; takes `TlkFile` objects
-- `StringManager.from_installation(inst, language="en_US")` — locates and
-  loads TLKs from a `GameInstallation`; detects original vs EE layout
-  automatically (EE: `lang/<code>/dialog.tlk`; original: `dialog.tlk` in root)
-- `manager.resolve(ref: StrRef) -> str` — primary resolution method
-- `manager.get(file_id: int, tlk_index: int) -> str` — callable interface
-  for `StrRef.resolve_with(manager.get)`
-- `manager.set_mod_tlk(male_tlk, female_tlk=None)` — load project override layer
-- `manager.clear_mod_tlk()` — remove override, fall back to base game only
-- `manager.has_mod` — True if a mod override is loaded
-- `manager.available_languages(inst) -> List[str]` — EE language codes available
-- Resolution order for female strref: mod_female → mod_male → base_female → base_male
-- Resolution order for male strref:   mod_male → base_male
-- Returns `""` for NONE sentinel or missing indices
-- `TlkFile` contract required: `get(index: int) -> str`, `contains(index: int) -> bool`
+```python
+from core.util.binary import BinaryReader, BinaryWriter, SignatureMismatch
+from core.util.enums  import <EnumName>, ...      # whatever enums the module uses
+from core.util.idsref import IdsRef
+from core.util.resref import ResRef
+from core.util.strref import StrRef, StrRefError
+```
+
+Omit only what the file genuinely does not use.
+
+### core/services/opcode_registry.py
+- Loads bundled opcode tables from `data/opcodes/<game_id>.json` at first access
+- Does NOT depend on a game installation — data is shipped with the editor
+- `OpcodeRegistry.for_game(game_id: str) -> OpcodeRegistry` — factory; caches
+  per game_id
+- `registry.resolve(opcode: int) -> OpcodeEntry` — returns name + description;
+  falls back to `OpcodeEntry(opcode, f"Opcode {opcode}", "")` for unknown values
+- `OpcodeEntry(value: int, name: str, description: str)` — frozen dataclass
+- JSON format: `{"opcodes": [{"value": N, "name": "...", "description": "..."}, ...]}`
+- Supported game_ids map to files: `"bgee"` / `"bg2ee"` → `bgee.json`,
+  `"iwd"` / `"iwdee"` → `iwd.json`, `"pst"` / `"pstee"` → `pst.json`
+
+### game/ids_manager.py
+- Lazy-loads `IdsTable` objects from the game installation on demand
+- Depends on `game/installation.py` — lives in `game/` for this reason
+- `IdsManager(installation: GameInstallation)` — construction does not load anything
+- `manager.get(ids_name: str) -> IdsTable` — load on first access, cache thereafter;
+  searches override dir first, then CHITIN.KEY (matching engine override priority)
+- `manager.preload(*ids_names: str) -> None` — load multiple tables eagerly
+- `manager.clear_cache() -> None` — force reload on next access (e.g. after game switch)
+- `ids_name` is the uppercase basename without extension, e.g. `"WPROF"`, `"EA"`
 
 ### game/string_manager.py
 - `StringManager(base_male, base_female=None, mod_male=None, mod_female=None)`
@@ -491,8 +460,6 @@ All format modules follow this contract without exception:
 
 ## CRE format — version status
 
-This is complex enough to warrant its own section.
-
 | Version | Games | Class | Status |
 |---------|-------|-------|--------|
 | V1.0 | BG1, BG2, BGEE, BG2EE | `CreHeader` | ✅ Complete, verified against IESDP |
@@ -539,20 +506,84 @@ In priority order:
 1. Implement CRE V2.2 (IWD2) parser — completely different header, not started
 2. Convert `cre.py` `soundset` from `bytes` to `List[StrRef]` — V1.0 and V9.0
 3. Vet and fix `itm.py` — ResRef fields contain garbage bytes (see decisions log)
-4. ResRef migration — apply ResRef type to all format parser fields across all parsers
-5. Vet remaining parsers against real game files: `spl.py`, `dlg.py`, `are.py`, `wed.py`, `mos.py`, `tis.py`
-6. `core/project/project.py` — Project open/save/new, dirty tracking, path management
-7. `core/project/mod_structure.py` — WeiDU .tp2 + .tra generation
-8. `core/project/undo_redo.py` — command pattern
-9. `core/watcher.py` — filesystem watcher (watchdog)
-10. UI layer (Dear PyGui)
-11. Unit tests for all modules
+4. **IdsRef / enum migration** (new — see decisions log):
+   a. `core/util/enums.py` — migrate all existing enums here; update imports
+   b. `core/util/idsref.py` — new IdsRef type
+   c. `core/formats/ids.py` — IDS file parser
+   d. `game/ids_manager.py` — lazy-loading IDS manager
+   e. Wire IdsRef into format files (itm, spl, cre, are) field by field
+   f. `data/opcodes/*.json` — populate bundled opcode tables from IESDP
+   g. `core/services/opcode_registry.py` — opcode resolution service
+5. ResRef migration — apply ResRef type to all format parser fields across all parsers
+6. Vet remaining parsers against real game files: `spl.py`, `dlg.py`, `are.py`, `wed.py`, `mos.py`, `tis.py`
+7. `core/project/project.py` — Project open/save/new, dirty tracking, path management
+8. `core/project/mod_structure.py` — WeiDU .tp2 + .tra generation
+9. `core/project/undo_redo.py` — command pattern
+10. `core/watcher.py` — filesystem watcher (watchdog)
+11. UI layer (Dear PyGui)
+12. Unit tests for all modules
 
 Completed (removed from list):
 - CRE V1.2 (PST) parser fixes — done (turn_undead_level, tracking_target, soundset)
 - `StringManager.resolve_all_languages()` — done
 - `core/project/strref.py` ProjectStrRef — done
 - `core/project/importer.py` — done
+
+---
+
+## UI architecture
+
+### Layered composition with semantic naming
+
+```
+ui/
+├── core/                        # Reusable, generic UI components
+│   ├── __init__.py
+│   ├── titlebar.py              # CustomTitleBarController — frameless window chrome
+│   ├── editor_toolbar.py        # EditorToolbar — game selector, status, buttons
+│   ├── resource_browser_pane.py # ResourceBrowserPane — searchable left panel
+│   └── progress_handler.py      # EditorProgressHandler — progress forwarding
+│
+├── editors/                     # Concrete editor implementations
+│   ├── __init__.py
+│   ├── character_editor.py      # CharacterEditorPanel
+│   └── item_editor.py           # ItemEditorPanel
+│
+├── skin/
+│   └── infinity/
+│       ├── assets.py            # InfinitySkinAssets — icon loader, CHU layout
+│       ├── screen_panel.py      # InfinityScreenPanel — game screen renderer
+│       ├── components/
+│       └── data/
+│           └── manifest_default.json   # Active config file (not a template)
+│
+└── app.py                       # Application root, viewport, routing
+```
+
+**Key design principles:**
+- Semantic naming: `EditorToolbar`, `ResourceBrowserPane`, `CharacterEditorPanel`
+  — what the component IS, not where it sits
+- Composition over inheritance: each editor owns an `EditorToolbar` and
+  `ResourceBrowserPane`; editors are stateful, core components are stateless
+- DPG tag-based item management: every DPG item gets a prefixed tag
+  `"{tag_prefix}_{suffix}"` to prevent collisions
+- Non-code data files belong in `skin/infinity/data/`
+
+**Adding new editor types:**
+1. Create `ui/editors/my_editor.py` with class `MyEditorPanel`
+2. Implement `__init__`, `set_size()`, `handle_mouse_event()`, `_search(query)`
+3. Compose `EditorToolbar` and `ResourceBrowserPane` as needed
+4. Export from `ui/editors/__init__.py`
+5. Instantiate in `ui/app.py` and add to `ui_state` dict
+6. Add routing case to `on_global_search_changed()`
+
+**Progress tracking pattern for new editors:**
+```python
+from ui.core import EditorProgressHandler
+# In __init__:
+self._progress_handler = EditorProgressHandler(self._set_status)
+service.set_progress_callback(self._progress_handler.on_progress)
+```
 
 ---
 
@@ -623,15 +654,15 @@ which handles language and gender selection. `StrRef` imports `TlkFile` under
 **2026-03 — All format files must explicitly import from core.util**
 Every file in `core/formats/` must have explicit imports for every symbol
 it uses from `core/util/`. Do not assume these are available implicitly.
-The standard import block for a format file that uses all three util modules is:
+The standard import block for a format file that uses all util modules is:
 
     from core.util.binary import BinaryReader, BinaryWriter, SignatureMismatch
+    from core.util.enums  import <EnumName>, ...
+    from core.util.idsref import IdsRef
     from core.util.resref import ResRef
     from core.util.strref import StrRef, StrRefError
 
-Omit only what the file genuinely does not use. This was a recurring silent
-error: `cre.py` was missing `binary` and `resref` imports across multiple
-sessions because the project owner was correcting it locally without flagging it.
+Omit only what the file genuinely does not use.
 
 **2026-03 — StrRef encodes file ID in top 8 bits (IESDP ground truth)**
 The IESDP Notes and Conventions page confirms that a strref uint32 encodes
@@ -652,19 +683,6 @@ and project-modified strings, with project strings taking priority.
 (lang/<code>/ subdirectory) layout. `TlkFile` is imported at call time
 inside `from_installation()` rather than at module level to avoid
 circular import issues before tlk.py is fully integrated.
-
-**2026-03 — StringManager design: layered resolution with mod override**
-`StringManager` holds up to four TlkFiles (base_male, base_female, mod_male,
-mod_female). Resolution priority for female strrefs: mod_female → mod_male →
-base_female → base_male. For male: mod_male → base_male. Each step is skipped
-if the TLK is not loaded or the index is not present. This mirrors the engine
-fallback behaviour and supports the use case of reading original game strings
-alongside mod-modified strings without merging them.
-
-`from_installation()` detects original vs EE layout by checking for a `lang/`
-subdirectory. The `language` parameter is only used for EE games.
-
-TOH/TOT override file support (IWD/BG2 talk table override format) is deferred.
 
 **2026-03 — ResourceIndex design: JSON-backed, source-layered, shadow store**
 `core/index.py` builds once from CHITIN.KEY + override dir, then is maintained
@@ -693,51 +711,6 @@ live reference (strref only), imported snapshot (strref + strings map),
 project-authored (strings map only). Live references resolve at display time;
 others carry inline text. At export, live → raw integer; others → @N WeiDU ref.
 
-At import time, all StrRef fields are resolved against every available language
-via StringManager.resolve_all_languages(). Only installed languages are captured.
-Resources from secondary games always become snapshots (their StrRef indices are
-meaningless in the primary game TLK). Primary game resources start as live
-references and become snapshots if/when the user modifies the string.
-
-The project does NOT maintain its own dialog.tlk. New strings are WeiDU @N
-references written to .tra files (one per language under strings/<lang>/).
-.tra files are maintained as a live working copy, not generated only at export.
-Total conversion TLK support is deferred.
-
-**2026-03 — itm.py to_json() bug: self.field instead of self.header.field**
-`ItmFile.to_json()` referenced `self.unidentified_name`, `self.identified_name`,
-`self.unidentified_desc`, `self.identified_desc` directly on the ItmFile instance
-instead of `self.header.*`. This caused `to_json()` to raise `AttributeError` on
-every call, which was silently caught by `_index_raw` in `core/index.py`, producing
-empty `data` dicts and empty `display_name` for all ITM entries. Fixed by changing
-all four references to `h.*` (where `h = self.header`).
-
-**2026-03 — itm.py ResRef fields contain garbage bytes**
-Several fields in ITM (e.g. `replacement_item`, `feature_blocks[n].resource`) are
-being read as raw strings containing binary garbage rather than clean ResRef strings.
-This is a parsing bug in `itm.py` to be fixed during the itm.py vetting pass.
-Discovered during the demo_search diagnostic run on a real BG2EE MISC75.ITM file.
-
-**2026-03 — string_manager.resolve() isinstance → duck typing**
-The `isinstance(ref, StrRef)` check in `resolve()` and `resolve_all_languages()`
-failed silently when the StrRef class was imported under a different module path
-(e.g. `strref` vs `core.util.strref`). Replaced with `hasattr` checks for
-`file_id`, `tlk_index`, and `is_none`.
-
-**2026-03 — itm.py to_json() bug: self.field instead of self.header.field**
-`ItmFile.to_json()` referenced `self.unidentified_name`, `self.identified_name`,
-`self.unidentified_desc`, `self.identified_desc` directly on the ItmFile instance
-instead of `self.header.*`. This caused `to_json()` to raise `AttributeError` on
-every call, which was silently caught by `_index_raw` in `core/index.py`, producing
-empty `data` dicts and empty `display_name` for all ITM entries. Fixed by changing
-all four references to `h.*` (where `h = self.header`).
-
-**2026-03 — itm.py ResRef fields contain garbage bytes**
-Several fields in ITM (e.g. `replacement_item`, `feature_blocks[n].resource`) are
-being read as raw strings containing binary garbage rather than clean ResRef strings.
-This is a parsing bug in `itm.py` to be fixed during the itm.py vetting pass.
-Discovered during the demo_search diagnostic run on a real BG2EE MISC75.ITM file.
-
 **2026-03 — string_manager.resolve() isinstance → duck typing**
 The `isinstance(ref, StrRef)` check in `resolve()` and `resolve_all_languages()`
 failed silently when the StrRef class was imported under a different module path
@@ -754,266 +727,77 @@ imports resolve from the project root.
 **2026-03 — Added PVRZ support for Enhanced Edition MOS V2 backgrounds**
 The error "MOS 'INVENTOR': not found or is PVRZ (no RGBA decode)" was caused by
 MOS V2 (PVRZ-based) files used in Enhanced Edition games. Implemented full PVRTC
-support:
+support via `core/formats/pvrtc.py` (PVRTC 4bpp decoder) and extended
+`core/formats/pvrz.py`. `MosFile.to_rgba()` accepts optional `pvrz_loader`
+callable for V2 support. `CharacterService.load_mos_by_resref()` creates a PVRZ
+loader and handles decoding.
 
-New modules:
-- `core/formats/pvrtc.py` — PVRTC 4bpp decoder
-- Extended `core/formats/pvrz.py` — PVRZ decompression + PVRTC decoding
-
-Modified:
-- `MosFile.to_rgba()` — accepts optional `pvrz_loader` callable for V2 support
-- `CharacterService.load_mos_by_resref()` — creates PVRZ loader, handles decoding
-
-The implementation:
-1. Loads PVRZ pages on-demand via `load_pvrz_page(page_number)`
-2. Decompresses PVRZ (zlib) to get PVRT-formatted texture data
-3. Decodes PVRTC 4bpp (common format) to RGBA using block decompression
-4. Extracts per-block regions and assembles into full MOS image
-5. Falls back to gradient placeholder if decoding fails
-
-PVRTC decoder handles:
-- PVRTC 4bpp blocks (4x4 pixels per 8 bytes) — full support
-- PVRTC 2bpp blocks (8x4 pixels per 8 bytes) — defers to placeholder
-
-Result: INVENTOR and other MOS V2 backgrounds now display as actual textures
-instead of generating errors or placeholders.
-
-**2026-03 — PVRZ Decoding Performance Optimization**
-
+**2026-03 — PVRZ decoding performance: two-level caching**
 Initial implementation decoded entire PVRZ textures on every region extract.
-Performance bottleneck:
-- `PvrzFile.get_region_rgba()` called `to_rgba()` which decoded full DXT5 texture
-  (10-40 MB per page) even for tiny 52×52 regions
-- Same PVRZ pages decoded repeatedly:
-  - STONSLOT (4 animation cycles) → same page decoded 4×
-  - MOS background → pages 181-182 decoded once per block
-  - Total: ~100-400 MB unnecessary decoding per inventory screen load
-
-Solution — Two-level caching:
-1. **PvrzFile internal cache**: `to_rgba()` caches decoded RGBA in `_rgba_cache`
-   - First region extract triggers full decode, subsequent calls reuse cached decode
-   - Instant for multiple region extracts from same page
-2. **CharacterService shared PVRZ cache**: `_pvrz_cache` dict by page number
-   - PvrzFile objects cached after first load from KEY and parse
-   - Single unified `_make_pvrz_loader()` used by both BAM V2 and MOS V2 decoders
-   - Cleared on game selection change to prevent stale resources
-
-Impact: ~5-10× faster loading for multi-resource screens (inventory + background
-using same PVRZ pages) thanks to:
-- Unified loader prevents mixed-type cache (both BAM and MOS work with PvrzFile objects)
-- No redundant KEY lookups (page-based caching reused across all resources)
-- No redundant full-texture decodes (PvrzFile internal RGBA cache persists across regions)
-
-Future: Could pre-cache PVRZ pages at game load time for guaranteed instant UI response.
-
-**2026-03 — Reusable Progress Tracking for All Editors**
-
-Created `EditorProgressHandler` (ui/core/progress_handler.py) as a lightweight,
-reusable component for all editors to report progress during long operations.
-This replaces the spinner-based approach which was incompatible with blocking
-operations.
-
-Design:
-- Single responsibility: forward status messages to toolbar
-- Editors instantiate with `EditorProgressHandler(toolbar.set_status)`
-- Services call `_report_progress(message)` at key points
-- Messages automatically appear in blue text on toolbar (no spinner animation needed)
-- Same pattern works for all editors (character, item, spell, etc.)
-- Optional AsyncLoader (ui/util/async_loader.py) for CPU-bound ops needing background threading
-
-Benefits:
-- Simple, copy-paste setup for new editors (3 lines: import, create, wire)
-- No spinner logic to maintain
-- Real-time status visibility
-- Straightforward to add background threading later if needed
-- Extensible for other UI feedback mechanisms (logging, popups, etc.)
-
-Pattern for new editors:
-```python
-from ui.core import EditorProgressHandler
-# In __init__:
-self._progress_handler = EditorProgressHandler(self._set_status)
-service.set_progress_callback(self._progress_handler.on_progress)
-```
-Services then call `_report_progress()` and messages flow through automatically.
-
----
-
-## 2026-03 — UI Architecture Restructuring: Layered Composition with Semantic Naming
-
-The original UI implementation had duplicate toolbars and browser panes in each editor.
-A restructuring established a semantic, layered architecture that scales to new editor
-types without code repetition.
-
-**Architecture Layers:**
-
-```
-ui/
-├── core/                        # Reusable, generic UI components
-│   ├── __init__.py              # Exports core components
-│   ├── titlebar.py              # CustomTitleBarController — frameless window chrome
-│   ├── editor_toolbar.py        # EditorToolbar — game selector, status, buttons
-│   └── resource_browser_pane.py # ResourceBrowserPane — searchable left panel
-│
-├── editors/                     # Concrete editor implementations
-│   ├── __init__.py              # Exports CharacterEditorPanel, ItemEditorPanel
-│   ├── character_editor.py      # CharacterEditorPanel — CRE viewer/editor
-│   └── item_editor.py           # ItemEditorPanel — ITM viewer (renamed from ItmViewerPanel)
-│
-├── skin/                        # Visual theme and domain-specific UI
-│   ├── infinity/                # Infinity Engine skin layer
-│   │   ├── __init__.py
-│   │   ├── assets.py             # InfinitySkinAssets — icon loader, CHU layout
-│   │   ├── manifest_default.json # Configuration (moved to data/ subdirectory)
-│   │   ├── screen_panel.py       # InfinityScreenPanel — game screen renderer
-│   │   ├── components/           # Visual component definitions
-│   │   │   └── __init__.py
-│   │   └── data/                 # Configuration and manifest files
-│   │       ├── __init__.py
-│   │       └── manifest_default.json
-│   │
-│   └── <other_skins>/           # Additional skins (deferred)
-│
-└── app.py                       # Application root, viewport, routing
-```
-
-**Key Design Principles:**
-
-1. **Semantic Naming (not structural):**
-   - `EditorToolbar` — what the component IS (a toolbar for editors)
-   - `ResourceBrowserPane` — what it IS (a pane that browses resources)
-   - `CharacterEditorPanel` — what it IS (an editor panel for characters)
-   - NOT `ToolbarContainer`, `LeftPanel`, `Screen1`, `Panel2` (describes container/position)
-
-2. **Component Composition:**
-   - Each editor owns an `EditorToolbar` and `ResourceBrowserPane` (composition, not inheritance)
-   - Editors are stateful; core components are stateless containers
-   - Customization via callbacks (`extra_controls`, `on_row_selected`, `on_game_selected`)
-
-3. **Separation of Concerns:**
-   - **core/** — generic, editor-agnostic UI utilities (toolbars, panels, window control)
-   - **editors/** — concrete implementations (character editor, item editor)
-   - **skin/** — Infinity-specific visuals (CHU layouts, pixel art rendering, colors)
-
-4. **Global Search Routing:**
-   - All editors use a global search bar in `app.py`
-   - `on_global_search_changed()` routes the query to the active editor's `_search()` or `_refresh_character_list()`
-   - Each editor implements its own search semantics (no assumed interface)
-
-5. **DPG Tag-Based Item Management:**
-   - Every DPG item gets a prefixed tag: `"{tag_prefix}_{suffix}"`
-   - Editors pass `tag_prefix` to their components, which extend it: `f"{tag_prefix}_toolbar_*"`
-   - This prevents tag collisions when multiple editors are instantiated
-   - Panel resizing and divider dragging are owned by `ResourceBrowserPane`
-   - Editor panels pass `right_pane_x` and `gap_width` to `handle_divider_drag()` for spacing-aware behavior
-
-6. **Configuration in data/ Subdirectory:**
-   - Non-code data files (JSON, manifests) belong in `skin/infinity/data/`
-   - `manifest_default.json` moved from root infinity/ to data/manifest_default.json
-   - Keeps code and configuration clearly separated
-
-**Module Responsibilities:**
-
-- **CustomTitleBarController** (`ui/core/titlebar.py`)
-  - Manages frameless window chrome (Windows WM_NCHITTEST, WM_NCLBUTTONDBLCLK)
-  - Handles maximize/restore/minimize button callbacks
-  - Zero knowledge of editor content
-
-- **EditorToolbar** (`ui/core/editor_toolbar.py`)
-  - Game selection combo (dropdown of installed games)
-  - Refresh / Rebuild buttons (index rebuild)
-  - Status display line
-  - Optional extra controls (via `extra_controls` callback)
-  - Fixed height (34px); width fills available space
-  - No editor-specific logic
-
-- **ResourceBrowserPane** (`ui/core/resource_browser_pane.py`)
-  - Table with configurable columns (["ResRef", "Name"] for characters; ["ResRef", "Name", "Type"] for items)
-  - Left panel with spacing-aware divider-drag resizing (30% default, 180px minimum)
-  - Drag detection: by default uses 4px hit zone; when `right_pane_x` is provided, allows dragging anywhere in the gap between panes (robust to spacing changes)
-  - Row selection callback (`on_row_selected(idx)`)
-  - Methods: `populate_rows()`, `select_row()`, `set_size()`, `get_panel_width()`, `handle_divider_drag(mouse_x, is_button_down, *, right_pane_x=None, right_pane_min_width=260, gap_width=12)`
-  - No knowledge of resource parsing or semantics
-
-- **CharacterEditorPanel** (`ui/editors/character_editor.py`)
-  - Uses `EditorToolbar` + `ResourceBrowserPane` for layout
-  - Uses `InfinitySkinAssets` + `InfinityScreenPanel` for rendering
-  - Game screen tab with viewport animation
-  - Inventory display (toggle between table and game skin layouts)
-  - Call `_load_games()` AFTER `_screen_panel` initialization (prevents missing attribute errors)
-
-- **ItemEditorPanel** (`ui/editors/item_editor.py`, renamed from ItmViewerPanel)
-  - Uses `EditorToolbar` + `ResourceBrowserPane` for layout
-  - Structured view: header, extended headers, feature blocks
-  - Raw JSON tree and plain JSON text views
-  - Dynamic texture management for icons and BAM previews
-  - Title font loading (Segoe UI Bold or Arial Bold fallback)
-
-- **InfinitySkinAssets** (`ui/skin/infinity/assets.py`)
-  - Loads icons, MOSes, BAM sequences, CHU layouts
-  - Manages texture caching and CHU→screen_panel coordination
-  - Configuration via `manifest_default.json` (empty defaults; allows custom slot frame icons)
-
-- **app.py** (application root)
-  - Creates viewport, title bar, and root window
-  - Instantiates both editors (both are always running; hidden when inactive)
-  - Routes global search bar input to active editor
-  - Manages resize events and panel sizing
-  - Global mouse event handlers (down/move/release) forward to each editor's `handle_mouse_event()` method
-
-**Import Dependencies in Editors:**
-
-```python
-# OLD (before restructuring)
-from ui.viewers.editor_toolbar import EditorToolbar
-from ui.viewers.resource_browser_pane import ResourceBrowserPane
-
-# NEW (after restructuring)
-from ui.core import EditorToolbar, ResourceBrowserPane
-```
-
-**Adding New Editor Types:**
-
-1. Create `ui/editors/my_editor.py` with class `MyEditorPanel`
-2. Implement `__init__`, `set_size()`, `handle_mouse_event()`, `_search(query)`
-3. Compose `EditorToolbar` and `ResourceBrowserPane` (or only as needed)
-4. Optionally subclass from Infinity skin (`InfinitySkinAssets`, `InfinityScreenPanel`)
-5. Export from `ui/editors/__init__.py`
-6. Instantiate in `ui/app.py` and add to `ui_state` dict
-7. Add routing case to `on_global_search_changed()`
-
-**Manifest Configuration:**
-
-`ui/skin/infinity/data/manifest_default.json` is an active configuration file, not a template.
-It is loaded and parsed at runtime by `InfinitySkinAssets.load_manifest_file()`.
-Current structure:
-```json
-{
-  "slot_frame_icon_resref": "",
-  "slot_frame_mos_resref": ""
-}
-```
-
-Users can override default slot frame graphics by populating these fields with custom ResRefs.
-The file is required and must exist; provide sensible defaults (empty strings = use engine defaults).
+Fixed with two-level caching: (1) `PvrzFile` internal `_rgba_cache` — first
+region extract triggers full decode, subsequent calls reuse it; (2)
+`CharacterService` shared `_pvrz_cache` dict by page number — `PvrzFile` objects
+cached after first load, cleared on game selection change. Unified
+`_make_pvrz_loader()` used by both BAM V2 and MOS V2 decoders.
 
 **2026-03 — BAM/BMP transparent pixel RGB must be zeroed (pre-multiplied alpha)**
 BAM V1 and BMP icons use a green colour key (R=0, G=255, B=0) for transparency.
-When decoded, transparent pixels must be emitted as `(0.0, 0.0, 0.0, 0.0)` — not
-`(0.0, 1.0, 0.0, 0.0)`. DearPyGui's GPU renderer uses bilinear interpolation when
-a texture is drawn at a size other than its native dimensions. If transparent pixels
-retain their green RGB values, interpolation along opaque edges bleeds green into
-adjacent semi-transparent samples, producing a visible green outline around icons.
+When decoded, transparent pixels must be emitted as `(0.0, 0.0, 0.0, 0.0)` —
+not `(0.0, 1.0, 0.0, 0.0)`. DearPyGui uses bilinear interpolation when a texture
+is drawn at non-native size; retaining green RGB in transparent pixels bleeds
+green into adjacent edges. Affected: `bam.py` `_indices_to_rgba()`,
+`bmp.py` `_indices_to_rgba()`, `_decode_24bpp()`, `_decode_32bpp()`. In
+`_decode_32bpp`, the colour-key zero-out must run before the `a==0,
+non-zero RGB → force a=255` workaround.
 
-Affected decoders and the fix location:
-- `core/formats/bam.py` — `_indices_to_rgba()`: zero RGB when `idx == transparent_idx`
-- `core/formats/bmp.py` — `_indices_to_rgba()`: zero RGB when colour key matches
-- `core/formats/bmp.py` — `_decode_24bpp()`: same colour-key zero-out
-- `core/formats/bmp.py` — `_decode_32bpp()`: colour-key check must run *before*
-  the existing `a==0, non-zero RGB → force a=255` workaround, otherwise the
-  workaround re-opaqifies a pixel that should be transparent
+**2026-03 — EditorProgressHandler reusable progress tracking**
+Created `ui/core/progress_handler.py` as a lightweight component for all editors
+to report progress during long operations. Editors instantiate with
+`EditorProgressHandler(toolbar.set_status)`; services call `_report_progress()`;
+messages appear as blue text on the toolbar. Same pattern works for all editor
+types. Optional `AsyncLoader` (`ui/util/async_loader.py`) available for CPU-bound
+ops needing background threading.
 
-The outline does not appear when icons are rendered at native size (no interpolation).
-That is why the Item Editor heading icon was unaffected while the Game Screen and
-tooltip icons (both rescaled) showed the artefact. BMP icons in IE games are almost
-always 8bpp palette-based, so `_decode_32bpp` is rarely exercised in practice.
+**2026-03 — UI architecture restructuring: layered composition with semantic naming**
+Original UI had duplicate toolbars and browser panes per editor. Restructured to:
+`ui/core/` (reusable components), `ui/editors/` (concrete implementations),
+`ui/skin/` (visual theme). Semantic naming (`EditorToolbar`, `ResourceBrowserPane`)
+over structural naming (`LeftPanel`, `Screen1`). Composition over inheritance —
+editors own core components via constructor, not subclassing.
+
+**2026-03 — IdsRef as a distinct type for IDS-backed fields**
+All integer fields that are defined by an IDS file (weapon proficiency, EA,
+race, class, alignment, gender, projectile, damage type, etc.) are stored as
+`IdsRef(value, ids_name)` rather than bare `int`. This mirrors the `StrRef`
+design: the reference carries enough information to be resolved without
+consulting the schema. `ids_name` is the uppercase IDS basename without
+extension (e.g. `"WPROF"`, `"EA"`). The IDS name is NOT encoded in the binary
+value (unlike StrRef's file_id bits) — it is structural knowledge from IESDP,
+stored explicitly on the `IdsRef` instance. Serialises as
+`{"value": N, "ids": "NAME"}`. Resolution is always external — the caller
+supplies an `IdsTable` from `IdsManager`.
+
+**2026-03 — All enums centralised in core/util/enums.py**
+All `IntEnum` and `IntFlag` definitions are kept in a single module
+`core/util/enums.py` rather than scattered across format files. Rationale:
+one location is easier to find and maintain than hunting across dozens of files.
+Enums are not file formats; they belong in `core/util/` alongside other
+primitive shared types. Format files (`itm.py`, `spl.py`, `are.py`, `cre.py`,
+etc.) import enums from `core.util.enums`.
+
+**2026-03 — Opcode resolution via bundled JSON, served by core/services/**
+Opcodes are not stored in an IDS file and are not sourced from the game
+installation — they are documented by IESDP and ship with the editor.
+Bundled tables live in `data/opcodes/` (one JSON file per game variant).
+Resolution is provided by `core/services/opcode_registry.py`, which lives in
+`core/services/` because it is a runtime service over bundled data with no
+installation dependency. `game/` is reserved for modules that require a game
+installation; `core/services/` is the correct home for editor-bundled data
+services. `OpcodeRegistry.for_game(game_id)` is the entry point.
+
+**2026-03 — game/ reserved for installation-dependent modules only**
+`game/` contains only modules that directly interact with a game installation
+(locating files, reading CHITIN.KEY, loading TLK/IDS files). Modules that
+serve bundled editor data (opcodes, static reference tables) belong in
+`core/services/` instead. Future todo: rename `installation.py` to
+`installation_manager.py` for clarity.
