@@ -55,7 +55,7 @@ Likewise, game assets such as image files or other resource files will not be pu
 
 ## Acknowledgments
 
-There has been a long history of modding the Infinity Engine. This project is built on the backs of (snow) giants.
+There has been a long history of modding the Infinity Engine. This project is built on the backs of (frost) giants.
 
 Specific callouts include those responsible for the creation of the following tools and resources, which were instrumental in the creation of this one:
 
