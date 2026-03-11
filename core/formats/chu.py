@@ -35,7 +35,8 @@ IESDP reference:
 
 Usage::
 
-    from core.formats.chu import ChuFile, ControlType
+    from core.formats.chu import ChuFile
+    from core.util.enums import ControlType
 
     chu = ChuFile.from_file("GUIINV.chu")
     for window in chu.windows:
@@ -50,11 +51,11 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from enum import IntEnum
 from pathlib import Path
 from typing import List, Optional, Union
 
 from core.util.binary import BinaryReader, BinaryWriter, SignatureMismatch
+from core.util.enums import ControlType
 
 
 # ---------------------------------------------------------------------------
@@ -68,30 +69,6 @@ HEADER_SIZE     = 20
 WINDOW_SIZE     = 28    # 0x001c bytes per window entry
 CTL_TABLE_ENTRY = 8     # 4 (offset) + 4 (length) per control table entry
 CONTROL_COMMON  = 14    # bytes shared by every control type
-
-
-# ---------------------------------------------------------------------------
-# Enumerations
-# ---------------------------------------------------------------------------
-
-class ControlType(IntEnum):
-    """Known CHU control type codes (byte at offset 0x000c in common section)."""
-    BUTTON   = 0
-    SLIDER   = 2
-    TEXTEDIT = 3
-    TEXTAREA = 5
-    LABEL    = 6
-    SCROLLBAR = 7
-
-    @classmethod
-    def _missing_(cls, value: object) -> "ControlType":  # type: ignore[override]
-        # Return a synthetic member rather than raising, so unknown controls
-        # degrade gracefully — the raw type byte is still accessible on the
-        # dataclass.
-        pseudo = int.__new__(cls, value)  # type: ignore[arg-type]
-        pseudo._name_ = f"UNKNOWN_{value}"
-        pseudo._value_ = value
-        return pseudo
 
 
 # ---------------------------------------------------------------------------

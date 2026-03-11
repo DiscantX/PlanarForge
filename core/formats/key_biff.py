@@ -18,7 +18,8 @@ IESDP references:
 
 Usage::
 
-    from core.formats.key_biff import KeyFile, ResType
+    from core.formats.key_biff import KeyFile
+    from core.util.enums import ResType
 
     key = KeyFile.open("/path/to/game/CHITIN.KEY")
     entry = key.find("AR0602", ResType.ARE)
@@ -29,11 +30,11 @@ Usage::
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import IntEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Dict, Iterator, List, Optional, Tuple, Union
 
 from core.util.binary import BinaryReader, BinaryWriter, SignatureMismatch
+from core.util.enums import ResType
 from core.util.resref import ResRef
 
 if TYPE_CHECKING:
@@ -70,76 +71,6 @@ class KeyFileError(Exception):
 
 class BiffError(Exception):
     """Raised when a BIFF file cannot be parsed."""
-
-
-# ---------------------------------------------------------------------------
-# Resource type registry
-# ---------------------------------------------------------------------------
-
-class ResType(IntEnum):
-    """
-    Infinity Engine resource type codes.
-
-    These are the uint16 values stored in both KEY resource entries and
-    BIFF file entries to identify what kind of data a resource contains.
-    """
-    BMP    = 0x0001
-    MVE    = 0x0002
-    WAV    = 0x0004
-    WFX    = 0x0005
-    PLT    = 0x0006
-    BAM    = 0x03E8
-    WED    = 0x03E9
-    CHU    = 0x03EA
-    TIS    = 0x03EB
-    MOS    = 0x03EC
-    ITM    = 0x03ED
-    SPL    = 0x03EE
-    BCS    = 0x03EF
-    IDS    = 0x03F0
-    CRE    = 0x03F1
-    ARE    = 0x03F2
-    DLG    = 0x03F3
-    TWO_DA = 0x03F4
-    GAM    = 0x03F5
-    STO    = 0x03F6
-    WMP    = 0x03F7
-    CHR    = 0x03F8
-    BS     = 0x03F9
-    VVC    = 0x03FB
-    VEF    = 0x03FC
-    PRO    = 0x03FD
-    BIO    = 0x03FE
-    WBM    = 0x03FF
-    FNT    = 0x0400
-    GUI    = 0x0402
-    SQL    = 0x0403
-    PVRZ   = 0x0404
-    GLSL   = 0x0405
-    MENU   = 0x0408
-    LUA    = 0x0409
-    TTF    = 0x040A
-    PNG    = 0x040B
-    BAH    = 0x044C
-    INI    = 0x0802
-    SRC    = 0x0803
-
-    @classmethod
-    def extension(cls, code: int) -> str:
-        """Return a lowercase file extension for a resource type code."""
-        _EXT: Dict[int, str] = {
-            0x0001: "bmp",  0x0002: "mve",  0x0004: "wav",  0x0005: "wfx",
-            0x0006: "plt",  0x03E8: "bam",  0x03E9: "wed",  0x03EA: "chu",
-            0x03EB: "tis",  0x03EC: "mos",  0x03ED: "itm",  0x03EE: "spl",
-            0x03EF: "bcs",  0x03F0: "ids",  0x03F1: "cre",  0x03F2: "are",
-            0x03F3: "dlg",  0x03F4: "2da",  0x03F5: "gam",  0x03F6: "sto",
-            0x03F7: "wmp",  0x03F8: "chr",  0x03F9: "bs",   0x03FB: "vvc",
-            0x03FC: "vef",  0x03FD: "pro",  0x03FE: "bio",  0x03FF: "wbm",
-            0x0400: "fnt",  0x0402: "gui",  0x0403: "sql",  0x0404: "pvrz",
-            0x0405: "glsl", 0x0408: "menu", 0x0409: "lua",  0x040A: "ttf",
-            0x040B: "png",  0x044C: "bah",  0x0802: "ini",  0x0803: "src",
-        }
-        return _EXT.get(code, f"res_{code:04x}")
 
 
 # ---------------------------------------------------------------------------

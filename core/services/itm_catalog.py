@@ -8,10 +8,13 @@ from typing import Any, Optional
 from core.formats.bam import decode_first_frame_rgba
 from core.formats.bmp import decode_bmp_rgba
 from core.formats.itm import ItmFile
-from core.formats.key_biff import KeyFile, ResType
+from core.formats.key_biff import KeyFile
+from core.util.enums import ResType
 from core.index import IndexEntry, ResourceIndex, SOURCE_BIFF
 from core.util.resref import ResRef
 from core.util.strref import StrRef
+from core.services.opcode_registry import OpcodeRegistry
+from game.ids_manager import IdsManager
 from game.installation import GameInstallation, InstallationFinder
 from game.string_manager import StringManager
 
@@ -26,6 +29,7 @@ class ItmCatalog:
         finder: Optional[InstallationFinder] = None,
         keyfile_cls: type[KeyFile] = KeyFile,
         string_manager_cls: type[StringManager] = StringManager,
+        ids_manager_cls: type[IdsManager] = IdsManager,
         item_parser_cls: type[ItmFile] = ItmFile,
         index_cls: type[ResourceIndex] = ResourceIndex,
         parser_file: Path | str = "core/formats/itm.py",
@@ -34,6 +38,7 @@ class ItmCatalog:
         self._finder = finder or InstallationFinder()
         self._keyfile_cls = keyfile_cls
         self._string_manager_cls = string_manager_cls
+        self._ids_manager_cls = ids_manager_cls
         self._item_parser_cls = item_parser_cls
         self._index_cls = index_cls
         self._parser_file = Path(parser_file)
@@ -41,6 +46,7 @@ class ItmCatalog:
         self._selected_game: Optional[GameInstallation] = None
         self._key: Optional[KeyFile] = None
         self._manager: Optional[StringManager] = None
+        self._ids_manager: Optional[IdsManager] = None
         self._index: Optional[ResourceIndex] = None
 
     def list_games(self) -> list[GameInstallation]:
@@ -55,6 +61,7 @@ class ItmCatalog:
         self._selected_game = inst
         self._key = None
         self._manager = None
+        self._ids_manager = None
         self._index = None
 
     def load_index(self, force_rebuild: bool = False) -> None:
@@ -258,6 +265,77 @@ class ItmCatalog:
             return ""
         return self._manager.resolve(ref) or ""
 
+    def resolve_ids(self, ids_name: str, raw_value: int) -> str:
+        """Resolve a raw IDS value to its symbolic name."""
+        if not isinstance(raw_value, int):
+            return ""
+        self._ensure_runtime_handles()
+        assert self._ids_manager is not None
+        try:
+            table = self._ids_manager.get(ids_name)
+        except Exception:
+            return ""
+        return table.resolve(raw_value)
+
+    def resolve_opcode(self, opcode: int) -> tuple[str, str]:
+        """Resolve an opcode value to (name, description) using bundled tables."""
+        if not isinstance(opcode, int):
+            return "", ""
+        game_id = ""
+        if self._selected_game is not None:
+            game_id = self._selected_game.game_id
+        registry = OpcodeRegistry.for_game(game_id)
+        entry = registry.resolve(opcode)
+        return entry.name, entry.description
+
+    def resolve_kit_usability_mask(self, raw_value: int, *, bit_offset: int = 0) -> str:
+        """
+        Resolve a kit usability bitmask (KITLIST.2DA) to kit names.
+
+        Returns a " | "-joined list of kit names, or "" if unresolved.
+        """
+        if not isinstance(raw_value, int) or raw_value == 0:
+            return ""
+        self._ensure_runtime_handles()
+        inst = self._require_selected_game()
+        assert self._key is not None
+        # Prefer 2DA kitlist from override or BIFF.
+        try:
+            entry = self._key.find("KITLIST", ResType.TWO_DA)
+            if entry is None:
+                return ""
+            raw = self._key.read_resource(entry, game_root=inst)
+        except Exception:
+            return ""
+
+        try:
+            text = raw.decode("latin-1", errors="replace")
+            table = _parse_2da(text)
+        except Exception:
+            return ""
+
+        kits: list[str] = []
+        for idx, row in enumerate(table.get("rows", [])):
+            kit_name = row.get("KITNAME") or row.get("KIT") or row.get("LOWER") or row.get("NAME")
+            if not kit_name:
+                continue
+            bit_index = idx - bit_offset
+            if bit_index < 0 or bit_index >= 8:
+                continue
+            if raw_value & (1 << bit_index):
+                label = str(kit_name)
+                # Many KITLIST.2DA entries store a STRREF in KITNAME.
+                try:
+                    ref = int(label)
+                    if ref >= 0:
+                        resolved = self.resolve_strref(ref)
+                        if resolved:
+                            label = resolved
+                except Exception:
+                    pass
+                kits.append(label)
+        return " | ".join(kits)
+
     def _require_selected_game(self) -> GameInstallation:
         if self._selected_game is None:
             raise RuntimeError("No game selected.")
@@ -269,6 +347,8 @@ class ItmCatalog:
             self._key = self._keyfile_cls.open(inst.chitin_key)
         if self._manager is None:
             self._manager = self._string_manager_cls.from_installation(inst)
+        if self._ids_manager is None:
+            self._ids_manager = self._ids_manager_cls(inst)
 
     def _build_index(self) -> ResourceIndex:
         assert self._key is not None
@@ -319,6 +399,7 @@ class ItmCatalog:
         except OSError:
             return "unknown"
 
+
     def _save_index(self, index: ResourceIndex, path: Path, chitin_mtime: float, parser_hash: str) -> None:
         entries: list[dict[str, Any]] = []
         for e in index.search(res_type=ResType.ITM):
@@ -366,3 +447,43 @@ class ItmCatalog:
             except Exception:
                 continue
         return index
+
+
+def _parse_2da(text: str) -> dict:
+    """
+    Minimal 2DA parser sufficient for KITLIST.2DA.
+    """
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    if not lines:
+        return {"columns": [], "rows": []}
+
+    idx = 0
+    if lines[idx].upper().startswith("2DA"):
+        idx += 1
+    if idx < len(lines) and lines[idx].upper().startswith("V"):
+        idx += 1
+
+    # Default value line (ignored)
+    if idx < len(lines):
+        idx += 1
+
+    if idx >= len(lines):
+        return {"columns": [], "rows": []}
+
+    headers = lines[idx].split()
+    idx += 1
+
+    rows: list[dict] = []
+    for line in lines[idx:]:
+        parts = line.split()
+        if len(parts) < 2:
+            continue
+        row_id = parts[0]
+        values = parts[1:]
+        row = {"_row_id": row_id}
+        for i, col in enumerate(headers):
+            if i < len(values):
+                row[col] = values[i]
+        rows.append(row)
+
+    return {"columns": headers, "rows": rows}

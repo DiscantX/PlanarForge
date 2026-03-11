@@ -58,11 +58,11 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass, field
-from enum import IntFlag
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from core.util.binary import BinaryReader, BinaryWriter, SignatureMismatch
+from core.util.enums import TransitionFlag
 from core.util.strref import StrRef, StrRefError
 
 
@@ -78,23 +78,6 @@ STATE_SIZE       = 16
 TRANSITION_SIZE  = 32
 
 NO_INDEX     = 0xFFFFFFFF
-
-
-# ---------------------------------------------------------------------------
-# Transition flags
-# ---------------------------------------------------------------------------
-
-class TransitionFlag(IntFlag):
-    NONE              = 0x00
-    HAS_TEXT          = 0x01   # transition has a player-response StrRef
-    HAS_TRIGGER       = 0x02   # transition has a condition string
-    HAS_ACTION        = 0x04   # transition has an action string
-    TERMINATES        = 0x08   # conversation ends here (no next state)
-    JOURNAL_ENTRY     = 0x10   # transition writes a journal entry
-    INTERRUPT         = 0x20   # interrupts current dialogue
-    ADD_JOURNAL       = 0x40   # add quest journal entry
-    REMOVE_JOURNAL    = 0x80   # remove quest journal entry
-    SOLVED_JOURNAL    = 0x100  # mark journal entry as solved
 
 
 # ---------------------------------------------------------------------------

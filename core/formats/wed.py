@@ -41,11 +41,11 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from enum import IntFlag
 from pathlib import Path
 from typing import List, Optional
 
 from core.util.binary import BinaryReader, BinaryWriter, SignatureMismatch
+from core.util.enums import PolygonFlag, TilemapFlag
 
 
 # ---------------------------------------------------------------------------
@@ -60,25 +60,6 @@ OVERLAY_HDR_SIZE  = 24
 TILEMAP_ENTRY_SIZE = 10
 DOOR_SIZE         = 16
 POLYGON_HDR_SIZE  = 18
-
-
-# ---------------------------------------------------------------------------
-# Enumerations
-# ---------------------------------------------------------------------------
-
-class TilemapFlag(IntFlag):
-    NONE            = 0x00
-    EXTENDED_NIGHT  = 0x01   # cell has an alternate night tile
-    DRAW_OVERLAPPED = 0x02   # tile drawn on top of adjacent tiles
-
-
-class PolygonFlag(IntFlag):
-    NONE       = 0x00
-    SHADE_WALL = 0x01   # blocks LOS
-    HOVERING   = 0x02   # polygon hovers above ground
-    COVER_PCS  = 0x04   # covers player characters
-    COVER_ANIMS = 0x08  # covers animations
-    IMPASSABLE  = 0x10  # blocks movement
 
 
 # ---------------------------------------------------------------------------

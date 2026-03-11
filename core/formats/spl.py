@@ -49,11 +49,20 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from enum import IntEnum, IntFlag
 from pathlib import Path
 from typing import List, Optional
 
 from core.util.binary import BinaryReader, BinaryWriter, SignatureMismatch
+from core.util.enums import (
+    CastingAnimation,
+    EffectTarget,
+    EffectTiming,
+    SpellFlag,
+    SpellSchool,
+    SpellTargetType,
+    SpellType,
+    SpellUsabilityFlag,
+)
 from core.util.resref import ResRef
 from core.util.strref import StrRef, StrRefError
 
@@ -71,141 +80,6 @@ HEADER_SIZE_V11 = 90
 EXT_HEADER_SIZE = 40
 FEATURE_BLOCK_SIZE = 48
 
-
-
-# ---------------------------------------------------------------------------
-# Enumerations
-# ---------------------------------------------------------------------------
-
-class SpellType(IntEnum):
-    """Spell category (offset 0x1C in header)."""
-    SPECIAL_ABILITY = 0x0000   # innate / special power
-    WIZARD          = 0x0001
-    CLERIC          = 0x0002
-    PSIONIC         = 0x0003   # PST
-    INNATE          = 0x0004   # also used for abilities granted by items
-    BARD            = 0x0005
-
-
-class SpellSchool(IntEnum):
-    """Arcane school / divine sphere (offset 0x25 in header)."""
-    NONE            = 0
-    ABJURATION      = 1
-    CONJURATION     = 2
-    DIVINATION      = 3
-    ENCHANTMENT     = 4
-    ILLUSION        = 5
-    EVOCATION       = 6
-    NECROMANCY      = 7
-    TRANSMUTATION   = 8   # Alteration
-    GENERALIST      = 9
-    DIVINATION2     = 10  # used inconsistently in some games
-    # Divine spheres (IWD2 / some EE titles map these differently)
-    ALL_SPHERES     = 0
-    ANIMAL          = 20
-    ASTRAL          = 21
-    CHARM           = 22
-    COMBAT          = 23
-    CREATION        = 24
-    ELEMENTAL       = 26
-    HEALING         = 27
-    NECROMANTIC     = 28
-    PLANT           = 29
-    PROTECTION      = 30
-    SUMMONING       = 31
-    SUN             = 32
-    WEATHER         = 33
-
-
-class SpellFlag(IntFlag):
-    """Spell flag bits (offset 0x18 in header)."""
-    NONE                    = 0x00000000
-    FRIENDLY                = 0x00000002  # does not affect caster's faction
-    NO_LOS_REQUIRED         = 0x00000004
-    ALLOW_DEAD              = 0x00000010  # can target dead creatures
-    IGNORE_WILD_SURGE       = 0x00000020
-    IGNORE_DEAD_MAGIC       = 0x00000040  # unaffected by dead magic zones
-    NOT_AFFECTED_BY_ANTIMAGIC = 0x00000080
-    IGNORE_WILD_MAGIC_ZONE  = 0x00000100
-    EE_HOSTILE              = 0x00000400  # EE: marks as hostile
-    EE_NO_INVENTORY_FEEDBACK = 0x00000800
-
-
-class UsabilityFlag(IntFlag):
-    """
-    Who cannot learn / use this spell (offset 0x1E in header).
-
-    Set bits *exclude* that class from using the spell.  The mapping
-    differs slightly between BG1/BG2/IWD; these are the BG2 values.
-    """
-    NONE            = 0x00000000
-    CHAOTIC         = 0x00000001
-    EVIL            = 0x00000002
-    GOOD            = 0x00000004
-    NEUTRAL_GE      = 0x00000008  # neither good nor evil
-    LAWFUL          = 0x00000010
-    NEUTRAL_LC      = 0x00000020  # neither lawful nor chaotic
-    BARD            = 0x00000040
-    CLERIC          = 0x00000080
-    CLERIC_EVIL     = 0x00000100
-    CLERIC_GOOD     = 0x00000200
-    CLERIC_NEUTRAL  = 0x00000400
-    DRUID           = 0x00000800
-    FIGHTER         = 0x00001000
-    MAGE            = 0x00002000
-    PALADIN         = 0x00004000
-    RANGER          = 0x00008000
-    SHAMAN          = 0x00010000
-    THIEF           = 0x00020000
-
-
-class CastingAnimation(IntEnum):
-    """Casting graphics selection (offset 0x28 in header)."""
-    NONE        = 0x0000
-    SPELL       = 0x0001
-    DETECTION   = 0x0002
-    MANUAL      = 0x0003  # no animation
-    AREA_EFFECT = 0x0004
-
-
-class TargetType(IntEnum):
-    """Extended header target type (offset 0x04 in ext header)."""
-    INVALID         = 0
-    LIVING_ACTOR    = 1
-    INVENTORY       = 2
-    DEAD_ACTOR      = 3
-    ANY_POINT       = 4
-    SELF            = 5
-    EX_SELF         = 6   # anyone except self
-    LARGE_AOE       = 7
-
-
-class EffectTarget(IntEnum):
-    """Feature block target (offset 0x20 in feature block)."""
-    NONE                    = 0
-    SELF                    = 1
-    PRESET_TARGET           = 2
-    PARTY                   = 3
-    EVERYONE                = 4
-    EVERYONE_EXCEPT_PARTY   = 5
-    ORIGINAL_CASTER         = 6
-    EVERYONE_IN_AREA        = 7
-    EVERYONE_EXCEPT_SELF    = 8
-    ORIGINAL_CASTER_GROUP   = 9
-
-
-class EffectTiming(IntEnum):
-    """Feature block timing mode (offset 0x22 in feature block)."""
-    DURATION            = 0
-    PERMANENT_UNSAVED   = 1
-    WHILE_EQUIPPED      = 2
-    DELAYED             = 3
-    DELAYED_PERMANENT   = 4
-    DELAYED_UNSAVED     = 5
-    DURATION_AFTER_DEATH = 6
-    PERMANENT_AFTER_DEATH = 7
-    INDEPENDENT         = 8
-    PERMANENT_SAVED     = 9
 
 
 # ---------------------------------------------------------------------------
@@ -358,7 +232,7 @@ class ExtendedHeader:
     dice live in feature blocks instead.
     """
     spell_level:      int = 0                  # uint16 — level of *this ability*
-    target_type:      int = TargetType.INVALID # uint8
+    target_type:      int = SpellTargetType.INVALID # uint8
     target_count:     int = 1                  # uint8
     range:            int = 0                  # uint16 — in feet
     casting_time:     int = 0                  # uint16 — in ticks
@@ -453,7 +327,7 @@ class ExtendedHeader:
     def from_json(cls, d: dict) -> "ExtendedHeader":
         eh = cls(
             spell_level      = d.get("spell_level",      0),
-            target_type      = d.get("target_type",      TargetType.INVALID),
+            target_type      = d.get("target_type",      SpellTargetType.INVALID),
             target_count     = d.get("target_count",     1),
             range            = d.get("range",            0),
             casting_time     = d.get("casting_time",     0),
@@ -489,7 +363,7 @@ class SplHeader:
     casting_graphics:  ResRef = ResRef("")         # ResRef — VEF/VVC casting animation
     flags:             int = SpellFlag.NONE
     spell_type:        int = SpellType.WIZARD
-    usability:         int = 0             # uint32 — UsabilityFlag (exclusions)
+    usability:         int = 0             # uint32 — SpellUsabilityFlag (exclusions)
     casting_anim:      int = CastingAnimation.SPELL  # uint16
     min_level:         int = 0             # uint16 — minimum caster level
     primary_type:      int = SpellSchool.NONE  # uint8 — school / sphere

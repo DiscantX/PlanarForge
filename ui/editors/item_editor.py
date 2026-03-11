@@ -3,12 +3,32 @@
 from __future__ import annotations
 
 import json
+from enum import IntEnum, IntFlag
 from pathlib import Path
 from typing import Any
 
 import dearpygui.dearpygui as dpg
 
 from core.services.itm_catalog import ItmCatalog
+from core.util.enums import (
+    AttackType,
+    ChargeBehavior,
+    EffectTarget,
+    EffectTiming,
+    ItemAbilityLocation,
+    ItemAbilityFlag,
+    ItemDamageType,
+    ItemDamageTypePST,
+    ItemFlag,
+    ItemFlagEE,
+    ItemFlagPSTEE,
+    ItemTargetType,
+    ItemTargetTypePST,
+    ItemType,
+    ItemUsabilityFlag,
+    ItemUsabilityFlagEE,
+    ItemUsabilityFlagPST,
+)
 from core.util.resref import ResRef
 from ui.core import EditorProgressHandler, EditorToolbar, ResourceBrowserPane
 
@@ -45,6 +65,11 @@ class ItemEditorPanel:
         # Panel sizing state
         self._total_width: int = 0
         self._total_height: int = 0
+        self._right_width: int = 0
+        self._last_structured_width: int = 0
+        self._last_payload: dict | None = None
+        self._last_icon: tuple[int, int, list[float]] | None = None
+        self._last_title: str = ""
         
         # Progress tracking
         self._progress_handler = EditorProgressHandler(self._set_status)
@@ -113,9 +138,23 @@ class ItemEditorPanel:
         self._browser.set_size(width, body_h)
         left_w = self._browser.get_panel_width()
         right_w = max(260, width - left_w - 12)
+        self._right_width = right_w
 
         dpg.configure_item(self.body_tag, pos=[0, top_h])
         dpg.configure_item(self.right_tag, width=right_w, height=body_h)
+        # Live reflow for structured table wrapping
+        structured_w = dpg.get_item_width(self.structured_tag)
+        if structured_w <= 0:
+            structured_w = right_w
+        if (
+            self._last_payload
+            and abs(structured_w - self._last_structured_width) >= 8
+        ):
+            self._last_structured_width = structured_w
+            try:
+                self._render_structured(self._last_payload, self._last_icon, self._last_title)
+            except Exception:
+                pass
 
     def refresh_results(self) -> None:
         """Refresh the results list with current search."""
@@ -237,6 +276,14 @@ class ItemEditorPanel:
         if not payload:
             dpg.add_text("No structured data.", parent=self.structured_tag)
             return
+        self._last_payload = payload
+        self._last_icon = icon
+        self._last_title = title
+        w = dpg.get_item_width(self.structured_tag)
+        if w <= 0:
+            w = self._right_width
+        if w > 0:
+            self._last_structured_width = w
 
         with dpg.group(parent=self.structured_tag, horizontal=True):
             if icon is not None:
@@ -272,8 +319,9 @@ class ItemEditorPanel:
         if "header" in payload:
             with dpg.tree_node(label="Header", parent=self.structured_tag, default_open=True):
                 header_node = dpg.last_item()
-                rows: list[tuple[str, str, str, tuple[int, int, list[float]] | None]] = []
+                rows: list[tuple[str, str, str, tuple[int, int, list[float]] | None, bool]] = []
                 self._collect_table_rows("header", payload["header"], rows)
+                rows = self._reorder_header_rows(rows)
                 self._render_section_table(
                     header_node,
                     rows,
@@ -288,7 +336,7 @@ class ItemEditorPanel:
                 for idx, ext_header in enumerate(ext_headers):
                     with dpg.tree_node(label=f"Extended Header [{idx}]", parent=ext_root_node, default_open=False):
                         ext_node = dpg.last_item()
-                        rows: list[tuple[str, str, str, tuple[int, int, list[float]] | None]] = []
+                        rows: list[tuple[str, str, str, tuple[int, int, list[float]] | None, bool]] = []
                         self._collect_table_rows(f"extended_headers[{idx}]", ext_header, rows)
                         self._render_section_table(
                             ext_node,
@@ -306,7 +354,7 @@ class ItemEditorPanel:
                 for idx, feature in enumerate(features):
                     with dpg.tree_node(label=f"Feature Block [{idx}]", parent=features_root_node, default_open=False):
                         feature_node = dpg.last_item()
-                        rows: list[tuple[str, str, str, tuple[int, int, list[float]] | None]] = []
+                        rows: list[tuple[str, str, str, tuple[int, int, list[float]] | None, bool]] = []
                         self._collect_table_rows(f"feature_blocks[{idx}]", feature, rows)
                         self._render_section_table(
                             feature_node,
@@ -321,7 +369,7 @@ class ItemEditorPanel:
         if other_keys:
             with dpg.tree_node(label="Other", parent=self.structured_tag, default_open=False):
                 other_node = dpg.last_item()
-                rows: list[tuple[str, str, str, tuple[int, int, list[float]] | None]] = []
+                rows: list[tuple[str, str, str, tuple[int, int, list[float]] | None, bool]] = []
                 for key in other_keys:
                     self._collect_table_rows(key, payload[key], rows)
                 self._render_section_table(other_node, rows, f"{self.structured_table_tag}_other")
@@ -361,18 +409,18 @@ class ItemEditorPanel:
         self,
         field_path: str,
         value: Any,
-        out_rows: list[tuple[str, str, str, tuple[int, int, list[float]] | None]],
+        out_rows: list[tuple[str, str, str, tuple[int, int, list[float]] | None, bool]],
     ) -> None:
-        if isinstance(value, dict):
+        if isinstance(value, dict) and not self._looks_like_idsref(value):
             if not value:
-                out_rows.append((field_path, "{}", "", None))
+                out_rows.append((field_path, "{}", "", None, False))
                 return
             for key, nested in value.items():
                 self._collect_table_rows(f"{field_path}.{key}", nested, out_rows)
             return
         if isinstance(value, list):
             if not value:
-                out_rows.append((field_path, "[]", "", None))
+                out_rows.append((field_path, "[]", "", None, False))
                 return
             for idx, nested in enumerate(value):
                 self._collect_table_rows(f"{field_path}[{idx}]", nested, out_rows)
@@ -381,10 +429,27 @@ class ItemEditorPanel:
         value_text = str(value)
         resolved = ""
         bam_icon: tuple[int, int, list[float]] | None = None
+        resolved_is_resref = False
         leaf = field_path.split(".")[-1]
         if "[" in leaf:
             leaf = leaf.split("[", 1)[0]
-        if self._is_strref_field(leaf) and isinstance(value, int):
+        if self._looks_like_idsref(value):
+            ids_name = str(value.get("ids", "")).strip().upper()
+            raw_val = value.get("value", 0)
+            try:
+                raw_int = int(raw_val)
+            except Exception:
+                raw_int = 0
+            value_text = f"{raw_int} ({ids_name})" if ids_name else str(raw_int)
+            if ids_name:
+                try:
+                    resolved = self.catalog.resolve_ids(ids_name, raw_int)
+                except Exception:
+                    resolved = ""
+        elif (
+            self._is_strref_field(leaf)
+            or (field_path.startswith("feature_blocks[") and leaf == "parameter1")
+        ) and isinstance(value, int):
             try:
                 resolved = self.catalog.resolve_strref(value)
             except Exception:
@@ -392,25 +457,138 @@ class ItemEditorPanel:
         elif self._is_itm_resref_field(leaf):
             itm_resref = self._normalize_resrefish(value)
             if not itm_resref:
-                out_rows.append((field_path, value_text, resolved, bam_icon))
+                out_rows.append((field_path, value_text, resolved, bam_icon, False))
                 return
             resolved = itm_resref
+            resolved_is_resref = True
             try:
                 bam_icon = self.catalog.load_item_icon_by_itm_resref(itm_resref)
             except Exception:
                 bam_icon = None
+        elif leaf == "animation" and isinstance(value, str):
+            resolved = self._resolve_animation_code(value)
         elif self._is_bam_field(leaf):
             bam_resref = self._normalize_resrefish(value)
             if not bam_resref:
-                out_rows.append((field_path, value_text, resolved, bam_icon))
+                out_rows.append((field_path, value_text, resolved, bam_icon, False))
                 return
             resolved = bam_resref
+            resolved_is_resref = True
             try:
                 bam_icon, _status = self.catalog.load_bam_icon_by_resref_with_status(bam_resref)
             except Exception:
                 bam_icon = None
+        elif leaf.startswith("kit_usability_") and isinstance(value, int):
+            offset = 0
+            if leaf.endswith("_2"):
+                offset = 8
+            elif leaf.endswith("_3"):
+                offset = 16
+            elif leaf.endswith("_4"):
+                offset = 24
+            try:
+                resolved = self.catalog.resolve_kit_usability_mask(value, bit_offset=offset)
+            except Exception:
+                resolved = ""
+        elif leaf == "opcode" and field_path.startswith("feature_blocks[") and isinstance(value, int):
+            try:
+                name, desc = self.catalog.resolve_opcode(value)
+                resolved = self._format_opcode_resolved(name, desc)
+            except Exception:
+                resolved = ""
+        else:
+            enum_cls = self._enum_for_field(field_path)
+            if enum_cls is not None and isinstance(value, int):
+                resolved = self._enum_display(enum_cls, value)
+                if field_path == "header.usability" and resolved:
+                    resolved = self._format_unusable_by(resolved)
 
-        out_rows.append((field_path, value_text, resolved, bam_icon))
+        out_rows.append((field_path, value_text, resolved, bam_icon, resolved_is_resref))
+
+    @staticmethod
+    def _looks_like_idsref(value: Any) -> bool:
+        return isinstance(value, dict) and "value" in value and "ids" in value
+
+    def _enum_for_field(self, field_path: str) -> type[IntEnum] | type[IntFlag] | None:
+        normalized = field_path.replace("]", "").replace("[", "")
+        # Strip numeric indices from paths like extended_headers0.attack_type
+        normalized = "".join(ch for ch in normalized if not ch.isdigit())
+        if normalized == "header.item_type":
+            return ItemType
+        if normalized == "header.flags":
+            game_id = (self._selected_game_id or "").upper()
+            if game_id == "PSTEE":
+                return ItemFlagPSTEE
+            if game_id.endswith("EE"):
+                return ItemFlagEE
+            return ItemFlag
+        if normalized == "header.usability":
+            game_id = (self._selected_game_id or "").upper()
+            if game_id.startswith("PST"):
+                return ItemUsabilityFlagPST
+            if game_id.endswith("EE"):
+                return ItemUsabilityFlagEE
+            return ItemUsabilityFlag
+        if normalized.startswith("extended_headers.") and normalized.endswith(".attack_type"):
+            return AttackType
+        if normalized.startswith("extended_headers.") and normalized.endswith(".target_type"):
+            if (self._selected_game_id or "").upper().startswith("PST"):
+                return ItemTargetTypePST
+            return ItemTargetType
+        if normalized.startswith("extended_headers.") and normalized.endswith(".location"):
+            return ItemAbilityLocation
+        if normalized.startswith("extended_headers.") and normalized.endswith(".charge_depletion"):
+            return ChargeBehavior
+        if normalized.startswith("extended_headers.") and normalized.endswith(".damage_type"):
+            if (self._selected_game_id or "").upper().startswith("PST"):
+                return ItemDamageTypePST
+            return ItemDamageType
+        if normalized.startswith("extended_headers.") and normalized.endswith(".flags"):
+            return ItemAbilityFlag
+        if normalized.startswith("feature_blocks.") and normalized.endswith(".target"):
+            return EffectTarget
+        if normalized.startswith("feature_blocks.") and normalized.endswith(".timing_mode"):
+            return EffectTiming
+        return None
+
+    @staticmethod
+    def _enum_display(enum_cls: type[IntEnum] | type[IntFlag], value: int) -> str:
+        try:
+            if issubclass(enum_cls, IntFlag):
+                if value == 0:
+                    try:
+                        return enum_cls(0).name
+                    except Exception:
+                        return "NONE"
+                names = [m.name for m in enum_cls if m.value and (value & int(m.value))]
+                return " | ".join(names) if names else f"UNKNOWN({value})"
+            return enum_cls(value).name
+        except Exception:
+            return f"UNKNOWN({value})"
+
+    @staticmethod
+    def _format_unusable_by(resolved: str) -> str:
+        if not resolved:
+            return resolved
+        parts = [p.strip() for p in resolved.split("|") if p.strip()]
+        cleaned: list[str] = []
+        for part in parts:
+            if part.startswith("UNUSABLE_BY_"):
+                part = part[len("UNUSABLE_BY_") :]
+            part = part.replace("_", " ")
+            part = " ".join(token.capitalize() for token in part.split())
+            cleaned.append(part)
+        return " | ".join(cleaned)
+
+    @staticmethod
+    def _format_opcode_resolved(name: str, desc: str) -> str:
+        if not name:
+            return ""
+        if not desc:
+            return name
+        compact = " ".join(desc.split())
+        return f"{name}\n{compact}"
+
 
     @staticmethod
     def _is_strref_field(field_name: str) -> bool:
@@ -465,16 +643,18 @@ class ItemEditorPanel:
     def _render_section_table(
         self,
         parent: str | int,
-        rows: list[tuple[str, str, str, tuple[int, int, list[float]] | None]],
+        rows: list[tuple[str, str, str, tuple[int, int, list[float]] | None, bool]],
         table_tag: str,
         *,
         strip_prefix: str = "",
     ) -> None:
+        wrap_targets: list[str] = []
+        cell_idx = 0
         with dpg.table(
             tag=table_tag,
             parent=parent,
             header_row=True,
-            policy=dpg.mvTable_SizingFixedFit,
+            policy=dpg.mvTable_SizingStretchProp,
             row_background=True,
             resizable=True,
             sortable=False,
@@ -483,14 +663,23 @@ class ItemEditorPanel:
             borders_innerH=True,
             borders_outerH=True,
         ):
-            dpg.add_table_column(label="Field")
-            dpg.add_table_column(label="Value")
-            dpg.add_table_column(label="Resolved / Preview")
-            for field_path, value_text, resolved_strref, bam_icon in rows:
+            dpg.add_table_column(label="Field", width_stretch=True)
+            dpg.add_table_column(label="Value", width_stretch=True)
+            dpg.add_table_column(label="Resolved / Preview", width_stretch=True)
+            for field_path, value_text, resolved_strref, bam_icon, resolved_is_resref in rows:
                 row_height = 24 if bam_icon is not None else 0
                 with dpg.table_row(parent=table_tag, height=row_height):
-                    dpg.add_text(ItemEditorPanel._humanize_field_path(field_path, strip_prefix=strip_prefix))
-                    dpg.add_text(value_text)
+                    field_tag = self._tag(f"cell_field_{cell_idx}")
+                    cell_idx += 1
+                    value_tag = self._tag(f"cell_value_{cell_idx}")
+                    cell_idx += 1
+                    dpg.add_text(
+                        ItemEditorPanel._humanize_field_path(field_path, strip_prefix=strip_prefix),
+                        tag=field_tag,
+                    )
+                    dpg.add_text(value_text, tag=value_tag)
+                    wrap_targets.append(field_tag)
+                    wrap_targets.append(value_tag)
                     with dpg.group(horizontal=True):
                         if bam_icon is not None:
                             tex = self._create_dynamic_texture(*bam_icon)
@@ -507,12 +696,84 @@ class ItemEditorPanel:
                                 full_height=height,
                             )
                         if resolved_strref:
-                            dpg.add_text(resolved_strref)
+                            resolved_tag = self._tag(f"cell_resolved_{cell_idx}")
+                            cell_idx += 1
+                            dpg.add_text(resolved_strref, tag=resolved_tag)
+                            wrap_targets.append(resolved_tag)
+        self._schedule_wrap_update(table_tag, wrap_targets)
+
+    def _schedule_wrap_update(self, table_tag: str, wrap_targets: list[str]) -> None:
+        if not wrap_targets:
+            return
+        frame = dpg.get_frame_count() + 1
+        dpg.set_frame_callback(frame, lambda: self._apply_wrap_update(table_tag, wrap_targets))
+
+    def _apply_wrap_update(self, table_tag: str, wrap_targets: list[str]) -> None:
+        wrap_width = self._measure_table_wrap_width(table_tag)
+        for tag in wrap_targets:
+            if not dpg.does_item_exist(tag):
+                continue
+            try:
+                dpg.configure_item(tag, wrap=wrap_width)
+            except Exception:
+                continue
+
+    def _measure_table_wrap_width(self, table_tag: str) -> int:
+        candidates: list[int] = []
+        for tag in (table_tag, self.structured_tag, self.right_tag):
+            try:
+                w = dpg.get_item_rect_size(tag)[0]
+            except Exception:
+                w = 0
+            if not w:
+                try:
+                    w = dpg.get_item_width(tag)
+                except Exception:
+                    w = 0
+            if w:
+                candidates.append(int(w))
+        if not candidates:
+            candidates.append(int(self._right_width or 720))
+
+        width = min(candidates)
+        pad = 0
+        try:
+            config = dpg.get_item_configuration(self.structured_tag)
+            pad = int(config.get("window_padding", (0, 0))[0]) * 2
+        except Exception:
+            pad = 0
+        return max(120, int(width) - pad)
 
     @staticmethod
     def _humanize_field_path(field_path: str, *, strip_prefix: str = "") -> str:
         if strip_prefix and field_path.startswith(strip_prefix):
             field_path = field_path[len(strip_prefix):]
+
+        if field_path == "usability":
+            return "Unusable by"
+
+        if field_path.startswith("melee_anim["):
+            idx_text = field_path[len("melee_anim[") :].split("]", 1)[0]
+            try:
+                idx = int(idx_text)
+            except ValueError:
+                idx = -1
+            labels = {
+                0: "Animation: Overhand Swing %",
+                1: "Animation: Backhand Swing %",
+                2: "Animation: Thrust %",
+            }
+            if idx in labels:
+                return f"Melee Anim [{idx + 1}] ({labels[idx]})"
+
+        kit_labels = {
+            "kit_usability_1": "Unusable by kit (1/4)",
+            "kit_usability_2": "Unusable by kit (2/4)",
+            "kit_usability_3": "Unusable by kit (3/4)",
+            "kit_usability_4": "Unusable by kit (4/4)",
+        }
+        if field_path in kit_labels:
+            return kit_labels[field_path]
 
         parts = field_path.split(".")
         pretty_parts: list[str] = []
@@ -529,6 +790,92 @@ class ItemEditorPanel:
             pretty_parts.append(f"{base}{index_part}" if base else part)
 
         return " > ".join(pretty_parts)
+
+    @staticmethod
+    def _reorder_header_rows(
+        rows: list[tuple[str, str, str, tuple[int, int, list[float]] | None]]
+    ) -> list[tuple[str, str, str, tuple[int, int, list[float]] | None]]:
+        if not rows:
+            return rows
+        kit_keys = {
+            "header.kit_usability_1",
+            "header.kit_usability_2",
+            "header.kit_usability_3",
+            "header.kit_usability_4",
+        }
+        kit_rows = [r for r in rows if r[0] in kit_keys]
+        other_rows = [r for r in rows if r[0] not in kit_keys]
+
+        def kit_sort_key(row: tuple[str, str, str, tuple[int, int, list[float]] | None]) -> int:
+            name = row[0]
+            if name.endswith("_1"):
+                return 1
+            if name.endswith("_2"):
+                return 2
+            if name.endswith("_3"):
+                return 3
+            if name.endswith("_4"):
+                return 4
+            return 99
+
+        kit_rows.sort(key=kit_sort_key)
+
+        # Insert kit rows right after header.usability if present.
+        out: list[tuple[str, str, str, tuple[int, int, list[float]] | None]] = []
+        inserted = False
+        for row in other_rows:
+            out.append(row)
+            if row[0] == "header.usability":
+                out.extend(kit_rows)
+                inserted = True
+        if not inserted:
+            out.extend(kit_rows)
+        return out
+
+    @staticmethod
+    def _resolve_animation_code(value: str) -> str:
+        code = (value or "").strip().upper()
+        if not code:
+            return ""
+        mapping = {
+            "2A": "Leather Armor",
+            "3A": "Chainmail",
+            "4A": "Plate Mail",
+            "2W": "Robe",
+            "3W": "Robe",
+            "4W": "Robe",
+            "AX": "Axe",
+            "BW": "Bow",
+            "CB": "Crossbow",
+            "CL": "Club",
+            "D1": "Buckler",
+            "D2": "Shield (Small)",
+            "D3": "Shield (Medium)",
+            "D4": "Shield (Large)",
+            "DD": "Dagger",
+            "FL": "Flail",
+            "FS": "Flame Sword",
+            "H0": "Small Vertical Horns",
+            "H1": "Large Horizontal Horns",
+            "H2": "Feather Wings",
+            "H3": "Top Plume",
+            "H4": "Dragon Wings",
+            "H5": "Feather Sideburns",
+            "H6": "Large Curved Horns",
+            "HB": "Halberd",
+            "MC": "Mace",
+            "MS": "Morning Star",
+            "QS": "Quarter Staff (Metal)",
+            "S1": "Sword 1-Handed",
+            "S2": "Sword 2-Handed",
+            "SL": "Sling",
+            "SP": "Spear",
+            "SS": "Short Sword",
+            "WH": "War Hammer",
+            "S3": "Katana",
+            "SC": "Scimitar",
+        }
+        return mapping.get(code, "")
 
     def _entry_tooltip_text(self, entry: Any) -> str:
         data = getattr(entry, "data", None)

@@ -2,5 +2,6 @@
 
 from .character_service import CharacterService
 from .itm_catalog import ItmCatalog
+from .opcode_registry import OpcodeRegistry
 
-__all__ = ["CharacterService", "ItmCatalog"]
+__all__ = ["CharacterService", "ItmCatalog", "OpcodeRegistry"]

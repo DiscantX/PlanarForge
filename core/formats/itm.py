@@ -46,11 +46,19 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from enum import IntEnum, IntFlag
 from pathlib import Path
 from typing import List, Optional
 
 from core.util.binary import BinaryReader, BinaryWriter, SignatureMismatch
+from core.util.enums import (
+    AttackType,
+    EffectTarget,
+    EffectTiming,
+    ItemFlag,
+    ItemTargetType,
+    ItemType,
+)
+from core.util.idsref import IdsRef
 from core.util.resref import ResRef
 from core.util.strref import StrRef, StrRefError
 
@@ -68,149 +76,6 @@ HEADER_SIZE_V11 = 116
 EXT_HEADER_SIZE = 56
 FEATURE_BLOCK_SIZE = 48
 
-
-
-# ---------------------------------------------------------------------------
-# Enumerations
-# ---------------------------------------------------------------------------
-
-class ItemType(IntEnum):
-    """Item category codes (offset 0x1C in header)."""
-    MISCELLANEOUS     = 0x0000
-    AMULET            = 0x0001
-    ARMOUR            = 0x0002
-    BELT              = 0x0003
-    BOOTS             = 0x0004
-    ARROWS            = 0x0005
-    BRACERS           = 0x0006
-    HEADGEAR          = 0x0007
-    KEYS              = 0x0008
-    POTION            = 0x0009
-    RING              = 0x000A
-    SCROLLS           = 0x000B
-    SHIELD            = 0x000C
-    FOOD              = 0x000D
-    BULLETS           = 0x000E
-    BOW               = 0x000F
-    DAGGER            = 0x0010
-    MACE              = 0x0011
-    SLING             = 0x0012
-    SMALL_SWORD       = 0x0013
-    LARGE_SWORD       = 0x0014
-    HAMMER            = 0x0015
-    MORNINGSTAR       = 0x0016
-    FLAIL             = 0x0017
-    DARTS             = 0x0018
-    AXE               = 0x0019
-    QUARTERSTAFF      = 0x001A
-    CROSSBOW          = 0x001B
-    HAND_TO_HAND      = 0x001C
-    SPEAR             = 0x001D
-    HALBERD           = 0x001E
-    BOLTS             = 0x001F
-    CLOAK             = 0x0020
-    GOLD              = 0x0021
-    GEM               = 0x0022
-    WAND              = 0x0023
-    CONTAINER         = 0x0024  # eye / broken armour slot items
-    BOOKS             = 0x0025
-    FAMILIAR          = 0x0026
-    TATTOO            = 0x0027  # PST
-    LENS              = 0x0028  # PST
-    BUCKLER           = 0x0029
-    CANDLE            = 0x002A
-    CLUB              = 0x002C
-    LARGE_SHIELD      = 0x002F
-    MEDIUM_SHIELD     = 0x0031
-    NOTES             = 0x0033
-    SMALL_SHIELD      = 0x0035
-    TELESCOPE         = 0x0037
-    DRINK             = 0x0038
-    GREAT_SWORD       = 0x0039
-    CONTAINER2        = 0x003A
-    FUR               = 0x003B
-    LEATHER_ARMOUR    = 0x003C
-    STUDDED_LEATHER   = 0x003D
-    CHAIN_MAIL        = 0x003E
-    SPLINT_MAIL       = 0x003F
-    HALF_PLATE        = 0x0040
-    FULL_PLATE        = 0x0041
-    HIDE_ARMOUR       = 0x0042
-    ROBE              = 0x0043
-    BASTARD_SWORD     = 0x0045
-    SCARF             = 0x0046
-    FOOD2             = 0x0047
-    THROWING_AXE      = 0x0048
-    CROSSBOW_BOLT     = 0x0049
-
-
-class ItemFlag(IntFlag):
-    """Item flag bits (offset 0x18 in header)."""
-    NONE                = 0x00000000
-    UNSELLABLE          = 0x00000001  # critical item, cannot be sold
-    TWO_HANDED          = 0x00000002
-    DROPPABLE           = 0x00000004
-    DISPLAYABLE         = 0x00000008
-    CURSED              = 0x00000010
-    UNKNOWN_20          = 0x00000020
-    MAGICAL             = 0x00000040
-    LEFT_HANDED         = 0x00000080
-    SILVER              = 0x00000100
-    COLD_IRON           = 0x00000200
-    OFF_HANDED          = 0x00000400
-    CONVERSABLE         = 0x00000800
-    EE_FAKE_TWO_HANDED  = 0x00001000  # EE only
-    EE_FORBID_OFF_HAND  = 0x00002000  # EE only
-
-
-class AttackType(IntEnum):
-    """Extended header attack type (offset 0x08 in ext header)."""
-    NONE        = 0
-    MELEE       = 1
-    RANGED      = 2
-    MAGICAL     = 3
-    LAUNCHER    = 4
-
-
-class TargetType(IntEnum):
-    """Extended header target type (offset 0x0C in ext header)."""
-    INVALID         = 0
-    LIVING_ACTOR    = 1
-    INVENTORY       = 2
-    DEAD_ACTOR      = 3
-    ANY_POINT       = 4
-    SELF            = 5
-    EX_SELF         = 6  # anyone except self
-    LARGE_AOE       = 7
-
-
-class EffectTarget(IntEnum):
-    """Feature block target type (offset 0x02 in feature block)."""
-    NONE            = 0
-    SELF            = 1
-    PRESET_TARGET   = 2
-    PARTY           = 3
-    EVERYONE        = 4
-    EVERYONE_EXCEPT_PARTY = 5
-    ORIGINAL_CASTER = 6
-    EVERYONE_IN_AREA = 7
-    EVERYONE_EXCEPT_SELF = 8
-    ORIGINAL_CASTER_GROUP = 9
-
-
-class EffectTiming(IntEnum):
-    """Feature block timing mode (offset 0x0C in feature block)."""
-    DURATION             = 0
-    PERMANENT            = 1
-    WHILE_EQUIPPED       = 2
-    DELAYED_DURATION     = 3
-    DELAYED              = 4
-    DELAYED_TRANSFORMS   = 5
-    DURATION_2           = 6
-    PERMANENT_2          = 7
-    PERMANENT_UNSAVED    = 8
-    PERMANENT_AFTER_DEATH = 9
-    TRIGGER              = 10
 
 
 # ---------------------------------------------------------------------------
@@ -362,10 +227,10 @@ class ExtendedHeader:
     location:          int = 0                  # uint8  0x02 — Location
     alt_dice_sides:    int = 0                  # uint8  0x03 — Alternate dice sides
     use_icon:          ResRef = ResRef("")       # resref 0x04 — Use icon (BAM)
-    target_type:       int = TargetType.INVALID # uint8  0x0C — Target type
+    target_type:       int = ItemTargetType.INVALID # uint8  0x0C — Target type
     target_count:      int = 0                  # uint8  0x0D — Target count
     range:             int = 0                  # uint16 0x0E — Range
-    projectile_type:     int = 0                  # uint8  0x10 — Projectile type (0=None,1=Arrow,2=Bolt,3=Bullet)
+    projectile_type:     int = 0                  # uint8  0x10 — Projectile type
     alt_dice_thrown:    int = 0                  # uint8  0x11 — Alternative dice thrown
     speed:             int = 0                  # uint8  0x12 — Speed
     alt_damage_bonus:  int = 0                  # int8   0x13 — Alternative damage bonus
@@ -381,7 +246,7 @@ class ExtendedHeader:
     charges:           int = 0                  # uint16 0x22 — Charges
     charge_depletion:  int = 0                  # uint16 0x24 — Charge depletion behaviour
     flags:             int = 0                  # uint32 0x26 — Flags
-    projectile_anim:   int = 0                  # uint16 0x2A — Projectile animation
+    projectile_anim:   IdsRef = field(default_factory=lambda: IdsRef(0, "PROJECTL"))  # uint16 0x2A — Projectile animation (PROJECTL.IDS)
     melee_anim:        List[int] = field(default_factory=lambda: [0, 0, 0])  # 3×uint16 0x2C–0x31
     unused_0x32:      int = 0                  # uint16 0x32 — Unused (IESDP V1/V1.1)
     unused_0x34:      int = 0                  # uint16 0x34 — Unused (IESDP V1/V1.1)
@@ -421,7 +286,7 @@ class ExtendedHeader:
         charges          = r.read_uint16()         # 0x22–0x23
         charge_depletion = r.read_uint16()         # 0x24–0x25
         flags            = r.read_uint32()         # 0x26–0x29
-        projectile_anim  = r.read_uint16()         # 0x2A–0x2B
+        projectile_anim  = IdsRef(r.read_uint16(), "PROJECTL")  # 0x2A–0x2B
         melee_anim       = [r.read_uint16() for _ in range(3)]  # 0x2C–0x31
         unused_0x32     = r.read_uint16()         # 0x32–0x33
         unused_0x34     = r.read_uint16()         # 0x34–0x35
@@ -471,7 +336,7 @@ class ExtendedHeader:
         w.write_uint16(self.charges)              # 0x22–0x23
         w.write_uint16(self.charge_depletion)     # 0x24–0x25
         w.write_uint32(self.flags)                # 0x26–0x29
-        w.write_uint16(self.projectile_anim)      # 0x2A–0x2B
+        w.write_uint16(self.projectile_anim.value)  # 0x2A–0x2B
         for v in (self.melee_anim + [0, 0, 0])[:3]:
             w.write_uint16(v)                     # 0x2C–0x31
         w.write_uint16(self.unused_0x32)         # 0x32–0x33
@@ -493,7 +358,7 @@ class ExtendedHeader:
         if self.id_req:             d["id_req"]            = self.id_req
         if self.location:           d["location"]          = self.location
         if self.target_count:       d["target_count"]      = self.target_count
-        if self.projectile_type:      d["projectile_type"]     = self.projectile_type
+        if self.projectile_type:     d["projectile_type"]     = self.projectile_type
         if self.alt_dice_thrown:     d["alt_dice_thrown"]    = self.alt_dice_thrown
         if self.alt_dice_sides:     d["alt_dice_sides"]    = self.alt_dice_sides
         if self.speed:              d["speed"]             = self.speed
@@ -507,7 +372,7 @@ class ExtendedHeader:
         if self.secondary_type:     d["secondary_type"]    = self.secondary_type
         if self.charge_depletion:   d["charge_depletion"]  = self.charge_depletion
         if self.flags:              d["flags"]             = self.flags
-        if self.projectile_anim:    d["projectile_anim"]   = self.projectile_anim
+        if self.projectile_anim.value: d["projectile_anim"]    = self.projectile_anim.to_json()
         if any(self.melee_anim):    d["melee_anim"]        = self.melee_anim
         if self.unused_0x32:       d["unused_0x32"]      = self.unused_0x32
         if self.unused_0x34:       d["unused_0x34"]      = self.unused_0x34
@@ -519,13 +384,19 @@ class ExtendedHeader:
 
     @classmethod
     def from_json(cls, d: dict) -> "ExtendedHeader":
+        proj_anim = d.get("projectile_anim", 0)
+        if isinstance(proj_anim, dict):
+            proj_anim = IdsRef.from_json(proj_anim)
+        else:
+            proj_anim = IdsRef(int(proj_anim), "PROJECTL")
+
         eh = cls(
             attack_type      = d.get("attack_type",      AttackType.NONE),
             id_req           = d.get("id_req",           0),
             location         = d.get("location",         0),
             alt_dice_sides   = d.get("alt_dice_sides",   0),
             use_icon         = ResRef.from_json(d.get("use_icon", "")),
-            target_type      = d.get("target_type",      TargetType.INVALID),
+            target_type      = d.get("target_type",      ItemTargetType.INVALID),
             target_count     = d.get("target_count",     0),
             range            = d.get("range",            0),
             projectile_type    = d.get("projectile_type",    0),
@@ -542,7 +413,7 @@ class ExtendedHeader:
             charges          = d.get("charges",          0),
             charge_depletion = d.get("charge_depletion", 0),
             flags            = d.get("flags",            0),
-            projectile_anim  = d.get("projectile_anim",  0),
+            projectile_anim  = proj_anim,
             melee_anim       = d.get("melee_anim",       [0, 0, 0]),
             unused_0x32     = d.get("unused_0x32",     0),
             unused_0x34     = d.get("unused_0x34",     0),
@@ -588,7 +459,7 @@ class ItmHeader:
     min_wisdom:         int = 0             # uint8
     kit_usability_4:    int = 0             # uint8
     min_constitution:   int = 0             # uint8
-    weapon_proficiency: int = 0             # uint8
+    weapon_proficiency: IdsRef = field(default_factory=lambda: IdsRef(0, "WPROF"))  # uint8 — weapon proficiency (WPROF.IDS)
     min_charisma:       int = 0             # uint16
 
     # Economy
@@ -637,7 +508,7 @@ class ItmHeader:
         min_wisdom          = r.read_uint8()
         kit_usability_4     = r.read_uint8()
         min_constitution    = r.read_uint8()
-        weapon_proficiency  = r.read_uint8()
+        weapon_proficiency  = IdsRef(r.read_uint8(), "WPROF")
         min_charisma        = r.read_uint16()
         base_value          = r.read_uint32()
         max_stack           = r.read_uint16()
@@ -702,7 +573,7 @@ class ItmHeader:
         w.write_uint8(self.min_wisdom)
         w.write_uint8(self.kit_usability_4)
         w.write_uint8(self.min_constitution)
-        w.write_uint8(self.weapon_proficiency)
+        w.write_uint8(self.weapon_proficiency.value)
         w.write_uint16(self.min_charisma)
         w.write_uint32(self.base_value)
         w.write_uint16(self.max_stack)
@@ -937,7 +808,8 @@ class ItmFile:
         if h.min_wisdom:         hd["min_wisdom"]         = h.min_wisdom
         if h.min_constitution:   hd["min_constitution"]   = h.min_constitution
         if h.min_charisma:       hd["min_charisma"]       = h.min_charisma
-        if h.weapon_proficiency: hd["weapon_proficiency"] = h.weapon_proficiency
+        if h.weapon_proficiency.value:
+            hd["weapon_proficiency"] = h.weapon_proficiency.to_json()
         if h.kit_usability_1:    hd["kit_usability_1"]    = h.kit_usability_1
         if h.kit_usability_2:    hd["kit_usability_2"]    = h.kit_usability_2
         if h.kit_usability_3:    hd["kit_usability_3"]    = h.kit_usability_3
@@ -978,7 +850,11 @@ class ItmFile:
             min_wisdom          = hd.get("min_wisdom",         0),
             kit_usability_4     = hd.get("kit_usability_4",    0),
             min_constitution    = hd.get("min_constitution",   0),
-            weapon_proficiency  = hd.get("weapon_proficiency", 0),
+            weapon_proficiency  = (
+                IdsRef.from_json(hd["weapon_proficiency"])
+                if isinstance(hd.get("weapon_proficiency", 0), dict)
+                else IdsRef(int(hd.get("weapon_proficiency", 0)), "WPROF")
+            ),
             min_charisma        = hd.get("min_charisma",       0),
             base_value          = hd.get("base_value",         0),
             max_stack           = hd.get("max_stack",          1),

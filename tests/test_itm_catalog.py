@@ -4,7 +4,7 @@ import unittest
 from dataclasses import dataclass
 from pathlib import Path
 
-from core.formats.key_biff import ResType
+from core.util.enums import ResType
 from core.services.itm_catalog import ItmCatalog
 from core.util.resref import ResRef
 from game.installation import GameInstallation
@@ -189,4 +189,3 @@ class TestItmCatalog(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
-

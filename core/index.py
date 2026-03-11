@@ -51,7 +51,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple, TYPE_CHECKING
 
-from core.formats.key_biff import KeyFile, ResType, ResourceEntry
+from core.formats.key_biff import KeyFile, ResourceEntry
+from core.util.enums import ResType
 from core.formats.are  import AreFile
 from core.formats.cre  import CreFile
 from core.formats.dlg  import DlgFile

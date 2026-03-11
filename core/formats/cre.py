@@ -30,7 +30,8 @@ IESDP references:
 
 Usage::
 
-    from core.formats.cre import CreFile, CreFileV12, SlotIndex, PstSlotIndex
+    from core.formats.cre import CreFile, CreFileV12
+    from core.util.enums import SlotIndex, PstSlotIndex
 
     cre = CreFile.from_file("GORION.cre")       # auto-dispatches on version
     print(cre.header.max_hp)
@@ -46,11 +47,11 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from enum import IntEnum, IntFlag
 from pathlib import Path
 from typing import Dict, List, Optional, Type, Union
 
 from core.util.binary import BinaryReader, BinaryWriter, SignatureMismatch
+from core.util.enums import Alignment, Class, CreFlag, Gender, PstSlotIndex, Race, SlotIndex
 from core.util.resref import ResRef
 from core.util.strref import StrRef, StrRefError
 
@@ -79,202 +80,6 @@ EFFECT_V2_SIZE        = 108  # V2 embedded: 48 + special(4) + tail(56)
 SLOT_COUNT     = 40   # V1 / V9  (BG1/BG2/BGEE: 40 slots per IESDP)
 SLOT_COUNT_V12 = 48   # PST V1.2 (48 slots per IESDP)
 
-
-
-# ---------------------------------------------------------------------------
-# Enumerations — shared
-# ---------------------------------------------------------------------------
-
-class Gender(IntEnum):
-    MALE    = 1
-    FEMALE  = 2
-    NEITHER = 3
-    BOTH    = 4
-
-
-class Race(IntEnum):
-    HUMAN    = 1
-    ELF      = 2
-    HALF_ELF = 3
-    DWARF    = 4
-    HALFLING = 5
-    GNOME    = 6
-    HALF_ORC = 7
-
-
-class Class(IntEnum):
-    MAGE                = 1
-    FIGHTER             = 2
-    CLERIC              = 3
-    THIEF               = 4
-    BARD                = 5
-    PALADIN             = 6
-    FIGHTER_MAGE        = 7
-    FIGHTER_CLERIC      = 8
-    FIGHTER_THIEF       = 9
-    FIGHTER_MAGE_THIEF  = 10
-    DRUID               = 11
-    RANGER              = 12
-    MAGE_THIEF          = 13
-    CLERIC_MAGE         = 14
-    CLERIC_THIEF        = 15
-    FIGHTER_DRUID       = 16
-    FIGHTER_MAGE_CLERIC = 17
-    CLERIC_RANGER       = 18
-    SHAMAN              = 19
-    SORCERER            = 19
-
-
-class Alignment(IntEnum):
-    LAWFUL_GOOD     = 0x11
-    NEUTRAL_GOOD    = 0x21
-    CHAOTIC_GOOD    = 0x31
-    LAWFUL_NEUTRAL  = 0x12
-    TRUE_NEUTRAL    = 0x22
-    CHAOTIC_NEUTRAL = 0x32
-    LAWFUL_EVIL     = 0x13
-    NEUTRAL_EVIL    = 0x23
-    CHAOTIC_EVIL    = 0x33
-
-
-class CreFlag(IntFlag):
-    NONE               = 0x00000000
-    DMG_ON_DEATH       = 0x00000001
-    NO_CORPSE          = 0x00000002
-    PERMANENT_CORPSE   = 0x00000004
-    ORIG_CLASS_FIGHTER = 0x00000008
-    ORIG_CLASS_MAGE    = 0x00000010
-    ORIG_CLASS_CLERIC  = 0x00000020
-    ORIG_CLASS_THIEF   = 0x00000040
-    ORIG_CLASS_DRUID   = 0x00000080
-    ORIG_CLASS_RANGER  = 0x00000100
-    FALLEN_PALADIN     = 0x00000200
-    FALLEN_RANGER      = 0x00000400
-    EXPORTABLE         = 0x00000800
-    HIDE_INJURY_STATUS = 0x00001000
-    QUEST_CRITICAL     = 0x00004000
-    ACTIVATED          = 0x00008000
-    EE_BEEN_IN_PARTY   = 0x00010000
-
-
-# ---------------------------------------------------------------------------
-# Item slot enums
-# ---------------------------------------------------------------------------
-
-class SlotIndex(IntEnum):
-    """Equipment slot indices for V1 (BG1/IWD) and V9 (BG2/EE) creatures."""
-    HELMET       = 0
-    ARMOUR       = 1
-    SHIELD       = 2
-    GLOVES       = 3
-    RING_LEFT    = 4
-    RING_RIGHT   = 5
-    AMULET       = 6
-    BELT         = 7
-    BOOTS        = 8
-    WEAPON1      = 9
-    WEAPON2      = 10
-    WEAPON3      = 11
-    WEAPON4      = 12
-    QUIVER1      = 13
-    QUIVER2      = 14
-    QUIVER3      = 15
-    CLOAK        = 16
-    QUICK_ITEM1  = 17
-    QUICK_ITEM2  = 18
-    QUICK_ITEM3  = 19
-    INVENTORY_0  = 20
-    INVENTORY_1  = 21
-    INVENTORY_2  = 22
-    INVENTORY_3  = 23
-    INVENTORY_4  = 24
-    INVENTORY_5  = 25
-    INVENTORY_6  = 26
-    INVENTORY_7  = 27
-    INVENTORY_8  = 28
-    INVENTORY_9  = 29
-    INVENTORY_10 = 30
-    INVENTORY_11 = 31
-    INVENTORY_12 = 32
-    INVENTORY_13 = 33
-    INVENTORY_14 = 34
-    INVENTORY_15 = 35
-    MAGIC_WEAPON    = 36
-    WEAPON_SELECTED = 37   # index of active weapon (0–3), not a real slot
-
-
-class PstSlotIndex(IntEnum):
-    """
-    Equipment slot indices for V1.2 (Planescape: Torment) creatures.
-
-    Order per IESDP V1.2 (48 slots total):
-    0  Right Earring/Lens/Helmet
-    1  Armor/Chest
-    2  Left Tattoo
-    3  Hand
-    4  L.Ring
-    5  R.Ring
-    6  Left Earring/Eyeball
-    7  Right Tattoo (lower)
-    8  Boots/Wrist
-    9-12  Weapon 1-4
-    13-18 Quiver 1-6
-    19  Right Tattoo (upper)
-    20-22 Quick item 1-3
-    23-24 Quick item 4-5
-    25-44 Inventory 1-20
-    45  Magic weapon
-    46  Selected weapon
-    47  Selected weapon ability
-    """
-    HELMET       = 0   # Right Earring / Lens / Helmet
-    ARMOUR       = 1   # Chest
-    TATTOO_LEFT  = 2   # Left Tattoo
-    HAND         = 3
-    RING_LEFT    = 4
-    RING_RIGHT   = 5
-    EYEBALL      = 6   # Left Earring / Eyeball
-    TATTOO_RIGHT_LOWER = 7  # Right Tattoo (lower)
-    BOOTS        = 8
-    WEAPON1      = 9
-    WEAPON2      = 10
-    WEAPON3      = 11
-    WEAPON4      = 12
-    QUIVER1      = 13
-    QUIVER2      = 14
-    QUIVER3      = 15
-    QUIVER4      = 16
-    QUIVER5      = 17
-    QUIVER6      = 18
-    TATTOO_RIGHT_UPPER = 19  # Right Tattoo (upper)
-    QUICK_ITEM1  = 20
-    QUICK_ITEM2  = 21
-    QUICK_ITEM3  = 22
-    QUICK_ITEM4  = 23
-    QUICK_ITEM5  = 24
-    INVENTORY_0  = 25
-    INVENTORY_1  = 26
-    INVENTORY_2  = 27
-    INVENTORY_3  = 28
-    INVENTORY_4  = 29
-    INVENTORY_5  = 30
-    INVENTORY_6  = 31
-    INVENTORY_7  = 32
-    INVENTORY_8  = 33
-    INVENTORY_9  = 34
-    INVENTORY_10 = 35
-    INVENTORY_11 = 36
-    INVENTORY_12 = 37
-    INVENTORY_13 = 38
-    INVENTORY_14 = 39
-    INVENTORY_15 = 40
-    INVENTORY_16 = 41
-    INVENTORY_17 = 42
-    INVENTORY_18 = 43
-    INVENTORY_19 = 44
-    MAGIC_WEAPON    = 45
-    WEAPON_SELECTED = 46
-    # slot 47: selected weapon ability (not named, read-only engine field)
 
 
 # ---------------------------------------------------------------------------

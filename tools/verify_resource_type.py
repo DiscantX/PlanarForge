@@ -23,7 +23,8 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 from game.installation import InstallationFinder, GameInstallation
-from core.formats.key_biff import KeyFile, ResType
+from core.formats.key_biff import KeyFile
+from core.util.enums import ResType
 from core.formats.are import AreFile
 from core.formats.cre import CreFile
 from core.formats.dlg import DlgFile

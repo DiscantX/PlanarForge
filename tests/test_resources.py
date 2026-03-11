@@ -4,7 +4,8 @@ from core.formats.itm import ItmFile, ItemType
 from core.formats.cre import CreFile, CreFileV12, SlotIndex, PstSlotIndex
 from core.formats.tlk import TlkFile
 from game.installation import InstallationFinder, GameInstallation
-from core.formats.key_biff import KeyFile, ResType
+from core.formats.key_biff import KeyFile
+from core.util.enums import ResType
 from game.string_manager import StringManager
 
 finder = InstallationFinder()

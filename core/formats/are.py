@@ -36,11 +36,19 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from enum import IntEnum, IntFlag
 from pathlib import Path
 from typing import List, Optional
 
 from core.util.binary import BinaryReader, BinaryWriter, SignatureMismatch
+from core.util.enums import (
+    ActorFlag,
+    AreaFlag,
+    AreaType,
+    ContainerType,
+    DoorFlag,
+    RegionType,
+    SpawnFlag,
+)
 from core.util.resref import ResRef
 from core.util.strref import StrRef, StrRefError
 
@@ -58,83 +66,6 @@ VERSION_V91     = b"V9.1"
 HEADER_SIZE_V1  = 0x11C   # 284 bytes
 HEADER_SIZE_V91 = 0x11C   # same base; V9.1 appends extra explored-mask data
 
-
-
-# ---------------------------------------------------------------------------
-# Enumerations
-# ---------------------------------------------------------------------------
-
-class AreaFlag(IntFlag):
-    NONE              = 0x0000
-    SAVE_FORBIDDEN    = 0x0001
-    TUTORIAL          = 0x0004
-    DEAD_MAGIC        = 0x0008
-    DREAM             = 0x0010
-    DREAM2            = 0x0020
-
-
-class AreaType(IntFlag):
-    NONE       = 0x0000
-    OUTDOOR    = 0x0001
-    DAY_NIGHT  = 0x0002
-    WEATHER    = 0x0004
-    CITY       = 0x0008
-    FOREST     = 0x0010
-    DUNGEON    = 0x0020
-    EXTENDED   = 0x0040
-    CAN_REST   = 0x0080
-
-
-class ActorFlag(IntFlag):
-    NONE          = 0x0000
-    CRE_IN_BIFF   = 0x0001   # creature data is in BIFF, not embedded
-    DEAD          = 0x0002
-    NO_PERM_DEATH = 0x0008
-    ALLY          = 0x0010
-    ENEMY         = 0x0020
-    INANIMATE     = 0x0040
-    NO_TURN_UNDEAD = 0x0080
-
-
-class RegionType(IntEnum):
-    PROXIMITY  = 0
-    INFO_POINT = 1
-    TRAVEL     = 2
-
-
-class ContainerType(IntEnum):
-    BAG        = 0
-    CHEST      = 1
-    DRAWER     = 2
-    PILE       = 3
-    TABLE      = 4
-    SHELF      = 5
-    ALTAR      = 6
-    NONVISIBLE = 7
-    WATER      = 8
-    BARREL     = 9
-    CRATE      = 10
-
-
-class DoorFlag(IntFlag):
-    NONE          = 0x0000
-    OPEN          = 0x0001
-    LOCKED        = 0x0002
-    RESET         = 0x0004
-    DETECTABLE    = 0x0008
-    BROKEN        = 0x0010
-    CANT_CLOSE    = 0x0020
-    LINKED        = 0x0040
-    SECRET        = 0x0080
-    FOUND         = 0x0100
-    TRANSPARENT   = 0x0200
-    TRIGGER_OPEN  = 0x0400
-
-
-class SpawnFlag(IntFlag):
-    NONE       = 0x0000
-    ENABLED    = 0x0001
-    CONTINUOUS = 0x0008
 
 
 # ---------------------------------------------------------------------------

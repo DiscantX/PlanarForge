@@ -1,0 +1,1489 @@
+{
+  "opcodes": [
+    {
+      "value": 0,
+      "name": "Stat: AC vs. Damage Type Modifier",
+      "description": "Applies the modifier value specified by the AC Modifier field to the category specified by the Type field. Known values for Type are: 0 ⟶ All 1 ⟶ Crushing 2 ⟶ Missile 4 ⟶ Piercing 8 ⟶ Slashing 16 ⟶ Base AC setting Sets the targets AC to the value specified by the AC Modifier field. If the targets AC is already AC Modifier or below, this effect will do nothing. Each modifier type to AC from this opcode is capped to the range [-20,20] . Each AC type total is capped to the range [-32768,32767] . Note: IWD1 and PST use a slightly different version. The âBase ACâ sets to field - 1 instead. IWD2 uses different parameters altogether."
+    },
+    {
+      "value": 1,
+      "name": "Stat: Attacks Per Round Modifier",
+      "description": "Alters a characters Attacks per Round, by changing the Key by the modifier value specified by the 'Key Value' field, in the style specified by 'Type' field. Key Attacks per Round 0 0 1 1 2 2 3 3 4 4 5 5 6 0.5 7 1.5 8 2.5 9 3.5 10 4.5 Known values for 'Type' are: 0 Cumulative Modifier -> Key = Key + 'Key Modifier' value 1 Flat Value Modifier -> Key = 'Key Modifier' value 2 Percentage Modifier -> Key = (Key * 'Key Modifier' value) / 100 3 Cumulative Modifier -> Same as 0 Info: When this opcode is stacked, the values of the Key Modifier are stacked, not the number of attacks."
+    },
+    {
+      "value": 2,
+      "name": "Cure: Sleep",
+      "description": "Removes opcode #39 effects and the STATE_SLEEPING flag from the targeted creature(s). This effect ignores durations attributed to it. Note: Does not remove the STATE_HELPLESS flag."
+    },
+    {
+      "value": 3,
+      "name": "State: Berserking",
+      "description": "Applies the berserk effect to the targeted creature(s), as specifed by the 'Type' field. Target will uncontrollably attack enemies if any are in view, and will occasionally attack neutral creatures. This effect only affects party members. Known values for 'Type' are: 0 Default 1 Always Active 2 Blood Rage"
+    },
+    {
+      "value": 4,
+      "name": "Cure: Berserking",
+      "description": "Removes opcode #3 effects and STATE_BERSERK from the targeted creature(s). Does not remove opcode #245 , opcode #246 and opcode #247 effects. This effect ignores durations attributed to it. Important: Both parameters should be 0 (zero)."
+    },
+    {
+      "value": 5,
+      "name": "Charm: Charm Specific Creature",
+      "description": "Charms the targeted creature(s) according to value in the 'Charm Type' field, if the target is matched by the value in the 'General Type' field. Values for 'General Type' are from General.ids. Known values for 'Charm Type' are: 0 Charmed (Target neutral after effect ends) 1 Charmed (Target hostile after effect ends) 2 Dire charmed (Target neutral after effect ends) 3 Dire charmed (Target hostile after effect ends) 4 Controlled by Cleric 5 Target is hostile"
+    },
+    {
+      "value": 6,
+      "name": "Stat: Charisma Modifier",
+      "description": "Applies the modifier value specified by the 'Statistic Modifier' field in the style specified by the 'Type' field. Known values for 'Type' are: 0 Cumulative Modifier -> Charisma = Charisma + 'Statistic Modifier' value 1 Flat Value Modifier -> Charisma = 'Statistic Modifier' value 2 Percentage Modifier -> Charisma = (Charisma * 'Statistic Modifier' value) / 100 Negative values for 'Statistic Modifier' act as follows for the 'Type' modes: 0 Charisma = Charisma - 'Statistic Modifier' value 1 Charisma = 25 2 Charisma = 25"
+    },
+    {
+      "value": 7,
+      "name": "Colour: Set character colours by Palette",
+      "description": "Alters the colour of the area specified by the 'Location' field, to the colour gradient specified by the 'Gradient Number' field. Known values for 'Location' are: 0 Body Metal 1 Body User 2 2 Body User 1 3 Body Skin 4 Body Leather 5 Body Armor 6 Body Hair 16 Weapon Metal 18 Weapon User 1 19 Weapon User 2 20 Weapon Leather 21 Weapon Armor 32 Shield Metal 33 Shield User 2 34 Shield User 1 36 Shield Leather 37 Shield Armor 48 Helmet Metal 49 Helmet User 2 50 Helmet User 1 52 Helmet Leather 53 Helmet Armor 255 Whole Body"
+    },
+    {
+      "value": 8,
+      "name": "Colour: Change by RGB",
+      "description": "Alters the colour of the area specified by the 'Location' field, to the colour specified by the 'RGB Colour' field. The 'RGB Colour' field is handled as follows: Second byte = Red (0-255) Third byte = Green (0-255) Fourth byte = Blue (0-255) Known values for 'Location' are: 0 Body metal 1 Body User 2 2 Body User 1 3 Body Skin 4 Body Leather 5 Body Armor 6 Body Hair 16 Weapon Metal 18 Weapon User 1 19 Weapon User 2 20 Weapon Leather 21 Weapon Armor 32 Shield Metal 33 Shield User 2 34 Shield User 1 36 Shield Leather 37 Shield Armor 48 Helmet Metal 49 Helmet User 2 50 Helmet User 1 52 Helmet Leather 53 Helmet Armor 255 Whole Body"
+    },
+    {
+      "value": 9,
+      "name": "Colour: Glow Pulse",
+      "description": "Pulses the area specified by the 'Location and Speed' field, at the rate specified by the 'Location and Speed' field, with the colour specified by the 'RGB Colour' field. If the colour values are all set to 0, the glow effect only occurs if the creature is in darkness; outside at night, inside a building, or standing in shadows. The 'RGB Colour' field is handled as follows: Second byte = Red (0-255) Third byte = Green (0-255) Fourth byte = Blue (0-255) The 'Location and Speed' field is handled as follows: First byte = Location Third byte = Speed A speed of 0 does not pulsate. A speed of 1 is fastest, and a speed of 255 is slowest. Known values for 'Location' are: 0 Body metal 1 Body User 2 2 Body User 1 3 Body Skin 4 Body Leather 5 Body Armor 6 Body Hair 16 Weapon Metal 18 Weapon User 1 19 Weapon User 2 20 Weapon Leather 21 Weapon Armor 32 Shield Metal 33 Shield User 2 34 Shield User 1 36 Shield Leather 37 Shield Armor 48 Helmet Metal 49 Helmet User 2 50 Helmet User 1 52 Helmet Leather 53 Helmet Armor 255 Whole Body"
+    },
+    {
+      "value": 10,
+      "name": "Stat: Constitution Modifier",
+      "description": "Applies the modifier value specified by the 'Statistic Modifier' field in the style specified by the 'Type' field. Known values for 'Type' are: 0 Cumulative Modifier -> Constitution = Constitution + 'Statistic Modifier' value 1 Flat Value Modifier -> Constitution = 'Statistic Modifier' value 2 Percentage Modifier -> Constitution = (Constitution * 'Statistic Modifier' value) / 100 Negative values for 'Statistic Modifier' act as follows for the 'Type' modes: 0 Constitution = Constitution - 'Statistic Modifier' value 1 Constitution = 25 2 Constitution = 25"
+    },
+    {
+      "value": 11,
+      "name": "Cure: Poison",
+      "description": "Removes opcode #25 poison effects and STATE_POISONED from the targeted creature(s). Info: This effect ignores durations attributed to it."
+    },
+    {
+      "value": 12,
+      "name": "HP: Damage",
+      "description": "Damages the target by the value specified by the 'Damage Amount' field, with the damage type specified by the 'Type' field. Known values for 'Type' are: 0 Crushing 1 Crushing Set to Value 2 Crushing Set to Percentage 65536 Acid 65537 Acid Set to Value 65538 Acid Set to Percentage 131072 Cold 131073 Cold Set to Value 131074 Cold Set to Percentage 262144 Electricity 262145 Electricity Set to Value 262146 Electricity Set to Percentage 524288 Fire 524289 Fire Set to Value 524290 Fire Set to Percentage 1048576 Piercing 1048577 Piercing Set to Value 1048578 Piercing Set to Percentage 2097152 Poison 2097153 Poison Set to Value 2097154 Poison Set to Percentage 4194304 Magic 4194305 Magic Set to Value 4194306 Magic Set to Percentage 8388608 Missile 8388609 Missile Set to Value 8388610 Missile Set to Percentage 16777216 Slashing 16777217 Slashing Set to Value 16777218 Slashing Set to Percentage 33554432 Magic Fire 33554433 Magic Fire Set to Value 33554434 Magic Fire Set to Percentage 67108864 Magic Cold 67108865 Magic Cold Set to Value 67108866 Magic Cold Set to Percentage 134217728 Stunning 134217729 Stunning Set to Value 134217730 Stunning Set to Percentage 268435456 Soul Eater 268435457 Soul Eater Set to Value 268435458 Soul Eater Set to Percentage 1073741824 Disease 1073741825 Disease Set to Value 1073741826 Disease Set to Percentage The Dice values can be used to inflict varying damage amounts - e.g. 2d6 would do 2-12 damage (Damage type is still specified by the 'Type' value). If 'Damage Amount' and the Dice values are both non-zero, the total damage inflicted is: 'Damage Amount' + Dice value. 'Damage Amount' can be positive or negative (though the damage sound will play in either case). Note: âStunningâ damage does not stun the target. Stunning damage cannot kill a creature, creatures are reduced to 1 HP and are knocked unconscious."
+    },
+    {
+      "value": 13,
+      "name": "Death: Instant Death",
+      "description": "Instantly kills the targeted creature(s), in the style specified by the 'Death Type' value. Known values for 'Text Notification' are: 0 Show death message 1 Don't show death message Known values for 'Death Type' are: 0 Acid death 1 Burning death 2 Crushed death 4 Normal death 8 Exploding death 16 Stoned death 32 Freezing death 512 Permanent death 1024 Destruction death"
+    },
+    {
+      "value": 14,
+      "name": "Graphics: Defrost",
+      "description": "Removes STATE_FROZEN_DEATH from the targeted creatures and restores them to 1 HP. Does not affect creatures without STATE_FROZEN_DEATH ."
+    },
+    {
+      "value": 15,
+      "name": "Stat: Dexterity Modifier",
+      "description": "Applies the modifier value specified by the 'Statistic Modifier' field in the style specified by the 'Type' field. Known values for 'Type' are: 0 Cumulative Modifier -> Dexterity = Dexterity + 'Statistic Modifier' value 1 Flat Value Modifier -> Dexterity = 'Statistic Modifier' value 2 Percentage Modifier -> Dexterity = (Dexterity * 'Statistic Modifier' value) / 100 3 Cat's Grace Spell ('Statistic Modifier' should be set to 0) Negative values for 'Statistic Modifier' act as follows for the 'Type' modes: 0 Dexterity = Dexterity - 'Statistic Modifier' value 1 Dexterity = 25 2 Dexterity = 25"
+    },
+    {
+      "value": 16,
+      "name": "State: Haste",
+      "description": "Applies the Haste effect to the targeted creature(s). See description for other games. IWD2 may grant +4 AC (untested). Info: This effect will cancel out the slow opcode."
+    },
+    {
+      "value": 17,
+      "name": "HP: Current HP Modifier",
+      "description": "Applies the modifier value specified by the 'Statistic Modifier' field in the style specified by the 'Type' field. Known values for 'Type' are: 0 ⟶ Cumulative Modifier: HP = HP + 'Statistic Modifier' value 1 ⟶ Flat Value Modifier: HP = 'Statistic Modifier' value 2 ⟶ Percentage Modifier: HP = (HP * 'Statistic Modifier' value) / 100 'Statistic Modifier' can be positive or negative. Info: If âStatistic Modifierâ and the Dice values are both non-zero, the total HP change is: âStatistic Modifierâ + Dice value."
+    },
+    {
+      "value": 18,
+      "name": "HP: Maximum HP Modifier",
+      "description": "Applies the modifier value specified by the Statistic Modifier field in the style specified by the Type field. Known values for Type are: 0 ⟶ Cumulative Modifier: HP = HP + 'Statistic Modifier' value (affects current and max HP) 1 ⟶ Flat Value Modifier: HP = 'Statistic Modifier' value (affects current and max HP) 2 ⟶ Percentage Modifier: HP = (HP * 'Statistic Modifier' value) / 100 (affects current and max HP) 3 ⟶ As 0 (does not affect current HP) 4 ⟶ As 1 (does not affect current HP) 5 ⟶ As 2 (does not affect current HP) 6 ⟶ Non-cumulative Modifier: HP = HP + 'Statistic Modifier' value (affects current and max HP) (EE only) Statistic Modifier can be positive or negative. Known values for Mode are: 0 ⟶ Normal: Effect functions as dictated by the Type field. 1 ⟶ Do not update current HP. This value is set automatically once the effect has been initially processed on a creature. For normal operation, the special field MUST be zero. Info: To differentiate non-cumulative HP gain from other forms of HP gain, Type is set internally to 6 . As mentioned here , multiple effects of Type=6 can be carried by the creature at the same time and only the largest value is used when calculating extra HP. Hence the term ânoncumulative coexistingâ . This functionality doesnât interact with other forms ( Type != 6 ) of HP gain, and cumulative HP drain doesnât use Type=6 ."
+    },
+    {
+      "value": 19,
+      "name": "Stat: Intelligence Modifier",
+      "description": "Applies the modifier value specified by the 'Statistic Modifier' field in the style specified by the 'Type' field. Known values for 'Type' are: 0 Cumulative Modifier -> Intelligence = Intelligence + 'Statistic Modifier' value 1 Flat Value Modifier -> Intelligence = 'Statistic Modifier' value 2 Percentage Modifier -> Intelligence = (Intelligence * 'Statistic Modifier' value) / 100 'Statistic Modifier' can be positive or negative."
+    },
+    {
+      "value": 20,
+      "name": "State: Invisibility",
+      "description": "Applies the invisibility effect, in the style specified by the 'Type' value. Known values for 'Type' are : 0 Normal Invisibility -> affected creature makes the first attack with +4 1 Improved Invisibility -> affected creature stays invisible after attack 2 Toggle Invisibility -> affected creature invisibility state toggles when executing an action Note: âImproved Invisibilityâ does not provide saving throw bonuses."
+    },
+    {
+      "value": 21,
+      "name": "Stat: Lore Modifier",
+      "description": "Applies the modifier value specified by the Statistic Modifier field in the style specified by the Type field. Known values for Type are: 0 ⟶ Cumulative Modifier: Lore = Lore + 'Statistic Modifier' value 1 ⟶ Flat Value Modifier: Lore = 'Statistic Modifier' value 2 ⟶ Percentage Modifier: Lore = (Lore * 'Statistic Modifier' value) / 100 Statistic Modifier can be positive or negative. The effect modifies LORE . Warning: This effect does not work with Timing Mode 1 ."
+    },
+    {
+      "value": 22,
+      "name": "Stat: Cumulative Luck Bonus",
+      "description": "Applies the modifier value specified by the Statistic Modifier field in the style specified by the Type field. Luck affects the minimum damage caused by a weapon (up to the normal maximum damage of the weapon) and the attack roll modifier (up to a maximum of 20, excluding natural attack roll modifiers, e.g. high STR, invisibility etc) by Statistic Modifier amount. Statistic Modifier also affects the damge rolls of opponents (in feature blocks, not extension headers). The effect does not set STATE_LUCK . Known values for Type are: 0 ⟶ Cumulative Modifier: Luck = Luck + 'Statistic Modifier' value 1 ⟶ Flat Value Modifier: Luck = 'Statistic Modifier' value 2 ⟶ Percentage Modifier: Luck = (Luck * 'Statistic Modifier' value) / 100 Info: Effects of Luck: Modifies a creature's weapon damage die rolls (up/down to its maximum/minimum). Modifies a creatures's attack roll [1d20] (up/down to its maximum/minimum). Modifies non-weapon damage die rolls dealt to the creature (up/down to its maximum/minimum). Modifies a creatures's initiative roll [1d6 - 4] for weapon attacks (up/down to its maximum/minimum). See opcode #190 for further details about weapon/attack speed. Modifies a creatures's initiative roll [1d8 - 1] for movement (up/down to its maximum/minimum). Modifies a creatures's skill roll [1d100] for Hiding in Shadows (up/down to its maximum/minimum). Modifies a creatures's skill roll [1d100] for Set Traps (up/down to its maximum/minimum). Modifies a creatures's skill roll [1d10] for Open Locks (up/down to its maximum/minimum). Modifies a creatures's skill roll [1d10] for Bash Doors (up/down to its maximum/minimum). Modifies a creatures's skill roll [1d10] for Disarm Trap (up/down to its maximum/minimum). Modifies the chance for a Mirror Image to be struck, chance = ('number of images' + 'Statistic Modifier') / ('number of images' + 1) ."
+    },
+    {
+      "value": 23,
+      "name": "Stat: Morale Modifier",
+      "description": "Applies the modifier value specified by the Statistic Modifier field in the style specified by the Type field. Known values for Type are: 0 ⟶ Cumulative Modifier: Morale = Morale + 'Statistic Modifier' value 1 ⟶ Flat Value Modifier: Morale = 'Statistic Modifier' value 2 ⟶ Percentage Modifier: Morale = (Morale * 'Statistic Modifier' value) / 100 Statistic Modifier can be positive or negative. At least in EEs, known values for Mode are: 0 ⟶ BG2 mode â It's hardcoded to fill the following values: Statistic Modifier = 10 Type = 1 m_done = 1 (internal field that immediately removes the effect from creature, no matter duration ) In addition, it checks if the creature is berserking, and if it is, it returns without doing anything. 1 ⟶ BG1 mode â Default (functions as expected) Note: Any Morale-based effect (i.e. Panic) may be added or removed by this effect."
+    },
+    {
+      "value": 24,
+      "name": "State: Horror",
+      "description": "Applies the horror effect to the targeted creature(s), in the style specified by the 'Type' field. Known values for 'Type' are: 0 Normal 1 Harpy Wail"
+    },
+    {
+      "value": 25,
+      "name": "State: Poison",
+      "description": "Damages the target by the 'Damage Amount' value, in the style specified by the 'Type' field. It sets the STATE_POISONED state. Known values for 'Type' are: 0 Inflict 'Damange Amount' per second 1 Inflict 'Damage Amount' per second halting at value controlled by 'Damage Amount' (pattern unknown) 2 Inflict 'Damage Amount' per second 3 Inflict 1 Damage per 'Damage Amount' seconds 4 Inflict 'Damage Amount' per round 5 Crash 6 Snakebite 8 Envenomed Weapon"
+    },
+    {
+      "value": 26,
+      "name": "Item: Remove Curse",
+      "description": "Removes Cursed items in addition to all opcode #283 effects from the targeted creature(s)."
+    },
+    {
+      "value": 27,
+      "name": "Stat: Acid Resistance Modifier",
+      "description": "Applies the modifier value specified by the Statistic Modifier field in the style specified by the Type field. Known values for Type are: 0 ⟶ Cumulative Modifier: Resistance = Resistance + 'Statistic Modifier' value 1 ⟶ Flat Value Modifier: Resistance = 'Statistic Modifier' value 2 ⟶ Percentage Modifier: Resistance = (Resistance * 'Statistic Modifier' value) / 100 Statistic Modifier can be positive or negative. The effect modifies RESISTACID ."
+    },
+    {
+      "value": 28,
+      "name": "Stat: Cold Resistance Modifier",
+      "description": "Applies the modifier value specified by the Statistic Modifier field in the style specified by the Type field. Known values for Type are: 0 ⟶ Cumulative Modifier: Resistance = Resistance + 'Statistic Modifier' value 1 ⟶ Flat Value Modifier: Resistance = 'Statistic Modifier' value 2 ⟶ Percentage Modifier: Resistance = (Resistance * 'Statistic Modifier' value) / 100 Statistic Modifier can be positive or negative. The effect modifies RESISTCOLD ."
+    },
+    {
+      "value": 29,
+      "name": "Stat: Electricity Resistance Modifier",
+      "description": "Applies the modifier value specified by the Statistic Modifier field in the style specified by the Type field. Known values for Type are: 0 ⟶ Cumulative Modifier: Resistance = Resistance + 'Statistic Modifier' value 1 ⟶ Flat Value Modifier: Resistance = 'Statistic Modifier' value 2 ⟶ Percentage Modifier: Resistance = (Resistance * 'Statistic Modifier' value) / 100 Statistic Modifier can be positive or negative. The effect modifies RESISTELECTRICITY ."
+    },
+    {
+      "value": 30,
+      "name": "Stat: Fire Resistance Modifier",
+      "description": "Applies the modifier value specified by the Statistic Modifier field in the style specified by the Type field. Known values for Type are: 0 ⟶ Cumulative Modifier: Resistance = Resistance + 'Statistic Modifier' value 1 ⟶ Flat Value Modifier: Resistance = 'Statistic Modifier' value 2 ⟶ Percentage Modifier: Resistance = (Resistance * 'Statistic Modifier' value) / 100 Statistic Modifier can be positive or negative. The effect modifies RESISTFIRE ."
+    },
+    {
+      "value": 31,
+      "name": "Stat: Magic Damage Resistance Modifier",
+      "description": "Applies the modifier value specified by the Statistic Modifier field in the style specified by the Type field. Known values for Type are: 0 ⟶ Cumulative Modifier: Resistance = Resistance + 'Statistic Modifier' value 1 ⟶ Flat Value Modifier: Resistance = 'Statistic Modifier' value 2 ⟶ Percentage Modifier: Resistance = (Resistance * 'Statistic Modifier' value) / 100 Statistic Modifier can be positive or negative. The effect modifies MAGICDAMAGERESISTANCE ."
+    },
+    {
+      "value": 32,
+      "name": "Cure: Death (Raise Dead)",
+      "description": "Raises the targeted creature(s) from the dead. Known values for Restore creature animation? are: 0 ⟶ No 1 ⟶ Yes This effect ignores durations attributed to it. Info: The new animation is selected just as it would be at Character Generation. Base Animation = 0x6000 + Class: 0x0000 (Cleric/Druid/Shaman/Default) 0x0100 (Fighter/Paladin/Ranger) 0x0200 (Mage/Sorcerer) 0x0300 (Thief/Bard) 0x0500 (Monk) Mutliclasses prioritize (Warrior > Priest > Rogue > Wizard) + Gender: 0x0000 (Male/Default) 0x0010 (Female) + Race: 0x0000 (Human/Default) 0x0001 (Elf/Half-Elf/Tiefling) 0x0002 (Dwarf) 0x0003 (Halfling) 0x0004 (Gnome) 0x0005 (Halforc)"
+    },
+    {
+      "value": 33,
+      "name": "Stat: Save vs. Death Modifier",
+      "description": "Applies the modifier value specified by the Statistic Modifier field in the style specified by the Type field. Known values for Type are: 0 ⟶ Cumulative Modifier: Save = Save + 'Statistic Modifier' value 1 ⟶ Flat Value Modifier: Save = 'Statistic Modifier' value 2 ⟶ Percentage Modifier: Save = (Save * 'Statistic Modifier' value) / 100 3 ⟶ Increment Instantly: Save = Save + 'Statistic Modifier' value (EE only) Statistic Modifier can be positive or negative. The effect modifies SAVEVSDEATH . Info: When Type = 3 , this opcode processes before saving throws are checked for effects proceeding it in the same effect stack; when Type = 0 , it processes after."
+    },
+    {
+      "value": 34,
+      "name": "Stat: Save vs. Wands Modifier",
+      "description": "Applies the modifier value specified by the Statistic Modifier field in the style specified by the Type field. Known values for Type are: 0 ⟶ Cumulative Modifier: Save = Save + 'Statistic Modifier' value 1 ⟶ Flat Value Modifier: Save = 'Statistic Modifier' value 2 ⟶ Percentage Modifier: Save = (Save * 'Statistic Modifier' value) / 100 3 ⟶ Increment Instantly: Save = Save + 'Statistic Modifier' value (EE only) Statistic Modifier can be positive or negative. The effect modifies SAVEVSWANDS . Info: When Type = 3 , this opcode processes before saving throws are checked for effects proceeding it in the same effect stack; when Type = 0 , it processes after."
+    },
+    {
+      "value": 35,
+      "name": "Stat: Save vs. Petrification/Polymorph Modifier",
+      "description": "Applies the modifier value specified by the Statistic Modifier field in the style specified by the Type field. Known values for Type are: 0 ⟶ Cumulative Modifier: Save = Save + 'Statistic Modifier' value 1 ⟶ Flat Value Modifier: Save = 'Statistic Modifier' value 2 ⟶ Percentage Modifier: Save = (Save * 'Statistic Modifier' value) / 100 3 ⟶ Increment Instantly: Save = Save + 'Statistic Modifier' value (EE only) Statistic Modifier can be positive or negative. The effect modifies SAVEVSPOLY . Info: When Type = 3 , this opcode processes before saving throws are checked for effects proceeding it in the same effect stack; when Type = 0 , it processes after."
+    },
+    {
+      "value": 36,
+      "name": "Stat: Save vs. Breath Weapons Modifier",
+      "description": "Applies the modifier value specified by the Statistic Modifier field in the style specified by the Type field. Known values for Type are: 0 ⟶ Cumulative Modifier: Save = Save + 'Statistic Modifier' value 1 ⟶ Flat Value Modifier: Save = 'Statistic Modifier' value 2 ⟶ Percentage Modifier: Save = (Save * 'Statistic Modifier' value) / 100 3 ⟶ Increment Instantly: Save = Save + 'Statistic Modifier' value (EE only) Statistic Modifier can be positive or negative. The effect modifies SAVEVSBREATH . Info: When Type = 3 , this opcode processes before saving throws are checked for effects proceeding it in the same effect stack; when Type = 0 , it processes after."
+    },
+    {
+      "value": 37,
+      "name": "Stat: Save vs. Spells Modifier",
+      "description": "Applies the modifier value specified by the Statistic Modifier field in the style specified by the Type field. Known values for Type are: 0 ⟶ Cumulative Modifier: Save = Save + 'Statistic Modifier' value 1 ⟶ Flat Value Modifier: Save = 'Statistic Modifier' value 2 ⟶ Percentage Modifier: Save = (Save * 'Statistic Modifier' value) / 100 3 ⟶ Increment Instantly: Save = Save + 'Statistic Modifier' value (EE only) Statistic Modifier can be positive or negative. The effect modifies SAVEVSSPELL . Info: When Type = 3 , this opcode processes before saving throws are checked for effects proceeding it in the same effect stack; when Type = 0 , it processes after."
+    },
+    {
+      "value": 38,
+      "name": "State: Silence",
+      "description": "Applies the silence effect to the targeted creature(s). Sets STATE_SILENCED to true. A silenced creature cannot cast spells / use special abilities (unless flagged as Castable when silenced ), bard song or initiate dialog. The engine is hard-coded to allow these spells to be cast by a silenced creature: \"SPWI219\" (Vocalize) \"SPIN649\" (Teleport to Pocket Plane) in BG2/BGEE"
+    },
+    {
+      "value": 39,
+      "name": "State: Unconsciousness",
+      "description": "Applies the unconsciousness effect to the targeted creature(s). Known values for Wake on Damage? are (only in EEs or IWD): 0 ⟶ Yes 1 ⟶ No Icon defines the index from STATDESC.2DA for custom portrait icons (EE only). Default value is Sleep . If it is set, also spell state PRONE will be set. Otherwise the creature will be moved to the backlist and become untargettable by most scripts . This opcode sets the STATE_SLEEPING and STATE_HELPLESS flag bits. Note: In case of Timing Mode s 1/4/7 the bits cannot be removed in-game. Moreover, the STATE_SLEEPING works as the Wake on Hit option. Itâs just not usable because of the unremovable STATE_HELPLESS ."
+    },
+    {
+      "value": 40,
+      "name": "State: Slow",
+      "description": "Applies the slow effect to the targeted creature(s). It automatically grants the Slow portrait icon. Info: This effect will cancel out the haste opcode ."
+    },
+    {
+      "value": 41,
+      "name": "Graphics: Sparkle",
+      "description": "Displays the sparkle effect specified by the 'Type' field, in the colour specified by the 'Colour' field. Known values for 'Colour' are: 0 Crash 1 No effect / Black 2 White / White -> Blue 3 Purple -> White / Purple -> White 4 .. White 12 13 Crash Known values for 'Type' are: 1 Sparkle Puff 2 No effect? 3 Sparkle Shower"
+    },
+    {
+      "value": 42,
+      "name": "Spell: Wizard Spell Slots Modifier",
+      "description": "Alters the number of wizard spell slots available to the targeted creature(s), as specified by the Slot Amount Modifier field, at the level specified by the Spell Level field. Wizard spells are used by Bards, Sorcerers and Wizards in IWD2. Known values for Spell Level are: 0 ⟶ Double spells The amount of spell slots is doubled for the level specified by the Slot Amount Modifier value and all levels below BIT0 ⟶ Level 1 BIT1 ⟶ Level 2 BIT2 ⟶ Level 3 BIT3 ⟶ Level 4 BIT4 ⟶ Level 5 BIT5 ⟶ Level 6 BIT6 ⟶ Level 7 BIT7 ⟶ Level 8 BIT8 ⟶ Level 9 BIT9 ⟶ Double spells The amount of spell slots is doubled exclusively for the level specified by Slot Amount Modifier The target creature(s) must have at least 1 slot at the selected level to have their slot count changed. Negative slots start at 65535 (-1) , and go from there. Even though the spellbook has room to display only 12 slots at once, the slots are still there and usable. Slot Amount Modifier can be positive or negative. Note: If the number of current spell slots is 1: applying a -1 modifier will result in zero current slots and prevent further applications of this opcode from altering spell slots (until this effect terminates or is removed, or the base amount changes). applying a -2 modifier instead would bypass zero and result in 65535 (-1) . Then applying a +1 modifier would result in zero current slots and a repeat of the above. Regardless of whether the value can be altered, the effect is still attached to the creature, rather than being discarded entirely. They can still take effect should the creature's base spell slots be altered (such as from leveling up). Applying multiple effects in increments of -1 will insure that spell slots do not go below zero (and thus will not wrap around to maximum)."
+    },
+    {
+      "value": 43,
+      "name": "Cure: Stone to Flesh",
+      "description": "Removes STATE_STONE_DEATH from the targeted creatures and restores them to 1 HP. Does not affect creatures without STATE_STONE_DEATH . Important: Both parameters should be 0 (zero)."
+    },
+    {
+      "value": 44,
+      "name": "Stat: Strength Modifier",
+      "description": "Applies the modifier value specified by the 'Statistic Modifier' field in the style specified by the 'Type' field. Known values for 'Type' are: 0 Cumulative Modifier -> Strength = Strength + 'Statistic Modifier' value 1 Flat Value Modifier -> Strength = 'Statistic Modifier' value 2 Percentage Modifier -> Strength = (Strength * 'Statistic Modifier' value) / 100 3 Strength Spell ('Statistic Modifier' should be set to 0) Negative values for 'Statistic Modifier' act as follows for the 'Type' modes: 0 Strength = Strength - 'Statistic Modifier' value 1 Strength = 25 2 Strength = 25"
+    },
+    {
+      "value": 45,
+      "name": "State: Stun",
+      "description": "Stuns the targeted creature(s) in the style specified by the 'Type' field. Known values for 'Type' are: 0 Normal 1 Unstun on Damage 2 Power Word Stun"
+    },
+    {
+      "value": 46,
+      "name": "Cure: Stun (Unstun)",
+      "description": "Unstuns the targeted creature(s) ( opcode #45 and opcode #109 ). Also removes STATE_STUNNED from the creature. This effect ignores durations attributed to it."
+    },
+    {
+      "value": 47,
+      "name": "Cure: Invisibility",
+      "description": "Removes the invisibility effect from the targeted creature(s) if they don't have STATE_NONDETECTION set. Also removes STATE_INVISIBLE and STATE_IMPROVEDINVISIBILITY . This effect ignores durations attributed to it. Important: Both parameters should be 0 (zero)."
+    },
+    {
+      "value": 48,
+      "name": "Cure: Silence (Vocalize)",
+      "description": "Removes the silence effect and STATE_SILENCED from the targeted creature(s). This effect ignores durations attributed to it."
+    },
+    {
+      "value": 49,
+      "name": "Stat: Wisdom Modifier",
+      "description": "Applies the modifier value specified by the 'Statistic Modifier' field in the style specified by the 'Type' field. Known values for 'Type' are: 0 Cumulative Modifier -> Wisdom = Wisdom + 'Statistic Modifier' value 1 Flat Value Modifier -> Wisdom = 'Statistic Modifier' value 2 Percentage Modifier -> Wisdom = (Wisdom * 'Statistic Modifier' value) / 100 Negative values for 'Statistic Modifier' act as follows for the 'Type' modes: 0 Wisdom = Wisdom - 'Statistic Modifier' value 1 Wisdom = 25 2 Wisdom = 25"
+    },
+    {
+      "value": 50,
+      "name": "Colour: Glow by RGB (Brief)",
+      "description": "The targeted creature(s) entire animation glows the colour specified by the 'RGB Colour' field, at the speed specified by the (3rd byte of the) 'Speed' field. The 'RGB Colour' field is handled as follows: Second byte = Red (0-255) Third byte = Green (0-255) Fourth byte = Blue (0-255) The 'Speed' field is handled as follows: Third byte = Speed (0-255) A speed of 0 does not pulsate. A speed of 1 is fastest, and a speed of 255 is slowest. Known values for 'Location and Speed' are: 0 Body metal 1 Body User 2 2 Body User 1 3 Body Skin 4 Body Leather 5 Body Armor 6 Body Hair 16 Weapon Metal 18 Weapon User 1 19 Weapon User 2 20 Weapon Leather 21 Weapon Armor 32 Shield Metal 33 Shield User 2 34 Shield User 1 36 Shield Leather 37 Shield Armor 48 Helmet Metal 49 Helmet User 2 50 Helmet User 1 52 Helmet Leather 53 Helmet Armor 255 Whole Body"
+    },
+    {
+      "value": 51,
+      "name": "Colour: Strong/Dark by RGB",
+      "description": "Alters the colour of the area specified by the 'Location and Speed' field, to the colour specified by the 'RGB Colour' field. The 'RGB Colour' field is handled as follows: Second byte = Red (0-255) Third byte = Green (0-255) Fourth byte = Blue (0-255) Known values for 'Location' are: 0 Body metal 1 Body User 2 2 Body User 1 3 Body Skin 4 Body Leather 5 Body Armor 6 Body Hair 16 Weapon Metal 18 Weapon User 1 19 Weapon User 2 20 Weapon Leather 21 Weapon Armor 32 Shield Metal 33 Shield User 2 34 Shield User 1 36 Shield Leather 37 Shield Armor 48 Helmet Metal 49 Helmet User 2 50 Helmet User 1 52 Helmet Leather 53 Helmet Armor 255 Whole Body"
+    },
+    {
+      "value": 52,
+      "name": "Colour: Very Bright by RGB",
+      "description": "Alters the colour of the area specified by the 'Location' field, to the colour specified by the 'RGB Colour' field. The 'RGB Colour' field is handled as follows: Second byte = Red (0-255) Third byte = Green (0-255) Fourth byte = Blue (0-255) Known values for 'Location' are: 0 Body metal 1 Body User 2 2 Body User 1 3 Body Skin 4 Body Leather 5 Body Armor 6 Body Hair 16 Weapon Metal 18 Weapon User 1 19 Weapon User 2 20 Weapon Leather 21 Weapon Armor 32 Shield Metal 33 Shield User 2 34 Shield User 1 36 Shield Leather 37 Shield Armor 48 Helmet Metal 49 Helmet User 2 50 Helmet User 1 52 Helmet Leather 53 Helmet Armor 255 Whole Body"
+    },
+    {
+      "value": 53,
+      "name": "Empty:",
+      "description": "This opcode has no effect."
+    },
+    {
+      "value": 54,
+      "name": "Stat: THAC0 Modifier",
+      "description": "Applies the modifier value specified by the Statistic Modifier field in the style specified by the Type field. Known values for Type are: 0 ⟶ Cumulative Modifier: THAC0 = THAC0 + 'Statistic Modifier' value 1 ⟶ Flat Value Modifier: THAC0 = 'Statistic Modifier' value 2 ⟶ Percentage Modifier: THAC0 = (THAC0 * 'Statistic Modifier' value) / 100 Note: This effect adjusts the base stat, rather than modified THAC0."
+    },
+    {
+      "value": 55,
+      "name": "Death: Kill Creature Type",
+      "description": "Kills the targeted creature(s) with HD less than those specified by the Dice values, if the target(s) match the IDS mask. Known values for IDS File are: 2 ⟶ EA.IDS 3 ⟶ GENERAL.IDS 4 ⟶ RACE.IDS 5 ⟶ CLASS.IDS 6 ⟶ SPECIFIC.IDS 7 ⟶ GENDER.IDS 8 ⟶ ALIGN.IDS 9 ⟶ KIT.IDS (EE only) IDS Entry is a value from the specified IDS file, indicating the specific creature type to affect."
+    },
+    {
+      "value": 56,
+      "name": "Alignment: Invert",
+      "description": "Inverts the alignment of the targeted creature(s). Important: Both parameters should be 0 (zero)."
+    },
+    {
+      "value": 57,
+      "name": "Alignment: Change",
+      "description": "Alters the alignment of the targeted creature(s) to the value specified by Alignment . Known values for Alignment are: 00 ⟶ None 17 ⟶ Lawful Good 18 ⟶ Lawful Neutral 19 ⟶ Lawful Evil 33 ⟶ Neutral Good 34 ⟶ True Neutral 35 ⟶ Neutral Evil 49 ⟶ Chaotic Good 50 ⟶ Chaotic Neutral 51 ⟶ Chaotic Evil"
+    },
+    {
+      "value": 58,
+      "name": "Cure: Dispellable Effects (Dispel Magic)",
+      "description": "Dispels magic from the targeted creature(s) (excepting magical weapons eg. Spirtual Hammer). Depending on the value of the 'Type' field, the 'Level' field can be used to set the level of the effect. Known values for 'Type' are: 0 ⟶ Always dispel 1 ⟶ Use Caster Level 2 ⟶ Use 'Level' field With 'Type' of 1 or 2, the base chance of successfully dispelling is 50%. This chance is modified by the relative levels of the dispeller to the caster. Each level below gives a -10% chance, each level above gives a +5% chance. There is always a 1% chance of success or failure."
+    },
+    {
+      "value": 59,
+      "name": "Stat: Stealth Modifier",
+      "description": "Applies the modifier value specified by the Statistic Modifier field in the style specified by the Type field. Known values for Type are: 0 ⟶ Cumulative Modifier: Stealth = Stealth + 'Statistic Modifier' value 1 ⟶ Flat Value Modifier: Stealth = 'Statistic Modifier' value 2 ⟶ Percentage Modifier: Stealth = (Stealth * 'Statistic Modifier' value) / 100 Note: In BG2 and EEs, this effect alters the Move Silently skill."
+    },
+    {
+      "value": 60,
+      "name": "Stat: Miscast Magic",
+      "description": "The targeted creature(s) will fail to cast the type of spell specified by the 'Type' field, 'Percent Chance' percent of the time. Known values for 'Type' are: 0 Mage Spells 1 Cleric Spells 2 Innate"
+    },
+    {
+      "value": 61,
+      "name": "Crash",
+      "description": "Warning: This effect crashes the game."
+    },
+    {
+      "value": 62,
+      "name": "Spell: Priest Spell Slots Modifier",
+      "description": "Alters the number of priest spell slots available to the targeted creature(s), as specified by the 'Slot Amount Modifier' field, at the level specified by the 'Spell Level' field. Priest spells are used by Clerics, Druids, Paladins and Rangers. Known values for 'Spell Level' are: 0 Double spells 1 Level 1 2 Level 2 4 Level 3 8 Level 4 16 Level 5 32 Level 6 64 Level 7 512 Double spells For a 'Spell Level' of 0, the amount of spell slots is doubled for the level specified by the 'Slot Amount Modifier' value and all levels below. For a 'Spell Level' of 512, the amount of spell slots is doubled for the level(s) specified by the 'Slot Amount Modifier' field. The target creature(s) must have at least 1 slot at the selected level to have their slot count changed. If the resultant slot count is negative, the creature is given 12 slots. 'Statistic Modifier' can be positive or negative."
+    },
+    {
+      "value": 63,
+      "name": "State: Infravision",
+      "description": "Gives the targeted creature(s) infravision and sets STATE_INFRAVISION . Important: Both parameters should be 0 (zero)."
+    },
+    {
+      "value": 64,
+      "name": "State: Remove Infravision",
+      "description": "Removes infravision from the targeted creature(s). This effect ignores durations attributed to it. Note: This will not remove racial infravision."
+    },
+    {
+      "value": 65,
+      "name": "Overlay: Blur",
+      "description": "Applies the blur effect to the targeted creature(s) and sets STATE_BLUR . Graphical displacement is affected by movement rate. Important: Both parameters should be 0 (zero)."
+    },
+    {
+      "value": 66,
+      "name": "Graphics: Transparency Fade",
+      "description": "Fades the targeted creature(s) in or out. The 'Fade speed' field controls how fast it happens. Known values for 'Fade speed' are: 0 1 round (105 ticks by default) .. 255 Instant Known values for 'Type' are: 0 Default 1 Fade In 2 Fade Out This effect sets stat #60 (TRANSLUCENT) to param #1."
+    },
+    {
+      "value": 67,
+      "name": "Summon: Creature Summoning",
+      "description": "Summons a creature, with position and EA based on the Mode field. The Resource key should be set to the filename of the creature to summon. Known values for Mode are:"
+    },
+    {
+      "value": 68,
+      "name": "Summon: Unsummon Creature",
+      "description": "Unsummons a creature, with feedback controlled by Text Notification . Known values for Text Notification are: 0 ⟶ No text notification 1 ⟶ Show text notification Note: At least in BG2 and EEs, the Resource key should be set to the filename of the animation to play when unsummoning the creature, and defaults to \"SPGFLSH1\" if left empty."
+    },
+    {
+      "value": 69,
+      "name": "Protection: From Detection (Non-Detection)",
+      "description": "Applies the non-detection effect to the targeted creature(s), setting STATE_NONDETECTION while active. This effect is negated by opcode #70 . While in the non-detection state, the creature is immune to opcode #47 and opcode #116 , though they are affected by effects that remove illusionary protections by school or secondary type. Important: Timing Mode s 1/4/7 will permanently set the creature's STATE_NONDETECTION flag, leaving no removable effect. This flag is not cleared on death."
+    },
+    {
+      "value": 70,
+      "name": "Cure: Non-Detection",
+      "description": "Removes opcode #69 and the STATE_NONDETECTION flag from the targeted creature(s). This effect ignores durations attributed to it."
+    },
+    {
+      "value": 71,
+      "name": "IDS: Sex Change",
+      "description": "Alters the gender of the targetted creature(s) to the value specified by the Gender Modifier field, in the style specified by the Type value. Known values for Type are: 0 ⟶ Reverse Gender 1 ⟶ Flat Value Modifier: Gender = 'Statistic Modifier' value (values from GENDER.IDS ) The effect modifies SEX_CHANGED . Note: Reverse Gender also switches the second BIT of the lower BYTE of the creature's animation, which (for PC races), will switch between their male/female animations ( 0x6000 ⟷ 0x6010 ). Other races can be setup this way, but do not occupy the necessary animation slots by default. For instance, VAMPIRE is 0x7F12 , VAMPIRE_FEMALE is 0x7F22 (Male should be 0x7F02 and female 0x7F12 for it to work)."
+    },
+    {
+      "value": 72,
+      "name": "IDS: Set IDS State",
+      "description": "Alters the IDS state of the targeted creature(s) specified by the IDS File field, to the value specified by the IDS Entry field. Known values for IDS File are: 0 ⟶ EA 1 ⟶ Generic / General 2 ⟶ Race 3 ⟶ Class 4 ⟶ Specific 5 ⟶ Gender 6 ⟶ Align / Alignmen (iwd1, pst) Important: Only reliable timing mode is Timing Mode 1 (all others are bugged and can convert to this timing mode under various circumstances). Timing Mode s 1/4/7 will permanently set the creature(s) IDS value, leaving no removable effect."
+    },
+    {
+      "value": 73,
+      "name": "Damage Mod",
+      "description": "Inflicts a percentage extra damage (set by the 'Damage Modifier' parameter) of the type specified by the 'Type' parameter. Known values for 'Type' are: 0 Standard 1 Fire 2 Cold 3 Electricity 4 Acid 5 Magic 6 Poison 7 Slashing 8 Piercing 9 Crushing 10 Missile Note: âTypeâ 0 causes a flat damage increase, rather than a percentage."
+    },
+    {
+      "value": 74,
+      "name": "State: Blindness",
+      "description": "Applies the blindness effect to the targeted creature(s). This sets VISUALRANGE to 2, sets STATE_BLIND to true and incurs a cummulative 10 point base THAC0 penalty ( 4 on EE games, plus a cumulative 4 point base AC penalty. All of that is unverified in PST). Maintains its own portrait icon Blind . Important: Timing Mode s 1/4/7 will permanently set the creature's STATE_BLIND flag, leaving no removable effect. Related: the -4 penalty to AC and THAC0 are apparently tied to the effect, not STATE_BLIND . So for instance you will not be able to 100% cure a creature affected by CLERIC_NATURE_BEAUTY — \"sppr704.spl\" (it applies opcode #74 with timing_mode=1 ). As a workaround, you might want to stick with a limited timing_mode and set duration to a very high random value."
+    },
+    {
+      "value": 75,
+      "name": "Cure: Blindness",
+      "description": "Removes the blindness effect and the STATE_BLIND flag from the targeted creature(s). This effect ignores durations attributed to it. Important: Both parameters should be 0 (zero)."
+    },
+    {
+      "value": 76,
+      "name": "State: Feeblemindedness",
+      "description": "Applies the feeblemind effect to the targeted creature(s) â creatures are unselectable, immobile and do not respond to combat. Maintains the target's Intelligence to 3 (stacks normally with opcode #19 ). Important: A creature's scripts do not run while the creature is feebleminded."
+    },
+    {
+      "value": 77,
+      "name": "Cure: Feeblemindedness",
+      "description": "Removes the feeblemind effect and the STATE_FEEBLEMINDED flag from the targeted creature(s). This effect ignores durations attributed to it. Important: Both parameters should be 0 (zero)."
+    },
+    {
+      "value": 78,
+      "name": "State: Disease",
+      "description": "Set the Damage parameter as the amount of damage, and the Disease Type parameter as how the disease functions. Known values for 'Type' are: 0 Hit Points per second 1 Hit Points per round 2 Hit Points per Second 3 Seconds per Hit Points 4 Strength Penalty 5 Dexterity Penalty 6 Constitution Penalty 7 Intelligence Penalty 8 Wisdom Penalty 9 Charisma Penalty 10 Slow Effect 11 Mold Touch 13 Contagion 14 Cloud of Pestilence (at least in IWD2) 15 Dolorous Decay (at least in IWD2) 'Damage' can be positive (penalty) or negative (bonus). Important: Permanent timing modes require a duration for this effect to work."
+    },
+    {
+      "value": 79,
+      "name": "Cure: Disease",
+      "description": "Removes the disease and feeblemind effects from the targeted creature(s). This effect ignores durations attributed to it. It also unsets the feeblemind state bit. Important: Both parameters should be 0 (zero)."
+    },
+    {
+      "value": 80,
+      "name": "State: Deafness",
+      "description": "Applies the Deafness effect on the targeted creature(s) â creatures suffer a casting failure rate of 50% (20% in bg1, unknown in iwd1). The casting failure rate refers to Wizard and Priest spells only. This is cumulative with Miscast Magic. Warning: PST: it is unclear if this effect exist or does anything!"
+    },
+    {
+      "value": 81,
+      "name": "Cure: Deafness",
+      "description": "Removes the deafness effect from the targeted creature(s). This effect ignores durations attributed to it. Important: Both parameters should be 0 (zero)."
+    },
+    {
+      "value": 82,
+      "name": "Set AI Script",
+      "description": "Sets the script type specified by the Type value to the contents of the resource key. Known values for Type are: 0 ⟶ OVERRIDE 1 ⟶ AREA 2 ⟶ SPECIFICS 4 ⟶ CLASS 5 ⟶ RACE 6 ⟶ GENERAL 7 ⟶ DEFAULT Warning: This effect can unset scripts from a creature, which can break the game."
+    },
+    {
+      "value": 83,
+      "name": "Protection: From Projectile Weapon",
+      "description": "Gives the targeted creature(s) immunity to the weapon type specified by the 'Type' value. Known values for 'Type' are: 0 Instant 1 Arrow 2 Arrow Exploding 3 Arrow Flaming 4 Arrow Heavy* 5 Arrow (Non-Magical) 6 Axe 7 Axe Exploding 8 Axe Flaming 9 Axe Heavy* 10 Axe (Non-Magical) 11 Bolt 12 Bolt Exploding 13 Bolt Flaming 14 Bolt Heavy* 15 Bolt (Non-Magical) 16 Bullet 17 Bullet Exploding 18 Bullet Flaming 19 Bullet Heavy* 20 Bullet (Non-Magical) 26 Dagger* 27 Dagger Exploding 28 Dagger Flaming 29 Dagger Heavy 30 Dagger (Non-Magical) 31 Dart 32 Dart Exploding 33 Dart Flaming 34 Dart Heavy* 35 Dart (Non-Magical) 36 Magic Missile 37 Fireball 39 Lightning Bolt 41 Sleep 55 Spear 56 Spear Exploding 57 Spear Flaming 58 Spear Heaby 59 Spear (Non-Magical) 62 Web Travel 63 Web Ground 64 Gaze 65 Holy Might 66 Flame Strike 67 Magic Missile 1 68 Magic Missile 2 69 Magic Missile 3 70 Magic Missile 4 71 Magic Missile 5 72 Magic Missile 6 73 Magic Missile 7 74 Magic Missile 8 75 Magic Missile 9 76 Magic Missile 10 94 Cloud 95 Skull Trap 96 Colour Spray 97 Ice Storm 98 Fire Wall 99 Glyph 100 Grease 101 Flame Arrow Green 102 Flame Arrow Blue 103 Fireball Green 104 FireBall Blue 105 Potion 106 Potion Exploding 107 Acid Blob 108 Scorcher 109 Travel Door 186 Cloudkill 187 Flame Arrow Ice 188 Cow 189 Hold 190 Scorcher Ice 191 Acid Blob Mustard 192 Acid Blob Grey 193 Acid Blob Ochre 217 Icewind Magic Missile 313 Modenkainen's Force Missiles 345 Sekolah's Fire"
+    },
+    {
+      "value": 84,
+      "name": "Empty:",
+      "description": "This opcode has no effect."
+    },
+    {
+      "value": 85,
+      "name": "Empty:",
+      "description": "This opcode has no effect."
+    },
+    {
+      "value": 86,
+      "name": "Stat: Slashing Resistance Modifier",
+      "description": "Applies the modifier value specified by the Statistic Modifier field in the style specified by the Type field. Known values for Type are: 0 ⟶ Cumulative Modifier: Resistance = Resistance + 'Statistic Modifier' value 1 ⟶ Flat Value Modifier: Resistance = 'Statistic Modifier' value 2 ⟶ Percentage Modifier: Resistance = (Resistance * 'Statistic Modifier' value) / 100 Statistic Modifier can be positive or negative. The effect modifies RESISTSLASHING ."
+    },
+    {
+      "value": 87,
+      "name": "Stat: Crushing Resistance Modifier",
+      "description": "Applies the modifier value specified by the Statistic Modifier field in the style specified by the Type field. Known values for Type are: 0 ⟶ Cumulative Modifier: Resistance = Resistance + 'Statistic Modifier' value 1 ⟶ Flat Value Modifier: Resistance = 'Statistic Modifier' value 2 ⟶ Percentage Modifier: Resistance = (Resistance * 'Statistic Modifier' value) / 100 Statistic Modifier can be positive or negative. The effect modifies RESISTCRUSHING ."
+    },
+    {
+      "value": 88,
+      "name": "Stat: Piercing Resistance Modifier",
+      "description": "Applies the modifier value specified by the Statistic Modifier field in the style specified by the Type field. Known values for Type are: 0 ⟶ Cumulative Modifier: Resistance = Resistance + 'Statistic Modifier' value 1 ⟶ Flat Value Modifier: Resistance = 'Statistic Modifier' value 2 ⟶ Percentage Modifier: Resistance = (Resistance * 'Statistic Modifier' value) / 100 Statistic Modifier can be positive or negative. The effect modifies RESISTPIERCING ."
+    },
+    {
+      "value": 89,
+      "name": "Stat: Missiles Resistance Modifier",
+      "description": "Applies the modifier value specified by the Statistic Modifier field in the style specified by the Type field. Known values for Type are: 0 ⟶ Cumulative Modifier: Resistance = Resistance + 'Statistic Modifier' value 1 ⟶ Flat Value Modifier: Resistance = 'Statistic Modifier' value 2 ⟶ Percentage Modifier: Resistance = (Resistance * 'Statistic Modifier' value) / 100 Statistic Modifier can be positive or negative. The effect modifies RESISTMISSILE ."
+    },
+    {
+      "value": 90,
+      "name": "Stat: Open Locks Modifier",
+      "description": "Applies the modifier value specified by the Statistic Modifier field in the style specified by the Type field. Known values for Type are: 0 ⟶ Cumulative Modifier: Skill = Skill + 'Statistic Modifier' value 1 ⟶ Flat Value Modifier: Skill = 'Statistic Modifier' value 2 ⟶ Percentage Modifier: Skill = (Skill * 'Statistic Modifier' value) / 100 Important: Timing Mode s 1/4/7 permanently alters the creature's Open Locks score, leaving no removable effect."
+    },
+    {
+      "value": 91,
+      "name": "Stat: Find Traps Modifier",
+      "description": "Applies the modifier value specified by the Statistic Modifier field in the style specified by the Type field. Known values for Type are: 0 ⟶ Cumulative Modifier: Skill = Skill + 'Statistic Modifier' value 1 ⟶ Flat Value Modifier: Skill = 'Statistic Modifier' value 2 ⟶ Percentage Modifier: Skill = (Skill * 'Statistic Modifier' value) / 100 Important: Timing Mode s 1/4/7 permanently alters the creature's Find Traps score, leaving no removable effect."
+    },
+    {
+      "value": 92,
+      "name": "Stat: Pick Pockets Modifier",
+      "description": "Applies the modifier value specified by the Statistic Modifier field in the style specified by the Type field. Known values for Type are: 0 ⟶ Cumulative Modifier: Skill = Skill + 'Statistic Modifier' value 1 ⟶ Flat Value Modifier: Skill = 'Statistic Modifier' value 2 ⟶ Percentage Modifier: Skill = (Skill * 'Statistic Modifier' value) / 100 Important: Timing Mode s 1/4/7 permanently alters the creature's Pick Pockets score, leaving no removable effect."
+    },
+    {
+      "value": 93,
+      "name": "Stat: Fatigue Modifier",
+      "description": "Applies the modifier value specified by the Statistic Modifier field in the style specified by the Type field. Known values for Type are: 0 ⟶ Cumulative Modifier: Fatigue = Fatigue + 'Statistic Modifier' value 1 ⟶ Flat Value Modifier: Fatigue = 'Statistic Modifier' value 2 ⟶ Percentage Modifier: Fatigue = (Fatigue * 'Statistic Modifier' value) / 100 Statistic Modifier can be positive or negative. The effect modifies FATIGUE ."
+    },
+    {
+      "value": 94,
+      "name": "Stat: Drunkenness Modifier",
+      "description": "Applies the modifier value specified by the Statistic Modifier field in the style specified by the Type field. Known values for Type are: 0 ⟶ Cumulative Modifier: Drunkenness = Drunkenness + 'Statistic Modifier' value 1 ⟶ Flat Value Modifier: Drunkenness = 'Statistic Modifier' value 2 ⟶ Percentage Modifier: Drunkenness = (Drunkenness * 'Statistic Modifier' value) / 100 Statistic Modifier can be positive or negative. The effect modifies INTOXICATION ."
+    },
+    {
+      "value": 95,
+      "name": "Stat: Tracking Skill Modifier",
+      "description": "Applies the modifier value specified by the Statistic Modifier field in the style specified by the Type field. Known values for Type are: 0 ⟶ Cumulative Modifier: Skill = Skill + 'Statistic Modifier' value 1 ⟶ Flat Value Modifier: Skill = 'Statistic Modifier' value 2 ⟶ Percentage Modifier: Skill = (Skill * 'Statistic Modifier' value) / 100 Statistic Modifier can be positive or negative. The effect modifies TRACKING ."
+    },
+    {
+      "value": 96,
+      "name": "Stat: Level Change",
+      "description": "Applies the modifier value specified by the Statistic Modifier field in the style specified by the Type field. Known values for Type are: 0 ⟶ Cumulative Modifier: Level = Level + 'Statistic Modifier' value 1 ⟶ Flat Value Modifier: Level = 'Statistic Modifier' value 2 ⟶ Percentage Modifier: Level = (Level * 'Statistic Modifier' value) / 100 Note: In IWD2 the class to receive the change is specified at 0x2C"
+    },
+    {
+      "value": 97,
+      "name": "Stat: Exceptional Strength Modifier",
+      "description": "Applies the modifier value specified by the Statistic Modifier field in the style specified by the Type field. Known values for Type are: 0 ⟶ Cumulative Modifier: Exceptional Strength = Exceptional Strength + 'Statistic Modifier' value 1 ⟶ Flat Value Modifier: Exceptional Strength = 'Statistic Modifier' value 2 ⟶ Percentage Modifier: Exceptional Strength = (Exceptional Strength * 'Statistic Modifier' value) / 100 Statistic Modifier can be positive or negative. The effect modifies STREXTRA ."
+    },
+    {
+      "value": 98,
+      "name": "HP: Regeneration",
+      "description": "Restores HP to the value of 'Regeneration Amount' in the style specified by the 'Type' field, to the targeted creature(s). Known values for 'Type' are: 0 Restore 'Regeneration Amount' per second 1 Restore 'Regeneration Amount' as a percentage of total HP 2 Restore x HP every second 3 Restore 1HP every x seconds 4 Restore 'Regeneration Amount' per round Important: Permanent timing modes require a duration for this effect to work."
+    },
+    {
+      "value": 99,
+      "name": "Spell Effect: Duration Modifier",
+      "description": "Alters spell durations of the targeted creature(s), to the percentage specified by the Duration Modifier field, affecting the spell type specified by the Type field. Timing mode 0 is the only timing mode reliably affected. Timings handled through PRO files are ignored. For instance: Duration Modifier = 0 ⟶ Spells have no duration Duration Modifier = 100 ⟶ Spells have normal duration Duration Modifier = 200 ⟶ Spells have double duration Known values for Type are: 0 ⟶ Mage 1 ⟶ Priest 2 ⟶ Bard Song (EE only) The effect modifies SPELLDURATIONMODMAGE and SPELLDURATIONMODPRIEST . Note: Durations handled by Static Charge are unaffected (EE only)."
+    },
+    {
+      "value": 100,
+      "name": "Protection: from Creature Type",
+      "description": "Gives the targeted creature(s) protection from the creature type specified by the IDS File and IDS Entry fields. Known values for IDS File are: 2 ⟶ EA.IDS 3 ⟶ GENERAL.IDS 4 ⟶ RACE.IDS 5 ⟶ CLASS.IDS 6 ⟶ SPECIFIC.IDS 7 ⟶ GENDER.IDS 8 ⟶ ALIGN.IDS 9 ⟶ KIT.IDS (EE only; broken at least in 2.5) To be protected from any creature, leave IDS Entry at 0 (zero), and IDS File at 2 . Protection will grant the bearer immunity from being attacked, cast a spell at, or otherwise targeted by creatures with this type."
+    },
+    {
+      "value": 101,
+      "name": "Protection: from Opcode",
+      "description": "Gives the targeted creature(s) protection from the opcode specified by the Opcode field."
+    },
+    {
+      "value": 102,
+      "name": "Spell: Immunity (by Power Level)",
+      "description": "Gives the targeted creature(s) protection from effects (opcodes) whose Power attribute is equal to Spell Level ( range: 0 â 9 ). Info: Each application of this opcode only protects against its specified Spell Level , not \"up to\" it. Each effect in a spell/item is checked separately by this opcode. CAN block effects of Secondary Type MagicAttack . V1 effects inherit their Secondary Type from the Header( SPL ) / Extended Header( ITM ), V2 effects specify it manually. CAN block EFF files with resist_dispel = BIT2 . Keep in mind that this BIT is automatically set on any effect delivered by an Area-Effect (Explosion) projectile, so this opcode can deflect effects through AoE projectiles. CANNOT block non-hostile effects from self. V1 effects inherit their non-hostile behavior from the Header( SPL ) / Extended Header( ITM ), V2 effects specify it manually."
+    },
+    {
+      "value": 103,
+      "name": "Text: Change Name",
+      "description": "Alters the name of the targeted creature(s) to the strref specified by the String Reference field. When used with a duration timing, after the duration, the name will be set to a blank entry."
+    },
+    {
+      "value": 104,
+      "name": "Stat: Experience Points",
+      "description": "Applies the modifier value specified by the Statistic Modifier field in the style specified by the Type field. Known values for Type are: 0 ⟶ Cumulative Modifier: XP = XP + 'Statistic Modifier' value 1 ⟶ Flat Value Modifier: XP = 'Statistic Modifier' value 2 ⟶ Percentage Modifier: XP = (XP * 'Statistic Modifier' value) / 100 The effect modifies XP ."
+    },
+    {
+      "value": 105,
+      "name": "Stat: Gold",
+      "description": "Applies the modifier value specified by the Statistic Modifier field in the style specified by the Type field. Known values for Type are: 0 ⟶ Cumulative Modifier: Gold = Gold + 'Statistic Modifier' value 1 ⟶ Flat Value Modifier: Gold = 'Statistic Modifier' value 2 ⟶ Percentage Modifier: Gold = (Gold * 'Statistic Modifier' value) / 100 The effect modifies party gold or GOLD for everyone else. Note: PST does not support the percentage modifier type (unknown what it actually does)."
+    },
+    {
+      "value": 106,
+      "name": "Stat: Morale Break Modifier",
+      "description": "Applies the modifier value specified by the Statistic Modifier field in the style specified by the Type field. Known values for Type are: 0 ⟶ Cumulative Modifier: Morale Break = Morale Break + 'Statistic Modifier' value 1 ⟶ Flat Value Modifier: Morale Break = 'Statistic Modifier' value 2 ⟶ Percentage Modifier: Morale Break = (Morale Break * 'Statistic Modifier' value) / 100 The effect modifies MORALEBREAK ."
+    },
+    {
+      "value": 107,
+      "name": "Portrait Change",
+      "description": "Sets the portrait of the targeted creature(s) to that specified in the resource key, based on the Type value. This effect ignores durations attributed to it. Known values for Type are: 0 ⟶ Small portrait 1 ⟶ Large portrait"
+    },
+    {
+      "value": 108,
+      "name": "Stat: Reputation",
+      "description": "Sets the individual reputation of the targeted creature(s) to the value specified by the Statistic Modifier field in the style specified by the Type field. This does not affect the main reputation of the Party, unless Type 3-5 are used. Though it can affect ranger/paladinhood of any target. Known values for Type are: 0 ⟶ Cumulative Modifier: Reputation = Reputation + 'Statistic Modifier' value 1 ⟶ Flat Value Modifier: Reputation = 'Statistic Modifier' value 2 ⟶ Percentage Modifier: Reputation = (Reputation * 'Statistic Modifier' value) / 100 3 ⟶ Increment Party Reputation by 10 * 'Statistic Modifier' , cannot lower reputation below 100 , will raise reputation to 100 if already less (only in EEs) 4 ⟶ Party Reputation = 'Statistic Modifier' value, cannot lower reputation below 100 , will raise reputation to 100 if already less (only in EEs) 5 ⟶ Party Reputation = (Party Reputation * 'Statistic Modifier' value) / 100, cannot lower reputation below 100, will raise reputation to 100 if already less (only in EEs) The effect modifies REPUTATION ."
+    },
+    {
+      "value": 109,
+      "name": "State: Hold",
+      "description": "Applies the hold effect to the targeted creature(s), if the targeted creature(s) match the value specified by the 'IDS Entry' field, in the specified 'IDS File'. Known values for 'IDS File' are: 2 EA.ids 3 General.ids 4 Race.ids 5 Class.ids 6 Specific.ids 7 Gender.ids 8 Align.ids"
+    },
+    {
+      "value": 110,
+      "name": "Empty:",
+      "description": "This opcode has no effect. Note: It is still processed, so it will still interact with Spell Turning / Deflection /etcâ¦ just like any other effect."
+    },
+    {
+      "value": 111,
+      "name": "Item: Create Magical Weapon",
+      "description": "Creates the item specified by the resource key. The number of items created is controlled by the Amount field. The item is created in the Magical Weapon Slot . Important: The Magical Weapon Slot does not allow Item Abilities."
+    },
+    {
+      "value": 112,
+      "name": "Item: Remove Item",
+      "description": "Removes a single instance (or stack) of the item specified by the resource key from the targeted creature(s). Items in container items (e.g. Bags of Holding) will not be removed. If a creature has multiple instances of the item, the one in the lowest slot number (see SLOTS.IDS ) is removed. \"EFF_M02\" is hard-coded to play when an item is removed. This effect should be used to remove equipped items (use opcode #123 for inventory items)."
+    },
+    {
+      "value": 113,
+      "name": "Empty:",
+      "description": "This opcode has no effect. Note: It is still processed, so it will still interact with Spell Turning / Deflection /etcâ¦ just like any other effect."
+    },
+    {
+      "value": 114,
+      "name": "Empty:",
+      "description": "This opcode has no effect."
+    },
+    {
+      "value": 115,
+      "name": "Detect: Alignment",
+      "description": "Detects the alignment specified by the Alignment Mask field. Known values for Alignment Mask are: 0 ⟶ Evil (glow Red) 1 ⟶ Neutral (glow Blue) 2 ⟶ Good (glow Green)"
+    },
+    {
+      "value": 116,
+      "name": "State: Cure Invisibility",
+      "description": "Removes invisibility from the targeted creature(s). Also removes STATE_INVISIBLE and STATE_IMPROVEDINVISIBILITY . This effect ignores durations attributed to it. Important: Both parameters should be 0 (zero)."
+    },
+    {
+      "value": 117,
+      "name": "Spell Effect: Reveal Area",
+      "description": "Reveals the current area. Note: It does not remove the fog of war."
+    },
+    {
+      "value": 118,
+      "name": "Empty:",
+      "description": "This opcode has no effect. Note: It is still processed, so it will still interact with Spell Turning / Deflection /etcâ¦ just like any other effect."
+    },
+    {
+      "value": 119,
+      "name": "Spell Effect: Mirror Image",
+      "description": "Applies the mirror image effect to the targeted creature(s), creating mirror images in the style specified by the 'Type' field. The number of images is dicated by the level of the caster. Know values for 'Type' are: 0 Normal 1 Reflected Image"
+    },
+    {
+      "value": 120,
+      "name": "Protection: from Weapons",
+      "description": "Gives the targeted creature(s) immunity to weapons as specified by the Type field. The Enchantment field is used if Type is set to 0 . Known values for Type are: 0 ⟶ Enchanted 1 ⟶ Magical 2 ⟶ Non-Magical 3 ⟶ Silver 4 ⟶ Non-Silver 5 ⟶ Non-Silver / Non-Magical 6 ⟶ Two-Handed 7 ⟶ One-Handed 8 ⟶ Cursed 9 ⟶ Non-Cursed 10 ⟶ Cold Iron 11 ⟶ Non Cold Iron Info: Keep in mind that: Protected weapons will still trigger HitBy() , but will not interact with Mirror Image or Stone skins. Blocks weapon damage, on-hit effects of the weapon, opcode #248 and opcode #249 , regardless of the effects target. Area-effect projectiles (f.i. Arrow of Detonation) only check for Weapon Immunity on the attacked target, and use that result for all caught within their area of effect."
+    },
+    {
+      "value": 121,
+      "name": "Empty:",
+      "description": "This opcode has no effect. Sometimes known as \"Graphics: (Visual Animation Effect)\". Note: It is still processed, so it will still interact with Spell Turning / Deflection /etcâ¦ just like any other effect."
+    },
+    {
+      "value": 122,
+      "name": "Item: Create Inventory Item",
+      "description": "Creates a single instance of the item specified by the resource key. The item is created in the Inventory. Important: This opcode only works when used with a delayed timing mode (4). Applies a delayed opcode #123 effect to remove the item (based on specified duration )"
+    },
+    {
+      "value": 123,
+      "name": "Item: Remove Inventory Item",
+      "description": "Removes the item specified by the resource key from the targeted creature(s). This effect should be used to remove inventory items (use opcode #112 for equipped items). In particular: Removes all item(s) in the first slot containing the specified resource key from the targeted creature(s). Items in container items (e.g. Bags of Holding) will not be removed. Inventory slots are checked in numerical order from SLOTS.IDS ."
+    },
+    {
+      "value": 124,
+      "name": "Spell Effect: Teleport (Dimension Door)",
+      "description": "Teleports the targeted creature(s) in the style specified by the 'Type' field. Known values for 'Type' are: 0 Default 1 Source to Target 2 Return to Saved Location 3 Exchanged Source and Target Important: In IWD2 both parameters should be 0."
+    },
+    {
+      "value": 125,
+      "name": "Spell Effect: Unlock (Knock)",
+      "description": "Applies the knock effect to the targeted creature(s). Important: Both parameters should be 0 (zero)."
+    },
+    {
+      "value": 126,
+      "name": "Stat: Movement Modifier",
+      "description": "Applies the modifier value specified by the Statistic Modifier field in the style specified by the Type field. The engine allows values for Statistic Modifier from 0 (immobile) to 255 (instantaneous), though behaviour is only consistent in the range 0 â 30 . Known values for Type are: 0 ⟶ Cumulative Modifier: Movement = Movement + 'Statistic Modifier' value 1 ⟶ Flat Value Modifier: Movement = 'Statistic Modifier' value 2 ⟶ Non-stacking Percentage Modifier: Movement = (Movement * 'Statistic Modifier' value) / 100 5 ⟶ Multiplicative Stacking Percentage Modifier: Movement = (Movement * 'Statistic Modifier' value) / 100 (EE only) Note: BG1 does not support the cumulative modifier and will behave as if in flat modifier mode."
+    },
+    {
+      "value": 127,
+      "name": "Summon: Monster Summoning",
+      "description": "Summons a number of monsters. Each CRE file has a Creature Power Level number. The amount of monsters summoned by this effect depends on this value, the special parameter and if it's used in SPL / ITM or from an external EFF . When used in SPL / ITM files, known value for Mode are: 0 ⟶ Summon until Creature Power Level equals/exceeds Number 1 ⟶ Summon amount equal to Number 2 ⟶ Summon until Creature Power Level equals/exceeds Caster's Level When used in external EFF files, known value for Mode are: 0 ⟶ Summon until Creature Power Level equals/exceeds Number 1 ⟶ Summon amount equal to 'Number' + Dice rolls 2 ⟶ Summon until Creature Power Level equals/exceeds Caster Level field The Type field sets which 2DA file to pick the creatures to summon from. The 2da files are monsumX and anisumX , where X = 'Type' + 1 . 0â4 are allied , 5â9 are hostile. The specific 2da files used are: 0 ⟶ MONSUM01: Monster Summon 1 1 ⟶ MONSUM02: Monster Summon 2 2 ⟶ MONSUM03: Monster Summon 3 3 ⟶ ANISUM01: Animal Summon 1 4 ⟶ ANISUM02: Animal Summon 2 5 ⟶ MONSUM01: Monster Summon 1 Hostile 6 ⟶ MONSUM02: Monster Summon 2 Hostile 7 ⟶ MONSUM03: Monster Summon 3 Hostile 8 ⟶ ANISUM01: Animal Summon 1 Hostile 9 ⟶ ANISUM02: Animal Summon 2 Hostile A custom .2da file can be entered in the resource field (untested in bg1). If used from an external effect (.eff), the vvc field controls the bam file played when summoning."
+    },
+    {
+      "value": 128,
+      "name": "State: Confusion",
+      "description": "Applies the confusion effect to the targeted creature(s). The creature will run around uncontrollable, randomly attacking. Important: Timing Mode 1 will set STATE_CONFUSED without leaving behind a removable effect."
+    },
+    {
+      "value": 129,
+      "name": "State: Aid",
+      "description": "Applies a bless effect to the targeted creature(s). In particular: Grants a bonus/penalty to all Saving Throws equal to Statistic Modifier . Grants a bonus/penalty to Current and Maximum Hit Points equal to 'Statistic Modifier'd8 . Grants a bonus/penalty to base THAC0 equal to Statistic Modifier . Grants a bonus/penalty to base weapon damage equal to Statistic Modifier . Saving throws, THAC0, and Damage modifiers read only the first byte of Statistic Modifier for their value, the last 3 bytes are ignored. HP modifier uses the whole 4 bytes of Statistic Modifier . HP modifier is always positive (negative values become zero), but because Max HP itself is not bounded, it can overflow into negative amounts (Max HP is 32767). When used in external EFF s, Parameter2 controls the exact amount of HP gained. Note: While this opcode is \"Non-Cumulative\" (it sets values rather than increment), what it really does is stack in reverse standard order. The base STATE set on the CRE file will override any effect applied to them (defaulting to a value of zero). The oldest equipped effect will override newer equipped effects, and any equipped effect will override a non-equipped effect. The oldest non-equipped effect will override newer non-equipped effects. Testing in the original BG2 shows that if this opcode is used on an item with âwhile equippedâ duration, it becomes âpermanentâ when the item is equiped. Meaning that one can equip/unequip the item multiple times to give more and more eg. maximum hitpoints."
+    },
+    {
+      "value": 130,
+      "name": "State: Bless",
+      "description": "Modifies the THAC0, damage and morale of the target creature(s) by the amount specified by the Modifier parameter. In particular: Modifies THAC0 Modifies DAMAGEBONUS Morale is a 5 point bonus. Note: While this opcode is \"Non-Cumulative\" (it sets values rather than increment), what it really does is stack in reverse standard order. The base STATE set on the CRE file will override any effect applied to them (defaulting to a value of zero). The oldest equipped effect will override newer equipped effects, and any equipped effect will override a non-equipped effect. The oldest non-equipped effect will override newer non-equipped effects."
+    },
+    {
+      "value": 131,
+      "name": "State: Positive Chant",
+      "description": "Applies the chant effect to the targeted creature(s). This opcode has the same effects as opcode #22 , but maintains its own separate STATE . This opcode modifies LUCK . Note: Multiple chant effects are not cumulative."
+    },
+    {
+      "value": 132,
+      "name": "State: Raise Strength, Constitution, & Dexterity Non-Cumulative",
+      "description": "Raises the strength, constitution and dexterity of the targeted creature(s) by the value specified by the Statistic Modifier field. A negative value of Statistic Modifier sets the Strength, Constitution and Dexterity of the targeted creature(s) to 25. Note: While this opcode is \"Non-Cumulative\" (it sets values rather than increment), what it really does is stack in reverse standard order. The base STATE set on the CRE file will override any effect applied to them (defaulting to a value of zero). The oldest equipped effect will override newer equipped effects, and any equipped effect will override a non-equipped effect. The oldest non-equipped effect will override newer non-equipped effects."
+    },
+    {
+      "value": 133,
+      "name": "Spell Effect: Luck Non-Cumulative",
+      "description": "Applies the luck effect to the targeted creature(s). This opcode has the same effects as opcode #22 , but maintains its own separate STATE . This opcode modifies LUCK . Note: While this opcode is \"Non-Cumulative\" (it sets values rather than increment), what it really does is stack in reverse standard order. The base STATE set on the CRE file will override any effect applied to them (defaulting to a value of zero). The oldest equipped effect will override newer equipped effects, and any equipped effect will override a non-equipped effect. The oldest non-equipped effect will override newer non-equipped effects."
+    },
+    {
+      "value": 134,
+      "name": "State: Petrification",
+      "description": "Applies the petrification effect to the targeted creature(s). This effects kills & removes PC's from the party, and ends the game if used on the Protagonist (not in IWDs or PST). Important: Both parameters should be 0 (zero)."
+    },
+    {
+      "value": 135,
+      "name": "Graphics: Polymorph into Specific",
+      "description": "Polymorphs the targeted creature(s) into the creature specified by the resource key, in the style specified by the 'Type' field. Known values for 'Type' are: 0 Resistances/statistics gained, spell-casting disabled, colouring 1 No resistances/statistics gained, spell-casting enabled, colouring 2 No resistances/statistics gained, spell-casting enabled, no colouring"
+    },
+    {
+      "value": 136,
+      "name": "State: Force Visible",
+      "description": "Renders the targeted creature(s) partially visible: removes normal invisibility, but not the improved invisibility state; the targeted is visible and attackable, but not targetable by spells. The effect has no meaning on visible targets. This effect has no duration. Important: Leave both parameters at zero for this effect to work."
+    },
+    {
+      "value": 137,
+      "name": "State: Negative Chant",
+      "description": "Applies the chant effect to the targeted creature(s). This opcode has the same effects as opcode #22 , but maintains its own separate STATE . This opcode modifies LUCK . This opcode works as the reverse of Chant (positive values decrease Luck, negative values increase Luck). Note: While this opcode is \"Non-Cumulative\" (it sets values rather than increment), what it really does is stack in reverse standard order. The base STATE set on the CRE file will override any effect applied to them (defaulting to a value of zero). The oldest equipped effect will override newer equipped effects, and any equipped effect will override a non-equipped effect. The oldest non-equipped effect will override newer non-equipped effects."
+    },
+    {
+      "value": 138,
+      "name": "Graphics: Character Animation Change",
+      "description": "The targeted creature(s) shows the animation sequence specified by the 'Animation Sequence' field. Known values for 'Type' are: 1 Lay down (short) 2 Move hands (short) 3 Move hands (long) 4 Move shoulder (short) 5 Move shoulder (long) 6 Lay down (long) 7 Breath rapidly (short) 8 Breath rapidly (long)"
+    },
+    {
+      "value": 139,
+      "name": "Text: Display String",
+      "description": "Displays the strref specified by the String Reference value. Info: At least in EE games, it is possible to colorize the string. In order to do so, follow the instructions concerning the colorization of the name of your character during Character Creation ."
+    },
+    {
+      "value": 140,
+      "name": "Graphics: Casting Glow",
+      "description": "Creates a 2D animation for casting glow. These effects are usually used for casting glows based on the spell school. Known values for 'Type' are: 0 .. 8 = Crash 9 Casting Glow Aqua (Necromancy) 10 Casting Glow Blue (Alteration) 11 Casting Glow Gold (Enchantment) 12 Casting Glow Green (Abjuration) 13 Casting Glow Magenta (Illusion) 14 Casting Glow Purple (Conjuration) 15 Casting Glow Red (Invocation) 16 Casting Glow White (Divination) 17+ Crashes"
+    },
+    {
+      "value": 141,
+      "name": "Graphics: Lighting Effects",
+      "description": "Shows the lighting effect (a .bam file) specified by the 'Type' value at the location specified by 'Target'. These effects are usually used for spell hits based on the spell school. Known values for 'Target' are: 0 Current Location Non-0 Target Location Known values for 'Type' are: 0 aqua SHAIR 1 aqua SHEARTH 2 aqua SHWATER 3 *crash* 4 blue SHAIR 5 blue SHEARTH 6 blue SHWATER 7 *crash* 8 gold SHAIR 9 gold SHEARTH 10 gold SHWATER 11 *crash* 12 green SHAIR 13 green SHEARTH 14 green SHWATER 15 *crash* 16 magenta SHAIR 17 magenta SHEARTH 18 magenta SHWATER 19 *crash* 20 purple SHAIR 21 purple SHEARTH 22 purple SHWATER 23 *crash* 24 red SHAIR 25 red SHEARTH 26 red SHWATER 27 *crash* 28 white SHAIR 29 white SHEARTH 30 white SHWATER 31 *crash* 32 red MUSHROOM 33 grey MUSHROOM 34 green MUSHROOM 35 red PILLAR 36 white PILLAR 37 white SWIRL 38 Shadow Door (SPDIMDR) (BGs) 39 Finger of Death (SPFDEATH) (BG2) 40+ *crash* (BG2)"
+    },
+    {
+      "value": 142,
+      "name": "Graphics: Display Special Effect Icon",
+      "description": "Shows the icon specified by the 'Icon' field on the targeted creature(s) portrait. Known values for 'Icon' are: 0 Charm 1 Dire Charm 2 Rigid Thinking 3 Confused 4 Beserk 5 Intoxicated 6 Poisoned 7 Diseased 8 Blind 9 Protection from Evil 10 Protection from Petrification 11 Protection from Normal Missiles 12 Armor 13 Held 14 Asleep 15 Shield 16 Protection from Fire 17 Bless 18 Chant 19 Free Action 20 Barkskin 21 Strength 22 Heroism 23 Spell Invulnerability 24 Protection from Acid 25 Protection from Cold 26 Resist Fire/Cold 27 Protection from Electricity 28 Protection from Magic 29 Protection from Undead 30 Protection from Poison 31 Non-detectable 32 Good luck 33 Bad luck 34 Silenced 35 Cursed 36 Panic 37 - 38 Level Up(?) 39 Hasted 40 Resist Fear 41 Slowed 42 Bard Song 43 Nauseous 44 Fatigued 45 Held 46 Spirit Armor 47 Hopelessness 48 Courage 49 Friends 50 Hope 51 Greater Malison 52 Spirit Armor 53 Dominated 54 Feebleminded 55 Tenser's Transformation 56 Mind Blank 57 Aid 58 Master Thievery 59 Draw Upon Holy Might 60 Miscast Magic 61 Strength of One 62 Prayer 63 Defensive Harmony 64 Recitation 65 Champion's Strength 66 Chaotic Commands 67 Righteous Wrath of the Faithful 68 Phased 69 Pain 70 Impervious Sanctity of Mind 71 Petrified 72 Iron Body 73 Animal Rage 74 Exaltation 75 Cat's Grace 76 Blood Rage 77 Ballad of Three Heroes 78 Tale of Curran Strongheart 79 Tymora's Melody 80 Song of Kaudies 81 Siren's Yearning 82 War Chant of Sith 83 Deaf 84 Armor of Faith"
+    },
+    {
+      "value": 143,
+      "name": "Item: Create Item in Slot",
+      "description": "Creates the item specified by the resource key in the slot specified by the Slot field, on the targeted creature(s). Known values for Slot (from SLOTS.IDS ) are: 0 ⟶ AMULET 1 ⟶ ARMOR 2 ⟶ BELT 3 ⟶ BOOTS 4 ⟶ CLOAK 5 ⟶ GAUNTLETS 6 ⟶ HELMET 7 ⟶ RING_LEFT 8 ⟶ RING_RIGHT 9 ⟶ SHIELD 10 ⟶ FIST 11 ⟶ AMMO 15 ⟶ MISC 35 ⟶ WEAPON 11 ⟶ AMMO0 12 ⟶ AMMO1 13 ⟶ AMMO2 14 ⟶ AMMO3 15 ⟶ MISC0 16 ⟶ MISC1 17 ⟶ MISC2 18 ⟶ MISC3 19 ⟶ MISC4 20 ⟶ MISC5 21 ⟶ MISC6 22 ⟶ MISC7 23 ⟶ MISC8 24 ⟶ MISC9 25 ⟶ MISC10 26 ⟶ MISC11 27 ⟶ MISC12 28 ⟶ MISC13 29 ⟶ MISC14 30 ⟶ MISC15 31 ⟶ MISC16 32 ⟶ MISC17 33 ⟶ MISC18 34 ⟶ MISC19 âÂ Magical Weapon slot 35 ⟶ WEAPON0 36 ⟶ WEAPON1 37 ⟶ WEAPON2 38 ⟶ WEAPON3 Important: The Magical Weapon Slot does not allow Item Abilities. Moreover, unlike opcode #111 , this opcode will not \"equip\" the item that's created in this particular slot."
+    },
+    {
+      "value": 144,
+      "name": "Button: Disable Button",
+      "description": "Disabled the button specified by the 'Button' field. Known values for 'Button' are: 0 Stealth Button 1 Thieving Skill Button 2 Spell Select Button 3 First Quick Spell Button 4 Second Quick Spell Button 5 Third Quick Spell Button 6 N/A 7 Talk Button 8 Use Item Button 9 First Quick Item Button 11 Second Quick Item Button 12 Third Quick Item Button 13 Innate Ability Button Note: This effect may be limited to values 0-7."
+    },
+    {
+      "value": 145,
+      "name": "Spell: Disable Spell Casting Abilities",
+      "description": "Disables spell casting abilities of the targeted creature(s), in the style specified by the Spell Type field. Known values for Spell Type are: 0 ⟶ Disables wizard spells with location = spell (also applied by polymorph ) 1 ⟶ Disables priest spells with location = spell (also applied by polymorph ) 2 ⟶ Disables all innate spells (really any type except wizard / priest ), regardless of location 3 ⟶ Disables only \"magical\" spells (those lacking Ignore dead/wild magic ), regardless of type or location (EEs) Known values for Show message? are: 0 ⟶ Yes 1 ⟶ No"
+    },
+    {
+      "value": 146,
+      "name": "Spell: Cast Spell (at Creature)",
+      "description": "Casts the spell specified by the resource key at the level specified by the Casting Level field, in the style specified by the Type field. A Casting Level of 0 casts at the level of the casting creature. Known values for Type are: 0 ⟶ Normal Casting at specified level ( 0 for caster level), non-interruptible 1 ⟶ Cast Instantly at caster level 2 ⟶ Cast Instantly at specified level (EE-only) Important: When this opcode gets reflected using Type=1 , the spell specified by the resource key is cast at the target's Casting Level, not the caster's. When this opcode gets reflected ( opcode #197 , opcode #198 , opcode #199 , opcode #202 , opcode #203 and opcode #207 ) using Type=2 , the spell specified by the resource key is cast at the specified Casting Level , and it will also affect the original target (as if it wasn't reflected)."
+    },
+    {
+      "value": 147,
+      "name": "Spell: Learn Spell",
+      "description": "The targeted creature(s) learn the spell specified by the resource key."
+    },
+    {
+      "value": 148,
+      "name": "Spell: Cast Spell (at Point)",
+      "description": "Casts the spell specified by the resource key, at the level specified by the Casting Level field, in the style specified by the Type field. A Casting Level of 0 casts at the level of the casting creature. Known values for Type are: 0 ⟶ Normal Casting 1 ⟶ Cast Instantly (ignore Casting Level ) Note: This opcode does not work if the target is a container in non-ee versions."
+    },
+    {
+      "value": 149,
+      "name": "(Identify)",
+      "description": "The use of this effect is unknown, and effect of its parameters are undefined. Note: It is still processed, so it will still interact with Spell Turning / Deflection /etcâ¦ just like any other effect."
+    },
+    {
+      "value": 150,
+      "name": "Spell Effect: Find Traps",
+      "description": "Applies the find traps effect to the targeted creature(s). Important: Both parameters should be 0 (zero)."
+    },
+    {
+      "value": 151,
+      "name": "Summon: Replace Creature",
+      "description": "Replaces the targeted creature(s) with creature specified by the resource key, in the style specified by the Type value. Known values for Type are: 0 ⟶ Remove targeted creature via opcode #168 1 ⟶ Kill targeted creature via opcode #13 * p2=8 (Chunking death) 2 ⟶ Kill targeted creature via opcode #13 * p2=4 (Normal death) 3 ⟶ No effect on targeted creature âÂ New creature (specified by the resource key) is spawned at target's location Note: Experience is given as normal for a kill (the party still has to be the one applying the effect to earn experience)."
+    },
+    {
+      "value": 152,
+      "name": "Spell Effect: Play Movie",
+      "description": "Plays the movie specified by the resource key. Known movies are: AVALANCH BISLOGO CREDITS INTRO RETURN SCRY TOWER TSRLOGO"
+    },
+    {
+      "value": 153,
+      "name": "Overlay: Sanctuary",
+      "description": "Applies the sanctuary effect to the targeted creature(s). This effect sets stat #63 (SANCTUARY) to 1. Important: Both parameters should be 0 (zero)."
+    },
+    {
+      "value": 154,
+      "name": "Overlay: Entangle",
+      "description": "Applies the entangle visual effect to the targeted creature(s). Does not actually prevent the target from moving. This effect sets stat #62 (ENTANGLE) to 1. Important: Both parameters should be set to 0."
+    },
+    {
+      "value": 155,
+      "name": "Overlay: Minor Globe",
+      "description": "Applies the minor globe visual effect to the targeted creature(s). This effect sets stat #64 (MINORGLOBE) to 1."
+    },
+    {
+      "value": 156,
+      "name": "Overlay: Protection from Normal Missiles Cylinder",
+      "description": "Applies the protection from normal missiles cylinder visual effect to the targeted creature(s). This effect sets stat #65 (SHIELDGLOBE) to 1. Important: Both parameters should be 0 (zero)."
+    },
+    {
+      "value": 157,
+      "name": "State: Web Effect",
+      "description": "Applies the web effect to the targeted creature(s). The affected creature becomes immobile and its AI scripts stop running. This effect sets stats #58 (HELD) and #67 (WEB) to 1. It also sets the STATE_HELPLESS flag. Important: Both parameters should be 0 (zero)."
+    },
+    {
+      "value": 158,
+      "name": "Overlay: Grease",
+      "description": "Applies the grease visual effect to the targeted creature(s). Does not actually affect the target's movement rate. This effect sets stat #66 (GREASE) to 1. Important: Both parameters should be 0 (zero)."
+    },
+    {
+      "value": 159,
+      "name": "Spell Effect: Mirror Image (Exact Number)",
+      "description": "Applies the mirror image effect to the targeted creature(s), creating a number of images equal to the Amount value. Sets STATE_MIRRORIMAGE to true. Note: STATE_MIRRORIMAGE will maintain the effects of this opcode, once this opcode expires, but only until you save & reload. If you set STATE_MIRRORIMAGE on a CRE file, it won't do anything by itself. If you later apply opcode #119 / opcode #159 to the creature, once it expires, any remaining images will last until struck (absorbing attacks in the process), or until you save & reload."
+    },
+    {
+      "value": 160,
+      "name": "Remove Sanctuary",
+      "description": "Removes the sanctuary effect from the targeted creature(s). Important: Both parameters should be 0 (zero)."
+    },
+    {
+      "value": 161,
+      "name": "Cure: Horror",
+      "description": "Removes the horror effect from the targeted creature(s). This effect ignores durations attributed to it."
+    },
+    {
+      "value": 162,
+      "name": "Cure: Hold",
+      "description": "Removes the paralysis effect ( opcode #109 and opcode #175 ) from the targeted creature(s). Important: This effect should be used with an instant timing mode."
+    },
+    {
+      "value": 163,
+      "name": "Protection: Free Action",
+      "description": "Applies the free action effect to the targeted creature(s), restoring the creatures movement rate to its default value if the current movement rate value is below the default for the animation type. Also check out the EE description here ."
+    },
+    {
+      "value": 164,
+      "name": "Cure: Drunkeness",
+      "description": "Clears the drunkeness stat (as modified by opcode #94 )."
+    },
+    {
+      "value": 165,
+      "name": "Spell Effect: Pause Target",
+      "description": "Applies the pause effect to the targeted creature(s). In particular: Their inventory is still access-able. They are still select-able, and can be issued orders (for instance, activating modal abilities), though not all actions can be taken. It does not interrupt/end modal abilities the creature is currently using. They are not \"helpless\", an attack roll is still required to hit them. Their scripts stop running. This effect sets CasterHold to 1 . Important: Both parameters should be 0 ."
+    },
+    {
+      "value": 166,
+      "name": "Stat: Magic Resistance Modifier",
+      "description": "Applies the modifier value specified by the 'Statistic Modifier' field in the style specified by the 'Type' field. Known values for 'Type' are: 0 Cumulative Modifier -> Resistance = Resistance + 'Statistic Modifier' value 1 Flat Value Modifier -> Resistance = 'Statistic Modifier' value 2 Percentage Modifier -> Resistance = (Resistance * 'Statistic Modifier' value) / 100 Note: For a âTypeâ value of 0, any negative value of âStatistic Modifierâ will set the statistic to 127."
+    },
+    {
+      "value": 167,
+      "name": "Stat: THAC0 Modifier with Missile Weapons",
+      "description": "Applies the modifier value specified by the Statistic Modifier field in the style specified by the Type field. Known values for Type are: 0 ⟶ Cumulative Modifier: THAC0 = THAC0 + 'Statistic Modifier' value 1 ⟶ Flat Value Modifier: THAC0 = 'Statistic Modifier' value 2 ⟶ Percentage Modifier: THAC0 = (THAC0 * 'Statistic Modifier' value) / 100"
+    },
+    {
+      "value": 168,
+      "name": "Summon: Remove Creature",
+      "description": "Moves the targeted creature(s) to area \".ARE\" (a non-existent area). Also known as Script: Destroy Self . This deletes non-global creatures from the game (most common usage). For Global Creatures: This effect removes the creature from the player's party (if they were in it). The effect will keep the creature out of the party and any other Area for its duration, but does not re-instate the creature once it expires. They can still be recovered through script actions once the effect expires. Important: Both parameters should be 0 (zero)."
+    },
+    {
+      "value": 169,
+      "name": "Graphics: Prevent Special Effect Icon",
+      "description": "Prevents the icon specified by the 'Icon' field from being displayed. Known values for 'Icon' are: 0 Charm 1 Dire Charm 2 Rigid Thinking 3 Confused 4 Beserk 5 Intoxicated 6 Poisoned 7 Diseased 8 Blind 9 Protection from Evil 10 Protection from Petrification 11 Protection from Normal Missiles 12 Armor 13 Held 14 Asleep 15 Shield 16 Protection from Fire 17 Bless 18 Chant 19 Free Action 20 Barkskin 21 Strength 22 Heroism 23 Spell Invulnerability 24 Protection from Acid 25 Protection from Cold 26 Resist Fire/Cold 27 Protection from Electricity 28 Protection from Magic 29 Protection from Undead 30 Protection from Poison 31 Non-detectable 32 Good luck 33 Bad luck 34 Silenced 35 Cursed 36 Panic 37 - 38 Level Up(?) 39 Hasted 40 Resist Fear 41 Slowed 42 Bard Song 43 Nauseous 44 Fatigued 45 Held 46 Spirit Armor 47 Hopelessness 48 Courage 49 Friends 50 Hope 51 Greater Malison 52 Spirit Armor 53 Dominated 54 Feebleminded 55 Tenser's Transformation 56 Mind Blank 57 Aid 58 Master Thievery 59 Draw Upon Holy Might 60 Miscast Magic 61 Strength of One 62 Prayer 63 Defensive Harmony 64 Recitation 65 Champion's Strength 66 Chaotic Commands 67 Righteous Wrath of the Faithful 68 Phased 69 Pain 70 Impervious Sanctity of Mind 71 Petrified 72 Iron Body 73 Animal Rage 74 Exaltation 75 Cat's Grace 76 Blood Rage 77 Ballad of Three Heroes 78 Tale of Curran Strongheart 79 Tymora's Melody 80 Song of Kaudies 81 Siren's Yearning 82 War Chant of Sith 83 Deaf 84 Armor of Faith"
+    },
+    {
+      "value": 170,
+      "name": "Graphics: Play Damage Animation",
+      "description": "Plays the damage animation specified by the Animation field. It just plays a visual effect, like a far more limited version of opcode #215 , and is always instantaneous. Known values for Animation are: 0 ⟶ Blood (behind) (EEs) Doesn't display any animation. 1 ⟶ \"BLOODS.BAM\" Blood (small) 2 ⟶ \"BLOODM.BAM\" Blood (medium) 3 ⟶ \"BLOODL.BAM\" Blood (large) 4 ⟶ \"SPFIRIMP.BAM\" Fire 1 5 ⟶ \"SPFIRIMP.BAM\" Fire 2 6 ⟶ \"SPFIRIMP.BAM\" Fire 2 7 ⟶ \"SPSHKIMP.BAM\" Electricity 1 8 ⟶ \"SPSHKIMP.BAM\" Electricity 2 9 ⟶ \"SPSHKIMP.BAM\" Electricity 3 Info: On EE games: For Animation=4/5/6 and Animation=7/8/9 , this opcode actually pulls the animation from DMGTYPES.2DA , each playing both ANIMATION1 (those listed above) and ANIMATION2 , for FIRE and ELECTRICITY , respectively. Does not play the SOUND associated with them though. ANIMATION1 is the initial animation, ANIMATION2 is the lingering animation. BGEE/BG2EE use the default * (hardcoded) entries for all damage types, but they can be overridden by setting entries in DMGTYPES.2DA , as IWDEE does. The animations for Animation=1/2/3 are not pulled from DMGTYPES.2DA , they're most likely fully hardcoded."
+    },
+    {
+      "value": 171,
+      "name": "Spell: Give Ability",
+      "description": "Gives the SPL specified by the resource key to the targeted creature(s). Note: Wizard spell type can be level 1â9 if gained. Priest spell type can be level 1â7 if gained. Other Spell type s can be level 1â32767 if gained."
+    },
+    {
+      "value": 172,
+      "name": "Empty:",
+      "description": "This opcode has no effect."
+    },
+    {
+      "value": 173,
+      "name": "Stat: Poison Resistance Modifier",
+      "description": "Modifies the Poison Resistance of the target creature(s) to the value specified by Statistic Modifier . The effect modifies RESISTPOISON . Warning: In EE v2.3 and prior, including the originals, this opcode always âSetâ Poison Resistance; in v2.5 and later, it always âincrementsâ Poison Resistance (it stacks)."
+    },
+    {
+      "value": 174,
+      "name": "Spell Effect: Play Sound Effect",
+      "description": "Plays the sound effect specified by the resource key. Important: Both parameters should be 0."
+    },
+    {
+      "value": 175,
+      "name": "State: Hold",
+      "description": "Applies a yellow fade in graphic effect to the targeted creature(s), and shows the Hold icon, if the targeted creature(s) match the value specified by the 'IDS Entry' field, in the specified 'IDS File'. Known values for 'IDS File' are: 2 EA.ids 3 General.ids 4 Race.ids 5 Class.ids 6 Specific.ids 7 Gender.ids 8 Align.ids"
+    },
+    {
+      "value": 176,
+      "name": "Stat: Movement Modifier (II)",
+      "description": "(As opcode #126 , but unaffected by Free Action ). Applies the modifier value specified by the Statistic Modifier field in the style specified by the Type field. The engine allows values for Statistic Modifier from 0 (immobile) to 255 (instantaneous), though behaviour is only consistent in the range 0 â 30 . Known values for Type are: 0 ⟶ Cumulative Modifier: Movement = Movement + 'Statistic Modifier' value 1 ⟶ Flat Value Modifier: Movement = 'Statistic Modifier' value 2 ⟶ Non-stacking Percentage Modifier: Movement = (Movement * 'Statistic Modifier' value) / 100 5 ⟶ Multiplicative Stacking Percentage Modifier: Movement = (Movement * 'Statistic Modifier' value) / 100 (EE only) Warning: PST: This effect doesnât exist and always crashes the game."
+    },
+    {
+      "value": 177,
+      "name": "Use EFF File",
+      "description": "Applies the EFF file specified by the resource key to the targeted creature(s), if the targeted creature(s) match the value specified by the IDS Entry field, in the specified IDS File . Known values for IDS File are: 2 ⟶ EA.IDS 3 ⟶ GENERAL.IDS 4 ⟶ RACE.IDS 5 ⟶ CLASS.IDS 6 ⟶ SPECIFIC.IDS 7 ⟶ GENDER.IDS 8 ⟶ ALIGN.IDS Important: This effect doesn't add the opcode contained in the EFF file to the targeted creature(s). Instead, the op177 instance itself stays on the target(s) via the usual duration rules, and internally decodes and executes the opcode contained in the EFF file every time the op177 instance is ticked."
+    },
+    {
+      "value": 178,
+      "name": "Spell Effect: THAC0 vs. Creature Type Modifier",
+      "description": "Alters the targeted creature(s) THAC0 against the creature type specified by the 'IDS Entry' field in the specified 'IDS File'. The actual modifier value is placed in the Parameter 3 field in an external effect. Known values for 'IDS File' are: 2 Object.ids 3 General.ids 4 Race.ids 5 Class.ids 6 Specific.ids 7 Gender.ids 8 Align.ids"
+    },
+    {
+      "value": 179,
+      "name": "Spell Effect: Damage vs. Creature Type Modifier",
+      "description": "Alters the targeted creature(s) damage against the creature type specified by the 'IDS Entry' field in the specified 'IDS File'. The actual modifier value is placed in the Parameter 3 field in an external effect - dice values are ignored. Known values for 'IDS File' are: 2 Object.ids 3 General.ids 4 Race.ids 5 Class.ids 6 Specific.ids 7 Gender.ids 8 Align.ids"
+    },
+    {
+      "value": 180,
+      "name": "Item: Can't Use Item",
+      "description": "The targeted creatures(s) cannot use the item specified by the resource key. The strref specified by the String Reference field is displayed when an attempt to use the item is made."
+    },
+    {
+      "value": 181,
+      "name": "Item: Can't Use Itemtype",
+      "description": "The targeted creature(s) cannot use the item type specified by the 'Type' field. The strref specified by the 'String Reference' field is displayed when at attempt to use such an item is made. Warning: This effect has never been seen to work."
+    },
+    {
+      "value": 182,
+      "name": "Item: Apply Effect Item",
+      "description": "Applies an effect when the specified item is equipped. Warning: This effect has never been seen to work."
+    },
+    {
+      "value": 183,
+      "name": "Item: Apply Effect Itemtype",
+      "description": "Applies the EFF file specified by the resource key to the targeted creature(s) when an ITM of the item type specified by the Type field is equipped. Important: EFF files applied by this opcode bypass / ignore opcode #101 ."
+    },
+    {
+      "value": 184,
+      "name": "Graphics: Passwall (Don't Jump)",
+      "description": "Allows creatures to be placed in impassable areas, based on the value of the Jump field. Known values for Jump are: 0 ⟶ Do Jump from impassable areas 1+ ⟶ Don't Jump from impassable areas Warning: PST: This effect doesnât exist and always crashes the game."
+    },
+    {
+      "value": 185,
+      "name": "State: Hold (II)",
+      "description": "Applies a yellow fade in graphic effect to the targeted creature(s), and shows the 'Held' icon, if the targeted creature(s) match the value specified by the IDS Entry field, in the specified IDS File . The affected creature becomes immobile and its AI scripts stop running. This effect is not removed by opcode #162 . Known values for IDS File are: 2 ⟶ EA.IDS 3 ⟶ GENERAL.IDS 4 ⟶ RACE.IDS 5 ⟶ CLASS.IDS 6 ⟶ SPECIFIC.IDS 7 ⟶ GENDER.IDS 8 ⟶ ALIGN.IDS 9 ⟶ KIT.IDS (EE only) This effect sets HELD to 1 . It also sets the STATE_HELPLESS flag. Note: At least in EEs, this opcode automatically displays string STRREF_EFFECT_HOLD in the combat log. It even overrides the entries in EFFTEXT.2DA ."
+    },
+    {
+      "value": 186,
+      "name": "Script: MoveToArea",
+      "description": "Marks the targetted creature(s) as travelling to the area specified by the resource key. The creature appears in the specified area after a delay (specified by the Delay field), with the orientation specified by the Orientation field. In particular: Global Creatures ignore the delay. If the creature is already in the specified area, it will ignore the delay. Non-global creatures currently in a different area than specified will use the delay. Delay is measured in 1 ⁄ 30 seconds, (½ tick), 600 = 20 seconds . On non-EE games, the creature appears at the point specified by the Target Point fields (external EFF files only). On EE games, target(s) appear at Caster's Coordinates in new area (it does not seem to be possible to override through EFFs). Creature is moved to the new area (instantly) and flagged Moving Between Areas until their delay expires (if it's used). It won't be active until the delay expires (it's hidden, cannot be affected by Area-effect, doesn't occupy space). It can still be targeted by the various Everyone targeting modes in the new area while it's still inactive, but similar to maze / imprisonment , effects won't trigger (including poison and similar) on them until they become active. Warning: IWD2: there was a note to not use this effect in older IESDP. There is some confusion whether the Target (bg1, iwds) or the Caster point field is used."
+    },
+    {
+      "value": 187,
+      "name": "Script: Store Local Variable",
+      "description": "This effect stores a local variable, specified by the 'variable' field. This effect can only be used in an external effect (ie. an eff file). Note: At minimum in later engines, this opcode can also store other values. Check the doc for BG2."
+    },
+    {
+      "value": 188,
+      "name": "Spell Effect: Aura Cleansing",
+      "description": "While ON, the creature displays string STRREF_FEEDBACK_AURA_CLEANSED (EE games only) whenever they begin to cast a spell before their aura would normally clear (i.e. more than once/round). Does NOT affect item usage, only spellcasting. Set the Stat Value field to any non-zero value if you want no time needed between spells. The effect modifies AURACLEANSING to Stat Value . Note: The Stat Value parameter can take any value. If you set it to 0 , you will disable the effect (for its duration)."
+    },
+    {
+      "value": 189,
+      "name": "Stat: Casting Time Modifier",
+      "description": "Alters the Casting Time of spells by the value specified by the Speed Modifier field. This effect is cummulative. This effect sets MENTALSPEED to Speed Modifier . Known value for Type are: 0 ⟶ Increment by Speed Modifier Positive values decrease the casting time, negative values increase the casting time. 1 ⟶ Set casting time of every spell to Speed Modifier Negative values set casting time to 0 2 ⟶ Set casting time of spells with casting time higher than Speed Modifier to Speed Modifier Other spells are unaffected. Note: Type=2 was tested only for BGEE and might not work on non-EE."
+    },
+    {
+      "value": 190,
+      "name": "Stat: Attack Speed Factor",
+      "description": "Alters the weapon's attack speed by the value specified by the Speed Modifier field. This effect is not cumulative, meaning the last applied effect will override any others. Attack speed ranges from 0 (good) to 10 (bad). This effect acts as a bonus, so a high Speed Modifier is good. This effect sets PHYSICALSPEED to Speed Modifier ."
+    },
+    {
+      "value": 191,
+      "name": "Spell: Casting Level Modifier",
+      "description": "Applies the value specified by the 'Modifier' field as a bonus to casting spell levels, of a type specified by the 'Type' field. Known values for 'Type' are: 0 Mage 1 Cleric Note: This effect changes the casting level stat, but has no actual affect in-game IWD1"
+    },
+    {
+      "value": 192,
+      "name": "Spell Effect: Find Familiar",
+      "description": "Crashes if used by Player1, else displays 'Only the Protagonist may cast Find Familiar'"
+    },
+    {
+      "value": 193,
+      "name": "Spell Effect: Invisible Detection by Script",
+      "description": "Allows invisible creatures to be attacked (via scripts) and makes it possible to target improved invisible creatures with spells. The effect modifies SEEINVISIBLE to Stat Value . Note: The Stat Value parameter can take any value. If you set it to 0 , you will disable the effect (for its duration)."
+    },
+    {
+      "value": 194,
+      "name": "Empty:",
+      "description": "This opcode has no effect."
+    },
+    {
+      "value": 195,
+      "name": "Unknown",
+      "description": "The use of this effect is unknown, and effect of its parameters are undefined."
+    },
+    {
+      "value": 196,
+      "name": "Unknown",
+      "description": "The use of this effect is unknown, and effect of its parameters are undefined."
+    },
+    {
+      "value": 197,
+      "name": "Empty:",
+      "description": "This opcode has no effect."
+    },
+    {
+      "value": 198,
+      "name": "Empty:",
+      "description": "This opcode has no effect."
+    },
+    {
+      "value": 199,
+      "name": "Empty:",
+      "description": "This opcode has no effect."
+    },
+    {
+      "value": 200,
+      "name": "Empty:",
+      "description": "This opcode has no effect."
+    },
+    {
+      "value": 201,
+      "name": "Empty:",
+      "description": "This opcode has no effect."
+    },
+    {
+      "value": 202,
+      "name": "Empty:",
+      "description": "This opcode has no effect."
+    },
+    {
+      "value": 203,
+      "name": "Empty:",
+      "description": "This opcode has no effect."
+    },
+    {
+      "value": 204,
+      "name": "Empty:",
+      "description": "This opcode has no effect."
+    },
+    {
+      "value": 205,
+      "name": "Empty:",
+      "description": "This opcode has no effect."
+    },
+    {
+      "value": 206,
+      "name": "Spell Effect: Immunity Spell",
+      "description": "The creature type specified by the 'Type' field becomes immune to effects from the spell, item or external EFF specified by the resource key. It does so by comparing the effect source to the filename of spell or item, or the Parent Resource name for external EFF files. Known values for 'Type' are: 0 Default 1 Undead 2 Not Undead 3 Fire Using/Dwelling 4 Not Fire Using/Dwelling 5 Humanoid 6 Not Humanoid 7 Animal 8 Not Animal 9 Elemental 10 Not Elemental 11 Fungus 12 Not Fungus 13 Huge Creature 14 Not Huge Creature 15 Elf 16 Not Elf 17 Umber Hulk 18 Not Umber Hulk 19 Half-Elf 20 Not Half-Elf 21 Humanoid or Animal 22 Not Humanoid or Animal 23 Blind 24 Not Blind 25 Cold Using/Dwelling 26 Not Cold Using/Dwelling 27 Golem 28 Not Golem 29 Minotaur 30 Not Minotaur 31 Undead or Fungus 32 Not Undead or Fungus 33 Good 34 Not Good 35 Neutral 36 Not Neutral 37 Evil 38 Not Evil 39 Paladin 40 Not Paladin 41 Same Moral Alignment as Source 42 Not Same Moral Alignment as Source 43 Source 44 Not Source 45 Water Using/Dwelling 46 Not Water Using/Dwelling 47 Breathing 48 Not Breathing 49 Allies 50 Not Allies 51 Enemies 52 Not Enemies 53 Fire or Cold Using/Dwelling 54 Not Fire or Cold Using/Dwelling 55 Unnatural 56 Not Unnatural 57 Male 58 Not Male 59 Lawful 60 Not Lawful 61 Chaotic 62 Not Chaotic 63 Evasion Check (Thief) 64 Orc 65 Not Orc 66 Deaf 67 Not Deaf 68 Summoned Creature 69 Not Summoned Creature 70 Mind Flayer 71 Not Mind Flayer 72 Silenced 73 Not Silenced 74 Intelligence < 'Value' 75 Intelligence > 'Value' 76 Intelligence < = 'Value' 77 Intelligence >= 'Value' 78 Bard Skald 79 Not Bard Skald 80 Near Enemies 81 Not Near Enemies 82 Drow 83 Not Drow 84 Gray Dwarf 85 Not Gray Dwarf 86 Daytime 87 Not Daytime 88 Outdoor 89 Not Outdoor 90 Keg 91 Not Keg 92 Outsider 93 Not Outsider"
+    },
+    {
+      "value": 207,
+      "name": "Empty:",
+      "description": "This opcode has no effect."
+    },
+    {
+      "value": 208,
+      "name": "HP: Minimum Limit",
+      "description": "The targeted creature(s) HP value will not drop below the value specified by the Minimum Value field. This effect sets MINHITPOINTS to Minimum Value . Note: Minimum Value values 65536 to 98303 will set an only allowed hit point value (HP can't be higher or lower), each representing 'Minimum Value' value - 65536 , so 0 to 32767 . Values 32768 to 65535 do this as well, but all result in negative HP amounts, so not usable, as they will result in the same bugged non-death as opcode #17 reducing HP to 0. All values higher than 98303 just repeat loop over from -32768 to 32767 . Any positive value will also grant the creature immunity to directly applied opcode #13 effects. Those applied indirectly will still kill the creature, notably by opcodes #55 , #134 , #151 , #209 , and #238 ."
+    },
+    {
+      "value": 209,
+      "name": "Empty:",
+      "description": "This opcode has no effect."
+    },
+    {
+      "value": 210,
+      "name": "Spell Effect: Stun 90HP",
+      "description": "Applies the stun effect to the targeted creature(s), if the targeted creature(s) has less than 90 HP. The duration of the effect is: 1 to 29 HP ⟶ stunned for 4d4 rounds 30 to 59 HP ⟶ stunned for 2d4 rounds 60 to 89 HP ⟶ stunned for 1d4 rounds More specifically, it functions by applying opcode #45 . Note: Immunity to opcode #45 is sufficient to block the stun effect, but without immunity to opcode #210 it will still generate an erroneous ~Stunned~ string display."
+    },
+    {
+      "value": 211,
+      "name": "Empty:",
+      "description": "This opcode has no effect."
+    },
+    {
+      "value": 212,
+      "name": "Empty:",
+      "description": "This opcode has no effect."
+    },
+    {
+      "value": 213,
+      "name": "Empty:",
+      "description": "This opcode has no effect."
+    },
+    {
+      "value": 214,
+      "name": "Empty:",
+      "description": "This opcode has no effect. Also known as \"Secondary Cast List\"."
+    },
+    {
+      "value": 215,
+      "name": "Empty:",
+      "description": "This opcode has no effect."
+    },
+    {
+      "value": 216,
+      "name": "Empty:",
+      "description": "This opcode has no effect."
+    },
+    {
+      "value": 217,
+      "name": "Empty:",
+      "description": "This opcode has no effect."
+    },
+    {
+      "value": 218,
+      "name": "Protection: Stoneskin",
+      "description": "Gives the targeted creature(s) a number of protections from physical attacks, as specified by the 'Amount' field."
+    },
+    {
+      "value": 219,
+      "name": "Empty:",
+      "description": "This opcode has no effect."
+    },
+    {
+      "value": 220,
+      "name": "Empty:",
+      "description": "This opcode has no effect."
+    },
+    {
+      "value": 221,
+      "name": "Empty:",
+      "description": "This opcode has no effect."
+    },
+    {
+      "value": 222,
+      "name": "Empty:",
+      "description": "This opcode has no effect."
+    },
+    {
+      "value": 223,
+      "name": "Empty:",
+      "description": "This opcode has no effect."
+    },
+    {
+      "value": 224,
+      "name": "Empty:",
+      "description": "This opcode has no effect."
+    },
+    {
+      "value": 225,
+      "name": "Empty:",
+      "description": "This opcode has no effect."
+    },
+    {
+      "value": 226,
+      "name": "Empty:",
+      "description": "This opcode has no effect."
+    },
+    {
+      "value": 227,
+      "name": "Empty:",
+      "description": "This opcode has no effect."
+    },
+    {
+      "value": 228,
+      "name": "Empty:",
+      "description": "This opcode has no effect."
+    },
+    {
+      "value": 229,
+      "name": "Empty:",
+      "description": "This opcode has no effect."
+    },
+    {
+      "value": 230,
+      "name": "Empty:",
+      "description": "This opcode has no effect."
+    },
+    {
+      "value": 231,
+      "name": "Empty:",
+      "description": "This opcode has no effect."
+    },
+    {
+      "value": 232,
+      "name": "Colour: Fade from Colour RGB",
+      "description": "Alters the colour of the targeted creature(s). Set the 'RGB Colour' parameter to the colour value you want to use with the second byte being the Red portion (0-255), the third byte the Green portion (0-255), and the fourth byte being the Blue portion (0-255)."
+    },
+    {
+      "value": 233,
+      "name": "Graphics: Icewind Visual Spell Hit",
+      "description": "Plays the graphic animation specified by the 'Type' field. Known values for 'Type' are: 0 None 1 Abjuration 2 Alteration 3 Invocation 4 Necromancy 5 Conjuration 6 Enchantment 7 Illusion 8 Divination 9 Armor 10 Spirit Armor 11 Ghost Armor 12 Strength 13 Confusion 14 Nothing 15 Death Spell 16 Disintegrate 17 Power Word Silence 18 Power Word Stun 19 Finger of Death 20 Mordenkainen's Sword 21 Monster Summoning I 22 Monster Summoning II 23 Monster Summoning III 24 Monster Summoning IV 25 Monster Summoning V 26 Monster Summoning VI 27 Monster Summoning VII 28 Nothing 29 Nothing 30 Nothing 31 Bless 32 Curse 33 Prayer 34 Recitation 35 Cure Light Wounds 36 Cure Moderate Wounds 37 Cure Serious Wounds 38 Cure Critical wounds 39 Heal 40 Animal Summoning I 41 Animal Summoning II 42 Animal Summoning III 43 Slow Poison 44 Neutralize Poison 45 Call Lightning 46 Static Charge 47 Remove Paralysis 48 Free Action 49 Miscast Magic 50 Strength of One 51 Champion's Strength 52 Flame Strike 53 Raise Dead 54 Resurrection 55 Chaotic Commands 56 Righteous Wrath of the Faithful 57 Sunray 58 Spike Stones 59 Dimension Door Origin 60 Dimension Door Destination 61 Cone of Cold 62 Sol's Searing Orb 63 Fire 64 Cold 65 Electricity 66 Acid 67 Paralysis 68 Malavon's Spike Swath 69 Righteous Wrath of the Faithful Ground 70 Belhifet's Death Animation 71 Portal 72 Sunscorch 73 Blade Barrier (front) 74 Blade Barrier (back) 75 Circle of Bones (front) 76 Circle of Bones (back) 77 Cause Light Wounds 78 Cause Moderate Wounds 79 Cause Serious Wounds 80 Cause Critical Wounds 81 Cause Disease 82 Poison 83 Slay Living 84 Harm 85 Destruction 86 Exaltation 87 Cloudburst 88 Mold Touch 89 Lower Resistance 90 Nothing 91 Soul Eater 92 Smashing Wave 93 Suffocate 94 Abi-Dalzim's Horrid Wilting 95 Nothing 96 Vitriolic Sphere 97 Wailing Virgin Death 98 Undead Ward 99 Wailing Virgin on Hit 100 Wylfdene's Death 1 101 Wylfdene's Death 2 102 Dragon's Death 1 103 Dragon's Death 2 104 Monster Summoning Circle 105 Animal Summoning Circle 106 Earth Summoning Circle 107 Fire Summoning Circle 108 Water Summoning Circle"
+    },
+    {
+      "value": 234,
+      "name": "HP: Cold Damage",
+      "description": "Inflicts cold damage to the targeted creature(s) equal that that specified by the 'Damage' field. The Dice values can be used to inflict varying damage amounts - eg 2d6 would do 2-12 damage (Damage type is still specified by the 'Type' value). Info:"
+    },
+    {
+      "value": 235,
+      "name": "Graphics: Icewind Casting Glow",
+      "description": "Creates 2D Animation for casting glow. Known values for 'Type' are: 1 Abjuration 2 Conjuration 3 Divination 4 Enchantment 5 Illusion 6 Invokation 7 Necromancy 8 Transmutation"
+    },
+    {
+      "value": 236,
+      "name": "Chill Touch",
+      "description": "Inflicts cold damage to the targetted creature(s) equal that that specified by the 'Damage' field. If the affected creature is undead (general=4) then the creature is also affected by panic. The Dice values can be used to inflict varying damage amounts - eg 2d6 would do 2-12 damage (Damage type is still specified by the 'Type' value). Note: If âDamage Amountâ and the Dice values are both non-zero, the total damage inflicted is: âDamage + Dice value."
+    },
+    {
+      "value": 237,
+      "name": "HP: Crushing Damage",
+      "description": "Damages the target by the value specified by the 'Damage Amount' field, with a damage type of crushing. The Dice values can be used to inflict varying damage amounts - eg 2d6 would do 2-12 damage (Damage type is still specified by the 'Type' value). Note: If âDamage Amountâ and the Dice values are both non-zero, the total damage inflicted is: âDamage + Dice value."
+    },
+    {
+      "value": 238,
+      "name": "Stat: Save vs. all",
+      "description": "Alters all saving throws by the modifier value specified by the 'Statistic Modifier' field in the style specified by the 'Type' field. Known values for 'Type' are: 0 Cumulative Modifier -> Save = Save + 'Statistic Modifier' value 1 Flat Value Modifier -> Save = 'Statistic Modifier' value 2 Percentage Modifier -> Save = (Save * 'Statistic Modifier' value) / 100 'Statistic Modifier' can be positive or negative."
+    },
+    {
+      "value": 239,
+      "name": "Cure: Slow Poison",
+      "description": "Applies the slow poison effect to the targeted creature(s)."
+    },
+    {
+      "value": 240,
+      "name": "Summon: Icewind Summoning Spell",
+      "description": "Summons a creature, in the style specified by the 'Type' field. 0 MSUMMO1 Monster summoning I 1 MSUMMO2 Monster summoning II 2 MSUMMO3 Monster summoning III 3 MSUMMO4 Monster summoning IV 4 MSUMMO5 Monster summoning V 5 MSUMMO6 Monster summoning VI 6 MSUMMO7 Monster summoning VII 7 ASUMMO1 Animal summoning I 8 ASUMMO2 Animal summoning II 9 ASUMMO3 Animal summoning III 10 GINSECT Giant insect 11 CDOOM Creeping doom 12 MSUMMOM Monster summoning VI (Malavon)"
+    },
+    {
+      "value": 241,
+      "name": "HP: Vampiric Touch",
+      "description": "HP equal to the 'Damage' field are subtracted from creature A, and added onto creature B, in the style specified by the 'Type' field. Known values of 'Type' are: 0 Target to Source 1 Source to Target"
+    },
+    {
+      "value": 242,
+      "name": "Graphics: Display Creature Overlay",
+      "description": "Overlays the animation specified by the 'Type' field over the targeted creature(s). Known values of 'Type' are: 0 Globe of Invulnerability 1 Shroud of Flame 2 Antimagic Shell 3 Otiluke's Resilient Sphere 4 Protection from Normal Missiles 5 Cloak of Fear 6 Entropy Shield 7 Fire Aura 8 Frost Aura 9 Insect Plague 10 Storm Shield 11 Shield of Lathlander 12 Greater Shield of Lathlander 13 Seven Eyes"
+    },
+    {
+      "value": 243,
+      "name": "Summon: Icewind Animate Dead",
+      "description": "Summons a creature in the style specified by the 'Type' field. Known values of 'Type' are: 0 ADEAD Default 1 ADEADL Lich"
+    },
+    {
+      "value": 244,
+      "name": "State: Positive Prayer",
+      "description": "Applies the prayer effect to the targeted creature(s). The targeted creature(s) have saving throws and thac0 modified by the value specified by the 'Modifier' field."
+    },
+    {
+      "value": 245,
+      "name": "State: Negative Prayer",
+      "description": "Applies the reverse prayer effect to the targeted creature(s). The targeted creature(s) have saving throws and thac0 modified by the value specified by the 'Modifier' field."
+    },
+    {
+      "value": 246,
+      "name": "Summon: Icewind Summoning Spell (Mixed)",
+      "description": "Summons a creature in the style specified by the 'Type' Known values of 'Type' are: 0 SLIZARD Lizardmen 1 STROLLS Trolls 2 SSHADOW Shadow 3 ISTALKE Invisible Stalker 4 CFELEMW Fire elemental (Wizard) 5 CEELEMW Earth elemental (Wizard) 6 CWELEMW Water elemental (Wizard) 7 CFELEMP Fire elemental (Priest) 8 CEELEMP Earth elemental (Priest) 9 CWELEMP Water elemental (Priest) 10 CEELEMM Earth elemental (Malavon)"
+    },
+    {
+      "value": 247,
+      "name": "Beltyn's Burning Blood",
+      "description": "Applies the beltyns burning blood effect to the targeted creature(s). The affected creature(s) go bersek for the number of attack specified by the 'Strike Number' field, on a failed saving throw vs spells. Note: In IWD1 (with no expansions) param1 acts as a bonus to damage, rather than a strike number."
+    },
+    {
+      "value": 248,
+      "name": "Summon: Summon Shadow Monsters",
+      "description": "Summons a creautre in the style specified by the 'Type' field. Known values of 'Type' are: 0 SMONSTE Shadow monsters 1 DSMONST Demi-shadow monsters 2 SHADES Shades"
+    },
+    {
+      "value": 249,
+      "name": "State: Positive Recitation (state)",
+      "description": "Applies the recitation effect to the targeted creature(s). The targeted creature(s) have saving throws and thac0 modified by the value specified by the 'Modifier' field."
+    },
+    {
+      "value": 250,
+      "name": "State: Negative Recitation",
+      "description": "Applies the recitation effect to the targeted creature(s). The targeted creature(s) have saving throws and thac0 modified by the value specified by the 'Modifier' field."
+    },
+    {
+      "value": 251,
+      "name": "State: Hold (Lich Touch)",
+      "description": "Inflicts damage specified by the dice values, and holds the targeted creature(s) for the duration specified by the 'Duration' field."
+    },
+    {
+      "value": 252,
+      "name": "State: Blinded (Sol's Searing Orb)",
+      "description": "Inflicts damage as specified by the 'Damage' field and the dice values, and blinds the targeted creature(s)."
+    },
+    {
+      "value": 253,
+      "name": "Stat: AC vs. Damage Type Modifier (II)",
+      "description": "Appears to be the same as opcode 0. Applies the modifier value specified by the 'AC Modifier' field to the category specified by the 'Type' field. Known values for 'Type' are: 0 All Weapons 1 Crushing 2 Missile 4 Piercing 8 Slashing 16 Base AC setting (sets the targets AC to the value specified by the 'AC Modifier' field -1. If the targets AC is already 'AC Modifier' or below, this effect will do nothing)."
+    },
+    {
+      "value": 254,
+      "name": "Removal: Effects specified by Resource",
+      "description": "Removes effects from the resource specified by the resource key, in the style specified by the 'Type' field. Known values for 'Type' are: 0 Default 1 Equipped effects list only 2 Timed effects list only"
+    },
+    {
+      "value": 255,
+      "name": "State: Salamander Aura",
+      "description": "Inflicts damage as specified by the 'Damage' field and the dice values to the targeted creature(s). Known values for 'Type' are: 0 Fire Aura 1 Frost Aura Note: The Dice values can be used to inflict varying damage amounts - e.g. 2d6 would do 2-12 damage (Damage type is still specified by the âTypeâ value)."
+    },
+    {
+      "value": 256,
+      "name": "Spell Effect: Umber Hulk Gaze",
+      "description": "This effect applies Confusion to the targetted creatures(s). The Duration parameter sets how long the effect works. The effect works as an aura, affecting opponents of the originating creature. The effect is re-applied every 7 seconds. The effect does not stack, due to an applied Immunity Against Spell effect. If called from spin994, the following target types will not be affected (due to an applied Immunity Against Spell effect on them): Race - fungi Race - minotaur Race - golem State - blind"
+    },
+    {
+      "value": 257,
+      "name": "(Zombie Lord Aura)",
+      "description": "The use of this effect is unknown, and effect of its parameters are undefined."
+    },
+    {
+      "value": 258,
+      "name": "Protection: Immunity Resource",
+      "description": "The Type parameter sets how the effect functions Known values of 'Type' are: 0 Default 1 Test and set to 0"
+    },
+    {
+      "value": 259,
+      "name": "Summon: Summon Creature",
+      "description": "Summons a creature in the style specified by the 'Type' field. Known values of 'Type' are: 0 Default 1 Ally to source 2 Enemy to source 3 Force summon at source 4 Summon Genie"
+    },
+    {
+      "value": 260,
+      "name": "Graphics: Animation Removal",
+      "description": "Removes the animation of the targeted creature(s). Important: Both parameters should be 0 (zero)."
+    },
+    {
+      "value": 261,
+      "name": "Protection: Immunity Effect and Resource",
+      "description": "Gives the targeted creature(s) protection from the opcode specified by the 'Opcode' field, and blocks associated strref entries (see efftext.2da). Known values of 'Type' are: Opcode (0 to 296) 400 Hopelessness 404 Nausea 405 Enfeeblement 412 Control 416 Bleeding Wounds 431 Energy Drain 452 Bane 453 Power Attack 454 Expertise 455 Arterial Strike 456 Hamstring 457 Rapid Shot"
+    },
+    {
+      "value": 262,
+      "name": "Summon: Summon Pomabs",
+      "description": "The use of this effect is unknown, and effect of its parameters are undefined."
+    },
+    {
+      "value": 263,
+      "name": "Spell Effect: Turn Undead (Evil)",
+      "description": "*Dont Use* As opcode #5, affecting undead. Known values of 'Type' are: 0 Charmed (Target neutral after effect end) 1 Charmed (Target hostile after effect end) 2 Dire charmed (Target neutral after effect end) 3 Dire charmed (Target hostile after effect end) 4 Controlled by Cleric"
+    },
+    {
+      "value": 264,
+      "name": "Spell Effect: Static Charge",
+      "description": "Activates the static charge effect, for a number of strikes specified by the 'Number' field."
+    },
+    {
+      "value": 265,
+      "name": "State: Cloak of Fear",
+      "description": "Applies the cloak of fear effect to the targeted creature(s), for a number of strikes specifed by the 'Number' field."
+    },
+    {
+      "value": 266,
+      "name": "Stat: Movement Modifier (forced)",
+      "description": "Applies the modifier value specified by the 'Statistic Modifier' field in the style specified by the 'Type' field. Known values for 'Type' are: 0 Cumulative Modifier -> Movement = Movement + 'Statistic Modifier' value 1 Flat Value Modifier -> Movement = 'Statistic Modifier' value 2 Percentage Modifier -> Movement = (Movement * 'Statistic Modifier' value) / 100"
+    },
+    {
+      "value": 267,
+      "name": "Cure: Remove Confusion",
+      "description": "Removes the confusion effect from the targeted creature(s). Important: Both parameters should be 0 (zero)."
+    },
+    {
+      "value": 268,
+      "name": "Spell Effect: Eye of the Mind",
+      "description": "Gives the 'Eye of the Mind' (SPIN126) innate ability to the targeted creature(s) Important: Both parameters should be 0 (zero)."
+    },
+    {
+      "value": 269,
+      "name": "Spell Effect: Eye of the Sword",
+      "description": "Gives the 'Eye of the Sword' (SPIN127) innate ability to the targeted creature(s) Important: Both parameters should be 0 (zero)."
+    },
+    {
+      "value": 270,
+      "name": "Spell Effect: Eye of the Mage",
+      "description": "Gives the 'Eye of the Mage' (SPIN128) innate ability to the targeted creature(s) Important: Both parameters should be 0 (zero)."
+    },
+    {
+      "value": 271,
+      "name": "Spell Effect: Eye of the Venom",
+      "description": "Gives the 'Eye of Venom' (SPIN129) innate ability to the targeted creature(s) Important: Both parameters should be 0 (zero)."
+    },
+    {
+      "value": 272,
+      "name": "Spell Effect: Eye of the Spirit",
+      "description": "Gives the 'Eye of Spirit' (SPIN130) innate ability to the targeted creature(s) Important: Both parameters should be 0 (zero)."
+    },
+    {
+      "value": 273,
+      "name": "Spell Effect: Eye of the Fortitude",
+      "description": "Gives the 'Eye of Fortitude' (SPIN131) innate ability to the targeted creature(s)"
+    },
+    {
+      "value": 274,
+      "name": "Spell Effect: Eye of the Stone",
+      "description": "Gives the 'Eye of Sword' (SPIN132) innate ability to the targeted creature(s)"
+    },
+    {
+      "value": 275,
+      "name": "Spell Effect: Remove Seven Eyes",
+      "description": "Removes the seven eyes effect from the targeted creature(s)."
+    },
+    {
+      "value": 276,
+      "name": "Spell Effect: Remove Effects of Type",
+      "description": "Known values of 'Type' are: Opcode (0 to 296) 400 Hopelessness 404 Nausea 405 Enfeeblement 412 Control 416 Bleeding Wounds 419 Knocked Unconscious 428 Banish 431 Energy Drain"
+    },
+    {
+      "value": 277,
+      "name": "HP: Magic Damage (Soul Eater)",
+      "description": "Inflicts damage as specified by the 'Damage' field and the dice values to the targeted creature(s)."
+    },
+    {
+      "value": 278,
+      "name": "Spell Effect: Shroud of Flame",
+      "description": "Applies the shroud of flame effect to the targeted creature(s)."
+    },
+    {
+      "value": 279,
+      "name": "Spell Effect: Animal Rage",
+      "description": "Applies the animal rage effect to the targeted creature(s), in the style specified by the 'Type' field. Known values of 'Type' are: 0 LOS Check (parameter 1 is number of seconds) 1 State"
+    },
+    {
+      "value": 280,
+      "name": "Spell Effect: Turn Undead",
+      "description": "As opcode #5, affecting undead. Known values of 'Type' are: 0 Command 1 Rebuke 2 Destroy 3 Panic 4 Dependent on caster"
+    },
+    {
+      "value": 281,
+      "name": "Spell Effect: Vitriolic Sphere",
+      "description": "Inflicts damage as specified by the 'Damage' field and the dice values to the targeted creature(s)."
+    },
+    {
+      "value": 282,
+      "name": "HP: Suppress HP Info",
+      "description": "Hides the HP information of the targeted creature(s)."
+    },
+    {
+      "value": 283,
+      "name": "Text: Float Text",
+      "description": "Displays the text specified by the 'Strref' field, in the style specified by the 'Type' field. Known values for 'Type' are: 0 Default (show strref) 1 Cynicism (show Cynicism strrefs)"
+    },
+    {
+      "value": 284,
+      "name": "Spell Effect: Mace of Disruption",
+      "description": "Applies the mace of disruption effect to the targeted creature(s). Undead: 1-4 Hit Dice: 100% chance of instant death 5 Hit Dice: 95% chance of instant death 6 Hit Dice: 80% chance of instant death 7 Hit Dice: 65% chance of instant death 8-9 Hit Dice: 50% chance of instant death 10 Hit Dice: 35% chance of instant death 11+ Hit Dice: 20% chance of instant death Outer Planar Creatures: 5% chance of instant death Important: Both parameters should be 0 (zero)."
+    },
+    {
+      "value": 285,
+      "name": "State: Sleep (forced)",
+      "description": "Applies the sleep effect to the targeted creature(s)."
+    },
+    {
+      "value": 286,
+      "name": "Spell Effect: Ranger Tracking",
+      "description": "Activates the ranger tracking ability. Important: Both parameters should be 0 (zero)."
+    },
+    {
+      "value": 287,
+      "name": "Protection: Backstab",
+      "description": "Makes the targeted creature(s) immune to backstabbing. Important: Both parameters should be 0 (zero)."
+    },
+    {
+      "value": 288,
+      "name": "State: Set State",
+      "description": "Sets the state of the targetted creature(s) to the value specified by the 'Type' field. These effects could be detected by the gamescript trigger ExtendedStateCheck (see extstate.ids). Known values for 'Type' are: 0 Chaotic Command 1 Miscast Magic 2 Pain 3 Greater Malison 4 Blood Rage 5 Cats Grace 6 Mold Touch 7 Shroud of Flame"
+    },
+    {
+      "value": 289,
+      "name": "Dragon Gem Cutscene",
+      "description": "Sets the global variable GEM_ACTIVE to 1."
+    },
+    {
+      "value": 290,
+      "name": "Protection: from Spell (Message)",
+      "description": "The targeted creature(s) become immune to the spell specified by the resource key, subject to the 'Type' field. Known values for 'Type' are: 0 Default 1 Undead 2 Not Undead 3 Fire Using/Dwelling 4 Not Fire Using/Dwelling 5 Humanoid 6 Not Humanoid 7 Animal 8 Not Animal 9 Elemental 10 Not Elemental 11 Fungus 12 Not Fungus 13 Huge Creature 14 Not Huge Creature 15 Elf 16 Not Elf 17 Umber Hulk 18 Not Umber Hulk 19 Half-Elf 20 Not Half-Elf 21 Humanoid or Animal 22 Not Humanoid or Animal 23 Blind 24 Not Blind 25 Cold Using/Dwelling 26 Not Cold Using/Dwelling 27 Golem 28 Not Golem 29 Minotaur 30 Not Minotaur 31 Undead or Fungus 32 Not Undead or Fungus 33 Food 34 Not Good 35 Neutral 36 Not Neutral 37 Evil 38 Not Evil 39 Paladin 40 Not Paladin 41 Same Moral Alignment as Source 42 Not Same Moral Alignment as Source 43 Source 44 Not Source 45 Water Using/Dwelling 46 Not Water Using/Dwelling 47 Breathing 48 Not Breathing 49 Allies 50 Not Allies 51 Enemies 52 Not Enemies 53 Fire or Cold Using/Dwelling 54 Not Fire or Cold Using/Dwelling 55 Unnatural 56 Not Unnatural 57 Male 58 Not Male 59 Lawful 60 Not Lawful 61 Chaotic 62 Not Chaotic 63 Evasion Check (Thief) 64 Orc 65 Not Orc 66 Deaf 67 Not Deaf 68 Summoned Creature 69 Not Summoned Creature 70 Mind Flayer 71 Not Mind Flayer 72 Silenced 73 Not Silenced 74 Intelligence < 'Value' 75 Intelligence > 'Value' 76 Intelligence <= 'Value' 77 Intelligence >= 'Value' 78 Bard Skald 79 Not Bard Skald 80 Near Enemies 81 Not Near Enemies 82 Drow 83 Not Drow 84 Gray Dwarf 85 Not Gray Dwarf 86 Daytime 87 Not Daytime 88 Outdoor 89 Not Outdoor 90 Keg 91 Not Keg 92 Outsider 93 Not Outsider"
+    },
+    {
+      "value": 291,
+      "name": "Spell Effect: Debian's Rod of Smiting",
+      "description": "Applies the debians rod of smiting effect to the targeted creature(s). Golems: Extra 4-11 points of damage, with a 5% chance of insteant death. Outer Planar creatures: 5% chance of an extra 8-24 points."
+    },
+    {
+      "value": 292,
+      "name": "Spell Effect: Magical Rest",
+      "description": "This effect will refresh spells and remove any fatigue. Important: Both parameters should be 0 (zero)."
+    },
+    {
+      "value": 293,
+      "name": "Spell Effect: Beholder Dispel Magic",
+      "description": "Applies the beholder dispel magic effect to the targeted creature(s). Info: SPIN164 is periodically applied to creatures near the target."
+    },
+    {
+      "value": 294,
+      "name": "Spell Effect: Harpy Wail",
+      "description": "Applies the harpy wail to the targeted creature(s). Info: SPIN166 is periodically applied to creatures near the target, and EFF_P111 is played."
+    },
+    {
+      "value": 295,
+      "name": "Spell Effect: Jackalwere Gaze",
+      "description": "Applies the jackalwere gaze effect to the targeted creature(s). Info: The text Jackalwere Gaze is applied over the target, and SPIN179 is periodically applied to creatures near the target."
+    },
+    {
+      "value": 296,
+      "name": "Script: Set Global Variable",
+      "description": "Sets a the global variable specified by the 'Type' field to the value specified by the 'Value' field. Known values for 'Type' are: 0 RETURN_TO_LONELYWOOD"
+    }
+  ]
+}

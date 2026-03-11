@@ -7,7 +7,8 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 
 from core.formats.cre import Alignment, Class, CreFile, Gender, Race
-from core.formats.key_biff import KeyFile, ResType
+from core.formats.key_biff import KeyFile
+from core.util.enums import ResType
 from core.formats.mos import MosFile
 from core.services.itm_catalog import ItmCatalog
 from core.viewmodels.character_vm import CharacterVM, InventorySlotVM, StatVM
@@ -210,7 +211,7 @@ class CharacterService:
         from KEY when multiple resources need the same page.
         """
         from core.formats.pvrz import PvrzFile
-        from core.formats.key_biff import ResType
+        from core.util.enums import ResType
 
         key = self._key
         game = self._selected_game

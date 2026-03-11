@@ -48,7 +48,8 @@ if str(_ROOT) not in sys.path:
 
 from game.installation import InstallationFinder, GameInstallation
 from game.string_manager import StringManager, StringManagerError
-from core.formats.key_biff import KeyFile, ResType, BiffFile
+from core.formats.key_biff import BiffFile, KeyFile
+from core.util.enums import ResType
 from core.index import ResourceIndex, IndexEntry, SOURCE_BIFF
 from core.util.strref import StrRef
 
