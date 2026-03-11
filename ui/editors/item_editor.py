@@ -648,8 +648,13 @@ class ItemEditorPanel:
         *,
         strip_prefix: str = "",
     ) -> None:
-        wrap_targets: list[str] = []
+        wrap_targets: list[tuple[str, int]] = []
         cell_idx = 0
+        col_tags = (
+            f"{table_tag}_col_field",
+            f"{table_tag}_col_value",
+            f"{table_tag}_col_resolved",
+        )
         with dpg.table(
             tag=table_tag,
             parent=parent,
@@ -663,23 +668,23 @@ class ItemEditorPanel:
             borders_innerH=True,
             borders_outerH=True,
         ):
-            dpg.add_table_column(label="Field", width_stretch=True)
-            dpg.add_table_column(label="Value", width_stretch=True)
-            dpg.add_table_column(label="Resolved / Preview", width_stretch=True)
+            dpg.add_table_column(label="Field", width_stretch=True, tag=col_tags[0])
+            dpg.add_table_column(label="Value", width_stretch=True, tag=col_tags[1])
+            dpg.add_table_column(label="Resolved / Preview", width_stretch=True, tag=col_tags[2])
             for field_path, value_text, resolved_strref, bam_icon, resolved_is_resref in rows:
                 row_height = 24 if bam_icon is not None else 0
                 with dpg.table_row(parent=table_tag, height=row_height):
-                    field_tag = self._tag(f"cell_field_{cell_idx}")
+                    field_tag = f"{table_tag}_field_{cell_idx}"
                     cell_idx += 1
-                    value_tag = self._tag(f"cell_value_{cell_idx}")
+                    value_tag = f"{table_tag}_value_{cell_idx}"
                     cell_idx += 1
                     dpg.add_text(
                         ItemEditorPanel._humanize_field_path(field_path, strip_prefix=strip_prefix),
                         tag=field_tag,
                     )
                     dpg.add_text(value_text, tag=value_tag)
-                    wrap_targets.append(field_tag)
-                    wrap_targets.append(value_tag)
+                    wrap_targets.append((field_tag, 0))
+                    wrap_targets.append((value_tag, 1))
                     with dpg.group(horizontal=True):
                         if bam_icon is not None:
                             tex = self._create_dynamic_texture(*bam_icon)
@@ -696,53 +701,73 @@ class ItemEditorPanel:
                                 full_height=height,
                             )
                         if resolved_strref:
-                            resolved_tag = self._tag(f"cell_resolved_{cell_idx}")
+                            resolved_tag = f"{table_tag}_resolved_{cell_idx}"
                             cell_idx += 1
                             dpg.add_text(resolved_strref, tag=resolved_tag)
-                            wrap_targets.append(resolved_tag)
-        self._schedule_wrap_update(table_tag, wrap_targets)
+                            wrap_targets.append((resolved_tag, 2))
+        self._schedule_wrap_update(table_tag, col_tags, wrap_targets)
 
-    def _schedule_wrap_update(self, table_tag: str, wrap_targets: list[str]) -> None:
+    def _schedule_wrap_update(
+        self,
+        table_tag: str,
+        col_tags: tuple[str, str, str],
+        wrap_targets: list[tuple[str, int]],
+        attempt: int = 0,
+    ) -> None:
         if not wrap_targets:
             return
         frame = dpg.get_frame_count() + 1
-        dpg.set_frame_callback(frame, lambda: self._apply_wrap_update(table_tag, wrap_targets))
+        dpg.set_frame_callback(
+            frame,
+            lambda: self._apply_wrap_update(table_tag, col_tags, wrap_targets, attempt),
+        )
 
-    def _apply_wrap_update(self, table_tag: str, wrap_targets: list[str]) -> None:
-        wrap_width = self._measure_table_wrap_width(table_tag)
-        for tag in wrap_targets:
+    def _apply_wrap_update(
+        self,
+        table_tag: str,
+        col_tags: tuple[str, str, str],
+        wrap_targets: list[tuple[str, int]],
+        attempt: int,
+    ) -> None:
+        col_widths = self._measure_column_wrap_widths(table_tag, col_tags)
+        if not any(col_widths):
+            if attempt < 3:
+                self._schedule_wrap_update(table_tag, col_tags, wrap_targets, attempt + 1)
+            return
+        right_w = self._measure_item_width(self.right_tag)
+        for tag, col in wrap_targets:
             if not dpg.does_item_exist(tag):
                 continue
             try:
-                dpg.configure_item(tag, wrap=wrap_width)
+                width = col_widths[col] if col < len(col_widths) else col_widths[-1]
+                if right_w:
+                    width = min(width, right_w)
+                dpg.configure_item(tag, wrap=max(80, int(width)))
             except Exception:
                 continue
 
-    def _measure_table_wrap_width(self, table_tag: str) -> int:
-        candidates: list[int] = []
-        for tag in (table_tag, self.structured_tag, self.right_tag):
+    def _measure_item_width(self, tag: str) -> int:
+        try:
+            w = dpg.get_item_rect_size(tag)[0]
+        except Exception:
+            w = 0
+        if not w:
             try:
-                w = dpg.get_item_rect_size(tag)[0]
+                w = dpg.get_item_width(tag)
             except Exception:
                 w = 0
-            if not w:
-                try:
-                    w = dpg.get_item_width(tag)
-                except Exception:
-                    w = 0
-            if w:
-                candidates.append(int(w))
-        if not candidates:
-            candidates.append(int(self._right_width or 720))
+        return int(w) if w else 0
 
-        width = min(candidates)
-        pad = 0
-        try:
-            config = dpg.get_item_configuration(self.structured_tag)
-            pad = int(config.get("window_padding", (0, 0))[0]) * 2
-        except Exception:
-            pad = 0
-        return max(120, int(width) - pad)
+    def _measure_column_wrap_widths(
+        self, table_tag: str, col_tags: tuple[str, str, str]
+    ) -> list[int]:
+        widths = [self._measure_item_width(tag) for tag in col_tags]
+        if all(w == 0 for w in widths):
+            table_w = self._measure_item_width(table_tag) or self._measure_item_width(self.right_tag)
+            if not table_w:
+                table_w = int(self._right_width or 720)
+            widths = [int(table_w / 3)] * 3
+        return [max(80, int(w)) for w in widths]
 
     @staticmethod
     def _humanize_field_path(field_path: str, *, strip_prefix: str = "") -> str:
