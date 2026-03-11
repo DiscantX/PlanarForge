@@ -38,10 +38,32 @@ class ResourceBrowserPane:
         self.tag_prefix = tag_prefix
 
         self.root_tag = self._tag("root")
+        self.list_tag = self._tag("list")
+        self.grid_tag = self._tag("grid")
         self.table_tag = self._tag("table")
+        self.grid_table_tag = self._tag("grid_table")
+        self.grid_normal_theme_tag = self._tag("grid_normal_theme")
+        self.grid_selected_theme_tag = self._tag("grid_selected_theme")
+        self.grid_default_icon_tag = self._tag("grid_default_icon")
+        self.grid_click_handler_tag = self._tag("grid_click_handler")
         
         self._row_selectables: list[str] = []
         self._selected_index: int | None = None
+        self._rows: list[tuple[str, ...]] = []
+
+        # Grid view state
+        self._view_mode: str = "list"
+        self._grid_labels: list[str] = []
+        self._grid_icons: list[tuple[int, int, list[float]] | None] = []
+        self._grid_icon_textures: list[tuple[str, int, int] | None] = []
+        self._grid_texture_tags: list[str] = []
+        self._grid_tile_tags: list[str] = []
+        self._grid_texture_counter = 0
+        self._grid_columns: int = 1
+        self._grid_tile_width = 110
+        self._grid_tile_height = 110
+        self._grid_icon_size = 48
+        self._grid_tile_padding = 8
         
         # Panel sizing state
         self._total_width: int = 0
@@ -51,6 +73,23 @@ class ResourceBrowserPane:
         self._last_mouse_x: int = 0
         self._gap_width: int = 12  # Width of the divider gap between panes
 
+        with dpg.theme(tag=self.grid_normal_theme_tag):
+            with dpg.theme_component(dpg.mvChildWindow):
+                dpg.add_theme_color(dpg.mvThemeCol_ChildBg, (37, 37, 38, 255))
+                dpg.add_theme_color(dpg.mvThemeCol_Border, (54, 54, 59, 255))
+                dpg.add_theme_style(dpg.mvStyleVar_ChildRounding, 4)
+                dpg.add_theme_style(dpg.mvStyleVar_WindowPadding, 4, 4)
+
+        with dpg.theme(tag=self.grid_selected_theme_tag):
+            with dpg.theme_component(dpg.mvChildWindow):
+                dpg.add_theme_color(dpg.mvThemeCol_ChildBg, (45, 45, 55, 255))
+                dpg.add_theme_color(dpg.mvThemeCol_Border, (0, 120, 212, 255))
+                dpg.add_theme_style(dpg.mvStyleVar_ChildRounding, 4)
+                dpg.add_theme_style(dpg.mvStyleVar_WindowPadding, 4, 4)
+
+        with dpg.handler_registry(tag=self.grid_click_handler_tag):
+            dpg.add_mouse_click_handler(callback=self._on_grid_mouse_click)
+
         # Create the UI
         with dpg.child_window(
             tag=self.root_tag,
@@ -58,21 +97,25 @@ class ResourceBrowserPane:
             border=True,
             no_scrollbar=False,
         ):
-            # Create table with dynamic columns
-            with dpg.table(
-                tag=self.table_tag,
-                header_row=True,
-                policy=dpg.mvTable_SizingStretchProp,
-                row_background=True,
-                resizable=True,
-                sortable=False,
-                borders_innerV=True,
-                borders_outerV=True,
-                borders_innerH=True,
-                borders_outerH=True,
-            ):
-                for column_label in columns:
-                    dpg.add_table_column(label=column_label)
+            with dpg.group(tag=self.list_tag, show=True):
+                # Create table with dynamic columns
+                with dpg.table(
+                    tag=self.table_tag,
+                    header_row=True,
+                    policy=dpg.mvTable_SizingStretchProp,
+                    row_background=True,
+                    resizable=True,
+                    sortable=False,
+                    borders_innerV=True,
+                    borders_outerV=True,
+                    borders_innerH=True,
+                    borders_outerH=True,
+                ):
+                    for column_label in columns:
+                        dpg.add_table_column(label=column_label)
+
+            with dpg.group(tag=self.grid_tag, show=False):
+                pass
 
     def _tag(self, suffix: str) -> str:
         """Generate a DPG tag."""
@@ -93,6 +136,38 @@ class ResourceBrowserPane:
         pane_height = max(100, total_height)
         
         dpg.configure_item(self.root_tag, width=pane_width, height=pane_height)
+
+        if self._view_mode == "grid" and self._rows:
+            self._update_grid_layout(pane_width)
+
+    def set_view_mode(self, mode: str) -> None:
+        """Set the browser view mode ('list' or 'grid')."""
+        normalized = str(mode or "").strip().lower()
+        if normalized in {"grid", "icons", "icon"}:
+            normalized = "grid"
+        else:
+            normalized = "list"
+
+        if normalized == self._view_mode:
+            return
+
+        self._view_mode = normalized
+        if dpg.does_item_exist(self.list_tag):
+            dpg.configure_item(self.list_tag, show=self._view_mode == "list")
+        if dpg.does_item_exist(self.grid_tag):
+            dpg.configure_item(self.grid_tag, show=self._view_mode == "grid")
+
+        if self._view_mode == "grid":
+            self._render_grid()
+        else:
+            self._render_list()
+
+        if self._selected_index is not None:
+            self.select_row(self._selected_index)
+
+    def get_view_mode(self) -> str:
+        """Return the current browser view mode."""
+        return self._view_mode
 
     def get_panel_width(self) -> int:
         """Get the current pixel width of the browser pane."""
@@ -136,6 +211,9 @@ class ResourceBrowserPane:
     def populate_rows(
         self,
         items: list[tuple[str, ...]],
+        *,
+        grid_labels: list[str] | None = None,
+        grid_icons: list[tuple[int, int, list[float]] | None] | None = None,
     ) -> None:
         """
         Populate the table with rows.
@@ -144,33 +222,20 @@ class ResourceBrowserPane:
             items: List of tuples, where each tuple contains values for the columns
                    (e.g., [(resref1, name1), (resref2, name2), ...])
         """
-        # Clear existing rows
-        dpg.delete_item(self.table_tag, children_only=True, slot=1)
-        self._row_selectables.clear()
+        self._rows = list(items or [])
+        self._grid_labels = self._derive_grid_labels(self._rows, grid_labels)
+        self._grid_icons = self._normalize_grid_icons(self._rows, grid_icons)
         self._selected_index = None
 
-        if not items:
-            return
+        dpg.delete_item(self.grid_tag, children_only=True)
+        self._clear_grid_textures()
+        self._grid_icon_textures.clear()
+        self._grid_tile_tags.clear()
 
-        # Add each row
-        for idx, item_data in enumerate(items):
-            row_tag = self._tag(f"row_{idx}")
-            self._row_selectables.append(row_tag)
-
-            with dpg.table_row(parent=self.table_tag):
-                # First column is a selectable (for row selection)
-                dpg.add_selectable(
-                    tag=row_tag,
-                    label=str(item_data[0]) if item_data else "",
-                    span_columns=True,
-                    callback=self._on_row_clicked,
-                    user_data=idx,
-                    height=22,
-                )
-
-                # Add additional columns as text
-                for cell_data in item_data[1:]:
-                    dpg.add_text(str(cell_data))
+        if self._view_mode == "grid":
+            self._render_grid()
+        else:
+            self._render_list()
 
     def select_row(self, index: int) -> None:
         """
@@ -179,13 +244,20 @@ class ResourceBrowserPane:
         Args:
             index: Row index to select
         """
-        if index < 0 or index >= len(self._row_selectables):
+        if index < 0 or index >= max(len(self._row_selectables), len(self._grid_tile_tags)):
             return
 
-        # Update selection state for display
+        # Update selection state for display (list)
         for row_idx, row_tag in enumerate(self._row_selectables):
             if dpg.does_item_exist(row_tag):
                 dpg.set_value(row_tag, row_idx == index)
+
+        # Update selection state for display (grid)
+        for row_idx, tile_tag in enumerate(self._grid_tile_tags):
+            if not dpg.does_item_exist(tile_tag):
+                continue
+            theme = self.grid_selected_theme_tag if row_idx == index else self.grid_normal_theme_tag
+            dpg.bind_item_theme(tile_tag, theme)
 
         self._selected_index = index
 
@@ -196,7 +268,14 @@ class ResourceBrowserPane:
     def clear_rows(self) -> None:
         """Clear all rows from the table."""
         dpg.delete_item(self.table_tag, children_only=True, slot=1)
+        dpg.delete_item(self.grid_tag, children_only=True)
         self._row_selectables.clear()
+        self._grid_tile_tags.clear()
+        self._rows.clear()
+        self._grid_labels.clear()
+        self._grid_icons.clear()
+        self._grid_icon_textures.clear()
+        self._clear_grid_textures()
         self._selected_index = None
 
     def _on_row_clicked(self, _sender: Any, app_data: bool, user_data: int) -> None:
@@ -208,6 +287,244 @@ class ResourceBrowserPane:
             self.on_row_selected(user_data)
         except Exception:
             pass
+
+    def _on_grid_mouse_click(self, _sender: Any, app_data: Any) -> None:
+        if self._view_mode != "grid":
+            return
+        if app_data != dpg.mvMouseButton_Left:
+            return
+        for idx, tile_tag in enumerate(self._grid_tile_tags):
+            if not dpg.does_item_exist(tile_tag):
+                continue
+            try:
+                if dpg.is_item_hovered(tile_tag):
+                    self.select_row(idx)
+                    self.on_row_selected(idx)
+                    break
+            except Exception:
+                continue
+
+    def _render_list(self) -> None:
+        dpg.delete_item(self.table_tag, children_only=True, slot=1)
+        self._row_selectables.clear()
+        if not self._rows:
+            return
+
+        for idx, item_data in enumerate(self._rows):
+            row_tag = self._tag(f"row_{idx}")
+            self._row_selectables.append(row_tag)
+
+            with dpg.table_row(parent=self.table_tag):
+                dpg.add_selectable(
+                    tag=row_tag,
+                    label=str(item_data[0]) if item_data else "",
+                    span_columns=True,
+                    callback=self._on_row_clicked,
+                    user_data=idx,
+                    height=22,
+                )
+
+                for cell_data in item_data[1:]:
+                    dpg.add_text(str(cell_data))
+
+    def _render_grid(self) -> None:
+        dpg.delete_item(self.grid_tag, children_only=True)
+        self._grid_tile_tags.clear()
+
+        if not self._rows:
+            return
+
+        pane_width = self._measure_root_width() or self.get_panel_width()
+        self._grid_columns = self._compute_grid_columns(pane_width)
+        self._ensure_grid_textures()
+
+        with dpg.table(
+            tag=self.grid_table_tag,
+            parent=self.grid_tag,
+            header_row=False,
+            policy=dpg.mvTable_SizingFixedFit,
+            row_background=False,
+            resizable=False,
+            sortable=False,
+            borders_innerV=False,
+            borders_outerV=False,
+            borders_innerH=False,
+            borders_outerH=False,
+        ):
+            for _ in range(self._grid_columns):
+                dpg.add_table_column(
+                    width_fixed=True,
+                    init_width_or_weight=self._grid_tile_width,
+                )
+
+            idx = 0
+            total = len(self._rows)
+            while idx < total:
+                with dpg.table_row():
+                    for _col in range(self._grid_columns):
+                        if idx >= total:
+                            dpg.add_spacer(width=self._grid_tile_width, height=self._grid_tile_height)
+                            continue
+                        self._add_grid_tile(idx)
+                        idx += 1
+
+    def _add_grid_tile(self, idx: int) -> None:
+        label = self._grid_labels[idx] if idx < len(self._grid_labels) else ""
+        icon_tex = self._grid_icon_textures[idx] if idx < len(self._grid_icon_textures) else None
+        if icon_tex is None:
+            icon_tag, iw, ih = self._ensure_default_grid_icon()
+        else:
+            icon_tag, iw, ih = icon_tex
+
+        draw_w, draw_h = self._scale_icon(iw, ih, self._grid_icon_size)
+        tile_tag = self._tag(f"grid_tile_{idx}")
+        self._grid_tile_tags.append(tile_tag)
+
+        with dpg.child_window(
+            tag=tile_tag,
+            width=self._grid_tile_width,
+            height=self._grid_tile_height,
+            border=True,
+            no_scrollbar=True,
+            no_scroll_with_mouse=True,
+        ):
+            dpg.add_spacer(height=4)
+            with dpg.group(horizontal=True):
+                pad = max(0, int((self._grid_tile_width - draw_w) / 2))
+                if pad:
+                    dpg.add_spacer(width=pad)
+                dpg.add_image(icon_tag, width=draw_w, height=draw_h)
+            dpg.add_spacer(height=4)
+            with dpg.group(horizontal=True):
+                dpg.add_spacer(width=4)
+                dpg.add_text(label, wrap=max(1, self._grid_tile_width - 8))
+
+        dpg.bind_item_theme(tile_tag, self.grid_normal_theme_tag)
+
+    def _update_grid_layout(self, pane_width: int) -> None:
+        new_cols = self._compute_grid_columns(pane_width)
+        if new_cols != self._grid_columns:
+            self._grid_columns = new_cols
+            self._render_grid()
+
+    def _compute_grid_columns(self, pane_width: int) -> int:
+        usable = max(1, int(pane_width) - self._grid_tile_padding)
+        return max(1, usable // self._grid_tile_width)
+
+    def _scale_icon(self, width: int, height: int, target: int) -> tuple[int, int]:
+        if width <= 0 or height <= 0:
+            return target, target
+        scale = min(target / max(1, width), target / max(1, height))
+        return max(1, int(width * scale)), max(1, int(height * scale))
+
+    def _ensure_grid_textures(self) -> None:
+        if not self._grid_icons:
+            return
+        if self._grid_icon_textures and len(self._grid_icon_textures) == len(self._grid_icons):
+            return
+
+        self._clear_grid_textures()
+        self._grid_icon_textures.clear()
+
+        for icon in self._grid_icons:
+            if icon is None:
+                self._grid_icon_textures.append(None)
+                continue
+            width, height, rgba = icon
+            self._grid_texture_counter += 1
+            tag = self._tag(f"grid_tex_{self._grid_texture_counter}")
+            dpg.add_static_texture(
+                width=max(1, int(width)),
+                height=max(1, int(height)),
+                default_value=rgba,
+                tag=tag,
+                parent="window_icon_textures",
+            )
+            self._grid_texture_tags.append(tag)
+            self._grid_icon_textures.append((tag, int(width), int(height)))
+
+    def _clear_grid_textures(self) -> None:
+        for tag in self._grid_texture_tags:
+            if dpg.does_item_exist(tag):
+                dpg.delete_item(tag)
+        self._grid_texture_tags.clear()
+
+    def _ensure_default_grid_icon(self) -> tuple[str, int, int]:
+        if dpg.does_item_exist(self.grid_default_icon_tag):
+            return self.grid_default_icon_tag, 32, 32
+
+        size = 32
+        bg = (0.15, 0.15, 0.15, 1.0)
+        fg = (0.85, 0.85, 0.85, 1.0)
+        pixels = [[*bg] for _ in range(size * size)]
+
+        def set_px(x: int, y: int) -> None:
+            if 0 <= x < size and 0 <= y < size:
+                pixels[y * size + x] = [fg[0], fg[1], fg[2], fg[3]]
+
+        # Question mark glyph
+        for x in range(10, 22):
+            set_px(x, 6)
+        for y in range(7, 12):
+            set_px(21, y)
+        for x in range(14, 21):
+            set_px(x, 12)
+        for y in range(13, 18):
+            set_px(14, y)
+        for y in range(22, 26):
+            set_px(14, y)
+
+        flat = [c for px in pixels for c in px]
+        dpg.add_static_texture(
+            width=size,
+            height=size,
+            default_value=flat,
+            tag=self.grid_default_icon_tag,
+            parent="window_icon_textures",
+        )
+        return self.grid_default_icon_tag, size, size
+
+    def _derive_grid_labels(
+        self,
+        items: list[tuple[str, ...]],
+        grid_labels: list[str] | None,
+    ) -> list[str]:
+        if grid_labels is not None and len(grid_labels) == len(items):
+            return [str(label) for label in grid_labels]
+        labels: list[str] = []
+        for item in items:
+            if len(item) > 1 and str(item[1]).strip():
+                labels.append(str(item[1]))
+            elif item:
+                labels.append(str(item[0]))
+            else:
+                labels.append("")
+        return labels
+
+    def _normalize_grid_icons(
+        self,
+        items: list[tuple[str, ...]],
+        grid_icons: list[tuple[int, int, list[float]] | None] | None,
+    ) -> list[tuple[int, int, list[float]] | None]:
+        if grid_icons is None:
+            return [None for _ in items]
+        if len(grid_icons) != len(items):
+            return [None for _ in items]
+        return list(grid_icons)
+
+    def _measure_root_width(self) -> int:
+        if not dpg.does_item_exist(self.root_tag):
+            return 0
+        try:
+            w = dpg.get_item_rect_size(self.root_tag)[0]
+        except Exception:
+            w = 0
+        if not w:
+            try:
+                w = dpg.get_item_width(self.root_tag)
+            except Exception:
+                w = 0
+        return int(w) if w else 0
 
     def handle_divider_drag(
         self,

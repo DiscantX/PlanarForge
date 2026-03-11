@@ -52,6 +52,7 @@ class ItemEditorPanel:
         self.tooltip_theme_tag = self._tag("tooltip_theme")
         self.icon_texture_tag = self._tag("icon_texture")
         self.default_icon_texture_tag = self._tag("default_icon_texture")
+        self.browser_view_combo_tag = self._tag("browser_view_combo")
         self.title_text_theme_tag = self._tag("title_text_theme")
         self.title_font_tag = self._tag("title_font")
         self.tree_wrap_handler_tag = self._tag("tree_wrap_handler")
@@ -62,6 +63,7 @@ class ItemEditorPanel:
         self._selected_game_id: str | None = None
         self._dynamic_texture_tags: list[str] = []
         self._texture_counter = 0
+        self._browser_icon_cache: dict[str, tuple[int, int, list[float]] | None] = {}
         
         # Panel sizing state
         self._total_width: int = 0
@@ -71,7 +73,7 @@ class ItemEditorPanel:
         self._last_payload: dict | None = None
         self._last_icon: tuple[int, int, list[float]] | None = None
         self._last_title: str = ""
-        self._wrap_tables: dict[str, tuple[tuple[str, str, str], list[tuple[str, int]]]] = {}
+        self._wrap_tables: dict[str, tuple[tuple[str, str, str], list[tuple[str, int]], int, int]] = {}
         
         # Progress tracking
         self._progress_handler = EditorProgressHandler(self._set_status)
@@ -108,6 +110,7 @@ class ItemEditorPanel:
                 on_game_selected=self._on_game_selected,
                 on_refresh=self._on_refresh_clicked,
                 on_rebuild=self._on_rebuild_clicked,
+                extra_controls=self._add_toolbar_controls,
                 tag_prefix=self._tag("toolbar"),
             )
 
@@ -173,6 +176,28 @@ class ItemEditorPanel:
     def _set_status(self, text: str) -> None:
         self._toolbar.set_status(text)
 
+    def _add_toolbar_controls(self, parent_tag: str) -> None:
+        dpg.add_text("View:", parent=parent_tag)
+        dpg.add_combo(
+            tag=self.browser_view_combo_tag,
+            items=["List", "Icons"],
+            width=90,
+            callback=self._on_browser_view_changed,
+            parent=parent_tag,
+        )
+        dpg.set_value(self.browser_view_combo_tag, "List")
+
+    def _on_browser_view_changed(self, _sender: Any, app_data: str) -> None:
+        label = str(app_data or "").strip().lower()
+        mode = "grid" if label.startswith("icon") else "list"
+        selected = self._browser.get_selected_index()
+        self._browser.set_view_mode(mode)
+        self._populate_browser(include_icons=(mode == "grid"))
+        if self._results:
+            idx = selected if selected is not None else 0
+            idx = max(0, min(idx, len(self._results) - 1))
+            self._browser.select_row(idx)
+
     def _load_games(self) -> None:
         games = self.catalog.list_games()
         self._game_ids = [g.game_id for g in games]
@@ -192,6 +217,7 @@ class ItemEditorPanel:
         try:
             self._set_status("Rebuilding index...")
             self.catalog.select_game(self._selected_game_id)
+            self._browser_icon_cache.clear()
             self.catalog.load_index(force_rebuild=force_rebuild)
             self._set_status(f"Loaded ITM index for {self._selected_game_id}.")
             self._search("")
@@ -209,16 +235,7 @@ class ItemEditorPanel:
             self._render_error_details(str(exc))
             return
 
-        # Populate browser with results
-        browser_data = [
-            (
-                str(entry.resref),
-                entry.display_name or "",
-                entry.res_type.name if hasattr(entry.res_type, "name") else str(entry.res_type),
-            )
-            for entry in self._results
-        ]
-        self._browser.populate_rows(browser_data)
+        self._populate_browser(include_icons=(self._browser.get_view_mode() == "grid"))
 
         if not self._results:
             self._set_status("No matching ITM resources.")
@@ -229,6 +246,38 @@ class ItemEditorPanel:
         # Auto-select first item
         self._browser.select_row(0)
         self._select_entry(0)
+
+    def _populate_browser(self, *, include_icons: bool) -> None:
+        browser_data = [
+            (
+                str(entry.resref),
+                entry.display_name or "",
+                entry.res_type.name if hasattr(entry.res_type, "name") else str(entry.res_type),
+            )
+            for entry in self._results
+        ]
+        grid_labels = [
+            (entry.display_name or str(entry.resref))
+            for entry in self._results
+        ]
+        grid_icons = None
+        if include_icons:
+            grid_icons = [self._get_entry_icon(entry) for entry in self._results]
+        self._browser.populate_rows(
+            browser_data,
+            grid_labels=grid_labels,
+            grid_icons=grid_icons,
+        )
+
+    def _get_entry_icon(self, entry: Any) -> tuple[int, int, list[float]] | None:
+        key = str(getattr(entry, "resref", "") or "").strip().upper()
+        if not key:
+            return None
+        if key in self._browser_icon_cache:
+            return self._browser_icon_cache[key]
+        icon = self.catalog.load_item_icon(entry)
+        self._browser_icon_cache[key] = icon
+        return icon
 
     def _clear_rows(self) -> None:
         self._browser.clear_rows()
@@ -757,14 +806,59 @@ class ItemEditorPanel:
                             cell_idx += 1
                             dpg.add_text(resolved_strref, tag=resolved_tag)
                             wrap_targets.append((resolved_tag, 2))
-        self._wrap_tables[table_tag] = (col_tags, wrap_targets)
-        self._schedule_wrap_update(table_tag, col_tags, wrap_targets)
+        self._wrap_tables[table_tag] = (col_tags, wrap_targets, max_field, max_value)
+        self._apply_wrap_from_known_widths(col_tags, wrap_targets, max_field, max_value)
+
+    def _compute_col_widths(
+        self,
+        table_tag: str,
+        col_tags: tuple[str, str, str],
+        max_field: int,
+        max_value: int,
+    ) -> list[int]:
+        """Return [field_w, value_w, resolved_w] using measured columns when available,
+        otherwise derive from known fixed-column sizes and right-panel width."""
+        measured = self._measure_column_wrap_widths(table_tag, col_tags)
+        if any(measured):
+            return measured
+        # Table hasn't been laid out yet (collapsed or first frame) — compute directly.
+        right_w = self._measure_item_width(self.right_tag) or int(self._right_width or 720)
+        field_w  = max_field if max_field > 0 else right_w // 4
+        value_w  = max_value if max_value > 0 else right_w // 4
+        resolved_w = max(80, right_w - field_w - value_w - 16)
+        return [field_w, value_w, resolved_w]
+
+    def _apply_wrap_from_known_widths(
+        self,
+        col_tags: tuple[str, str, str],
+        wrap_targets: list[tuple[str, int]],
+        max_field: int,
+        max_value: int,
+    ) -> None:
+        """Apply wrap immediately using the known fixed-column sizes — no measurement needed."""
+        if not wrap_targets:
+            return
+        right_w   = self._measure_item_width(self.right_tag) or int(self._right_width or 720)
+        field_w   = max_field if max_field > 0 else right_w // 4
+        value_w   = max_value if max_value > 0 else right_w // 4
+        resolved_w = max(80, right_w - field_w - value_w - 16)
+        col_widths = [field_w, value_w, resolved_w]
+        for tag, col in wrap_targets:
+            if not dpg.does_item_exist(tag):
+                continue
+            try:
+                width = col_widths[col] if col < len(col_widths) else col_widths[-1]
+                dpg.configure_item(tag, wrap=max(80, int(width)))
+            except Exception:
+                continue
 
     def _schedule_wrap_update(
         self,
         table_tag: str,
         col_tags: tuple[str, str, str],
         wrap_targets: list[tuple[str, int]],
+        max_field: int = 0,
+        max_value: int = 0,
         attempt: int = 0,
     ) -> None:
         if not wrap_targets:
@@ -772,7 +866,7 @@ class ItemEditorPanel:
         frame = dpg.get_frame_count() + 1
         dpg.set_frame_callback(
             frame,
-            lambda: self._apply_wrap_update(table_tag, col_tags, wrap_targets, attempt),
+            lambda: self._apply_wrap_update(table_tag, col_tags, wrap_targets, max_field, max_value, attempt),
         )
 
     def _apply_wrap_update(
@@ -780,18 +874,11 @@ class ItemEditorPanel:
         table_tag: str,
         col_tags: tuple[str, str, str],
         wrap_targets: list[tuple[str, int]],
+        max_field: int,
+        max_value: int,
         attempt: int,
     ) -> None:
-        col_widths = self._measure_column_wrap_widths(table_tag, col_tags)
-        if not any(col_widths):
-            if attempt < 10:
-                self._schedule_wrap_update(table_tag, col_tags, wrap_targets, attempt + 1)
-                return
-            # Final fallback: use table/right width split into thirds.
-            fallback = self._measure_item_width(table_tag) or self._measure_item_width(self.right_tag)
-            if not fallback:
-                fallback = int(self._right_width or 720)
-            col_widths = [int(fallback / 3)] * 3
+        col_widths = self._compute_col_widths(table_tag, col_tags, max_field, max_value)
         right_w = self._measure_item_width(self.right_tag)
         for tag, col in wrap_targets:
             if not dpg.does_item_exist(tag):
@@ -807,18 +894,18 @@ class ItemEditorPanel:
     def _refresh_table_wraps_now(self) -> None:
         if not self._wrap_tables:
             return
-        for table_tag, (col_tags, wrap_targets) in list(self._wrap_tables.items()):
+        for table_tag, (col_tags, wrap_targets, max_field, max_value) in list(self._wrap_tables.items()):
             if not dpg.does_item_exist(table_tag):
                 continue
-            self._apply_wrap_update(table_tag, col_tags, wrap_targets, attempt=0)
+            self._apply_wrap_update(table_tag, col_tags, wrap_targets, max_field, max_value, attempt=0)
 
     def _refresh_table_wraps_deferred(self) -> None:
         if not self._wrap_tables:
             return
-        for table_tag, (col_tags, wrap_targets) in list(self._wrap_tables.items()):
+        for table_tag, (col_tags, wrap_targets, max_field, max_value) in list(self._wrap_tables.items()):
             if not dpg.does_item_exist(table_tag):
                 continue
-            self._schedule_wrap_update(table_tag, col_tags, wrap_targets, attempt=0)
+            self._schedule_wrap_update(table_tag, col_tags, wrap_targets, max_field, max_value, attempt=0)
 
 
     def _measure_item_width(self, tag: str) -> int:

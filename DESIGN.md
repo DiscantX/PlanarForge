@@ -801,3 +801,30 @@ services. `OpcodeRegistry.for_game(game_id)` is the entry point.
 serve bundled editor data (opcodes, static reference tables) belong in
 `core/services/` instead. Future todo: rename `installation.py` to
 `installation_manager.py` for clarity.
+
+**2026-03 — ITM IDS/enum/StrRef resolution wired into structured view**
+The ITM structured table now resolves IDS-backed fields (via `IdsRef`), enums,
+and StrRefs at display time. This includes header weapon proficiencies (WPROF),
+projectile animations (PROJECTL), header flags/usability (game-specific enum
+variants), extended header fields (attack type, target type, location, damage
+type, ability flags), feature block target/timing enums, and feature block
+parameter1 as StrRef text. Usability flags are displayed as "Unusable by" with
+kit usability fields labeled "Unusable by kit (1/4..4/4)" and resolved via
+KITLIST.2DA. Animation codes and melee animation labels are displayed to match
+NearInfinity naming.
+
+**2026-03 — IDS/enum data sources and resolution services**
+Implemented `IdsRef`, IDS parsing (`core/formats/ids.py`), and a lazy
+installation-backed IDS manager (`game/ids_manager.py`). Resolution in the UI
+uses `ItmCatalog.resolve_ids()` to avoid coupling formats to the game install.
+Enum definitions are centralized in `core/util/enums.py` with per-game variants
+for ITM header flags/usability and target/damage type differences.
+
+**2026-03 — Opcode registry from bundled IESDP tables**
+Added bundled opcode tables under `data/opcodes/` (BG(2)EE, IWD, PST variants)
+and an `OpcodeRegistry` service under `core/services/`. ITM feature block opcode
+values resolve through `ItmCatalog.resolve_opcode()` to a name/description pair
+using the bundled data (not installation files).
+
+**2026-03 — DPG table quirks**
+DPG table column widths return 0 until the table has been rendered in a visible frame. get_item_rect_size and get_item_width on column tags always return 0 at construction time, even for tables inside default_open=True tree nodes. Deferring to the next frame (via set_frame_callback) does not help — the layout pass hasn't run yet. The correct pattern for text wrap in a 3-column table (fixed Field, fixed Value, stretch Resolved) is to compute wrap widths synchronously at build time from the known max_field and max_value pixel sizes (obtained via dpg.get_text_size on the label strings before the table is created) and _right_width. Store those values alongside the wrap-target list in _wrap_tables so that subsequent resize and tree-open refreshes can fall back to the same calculation when measurement still returns zero (e.g. collapsed nodes). Do not attempt a retry loop with a blind third-o-of-panel fallback — it fires too late and produces the wrong width.
