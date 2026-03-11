@@ -54,6 +54,7 @@ class ItemEditorPanel:
         self.default_icon_texture_tag = self._tag("default_icon_texture")
         self.title_text_theme_tag = self._tag("title_text_theme")
         self.title_font_tag = self._tag("title_font")
+        self.tree_wrap_handler_tag = self._tag("tree_wrap_handler")
         self._title_font_ready = False
 
         self._results: list[Any] = []
@@ -70,6 +71,7 @@ class ItemEditorPanel:
         self._last_payload: dict | None = None
         self._last_icon: tuple[int, int, list[float]] | None = None
         self._last_title: str = ""
+        self._wrap_tables: dict[str, tuple[tuple[str, str, str], list[tuple[str, int]]]] = {}
         
         # Progress tracking
         self._progress_handler = EditorProgressHandler(self._set_status)
@@ -86,6 +88,11 @@ class ItemEditorPanel:
         with dpg.theme(tag=self.title_text_theme_tag):
             with dpg.theme_component(dpg.mvText):
                 dpg.add_theme_color(dpg.mvThemeCol_Text, (230, 230, 230, 255))
+
+        with dpg.item_handler_registry(tag=self.tree_wrap_handler_tag):
+            dpg.add_item_toggled_open_handler(
+                callback=lambda _s, _a, _u: self._refresh_table_wraps_deferred()
+            )
 
         with dpg.child_window(
             tag=self.root_tag,
@@ -276,6 +283,7 @@ class ItemEditorPanel:
         if not payload:
             dpg.add_text("No structured data.", parent=self.structured_tag)
             return
+        self._wrap_tables.clear()
         self._last_payload = payload
         self._last_icon = icon
         self._last_title = title
@@ -334,7 +342,13 @@ class ItemEditorPanel:
             ext_root_node = dpg.last_item()
             if isinstance(ext_headers, list) and ext_headers:
                 for idx, ext_header in enumerate(ext_headers):
-                    with dpg.tree_node(label=f"Extended Header [{idx}]", parent=ext_root_node, default_open=False):
+                    with dpg.tree_node(
+                        label=f"Extended Header [{idx}]",
+                        parent=ext_root_node,
+                        default_open=False,
+                    ):
+                        node = dpg.last_item()
+                        dpg.bind_item_handler_registry(node, self.tree_wrap_handler_tag)
                         ext_node = dpg.last_item()
                         rows: list[tuple[str, str, str, tuple[int, int, list[float]] | None, bool]] = []
                         self._collect_table_rows(f"extended_headers[{idx}]", ext_header, rows)
@@ -352,7 +366,13 @@ class ItemEditorPanel:
             features_root_node = dpg.last_item()
             if isinstance(features, list) and features:
                 for idx, feature in enumerate(features):
-                    with dpg.tree_node(label=f"Feature Block [{idx}]", parent=features_root_node, default_open=False):
+                    with dpg.tree_node(
+                        label=f"Feature Block [{idx}]",
+                        parent=features_root_node,
+                        default_open=False,
+                    ):
+                        node = dpg.last_item()
+                        dpg.bind_item_handler_registry(node, self.tree_wrap_handler_tag)
                         feature_node = dpg.last_item()
                         rows: list[tuple[str, str, str, tuple[int, int, list[float]] | None, bool]] = []
                         self._collect_table_rows(f"feature_blocks[{idx}]", feature, rows)
@@ -655,6 +675,26 @@ class ItemEditorPanel:
             f"{table_tag}_col_value",
             f"{table_tag}_col_resolved",
         )
+        field_labels = [
+            ItemEditorPanel._humanize_field_path(field_path, strip_prefix=strip_prefix)
+            for field_path, _value_text, _resolved_strref, _bam_icon, _is_resref in rows
+        ]
+        value_texts = [value_text for _fp, value_text, _rs, _bi, _isr in rows]
+        pad = 12
+        max_field = 0
+        max_value = 0
+        for label in field_labels:
+            try:
+                max_field = max(max_field, int(dpg.get_text_size(label)[0]))
+            except Exception:
+                continue
+        for text in value_texts:
+            try:
+                max_value = max(max_value, int(dpg.get_text_size(text)[0]))
+            except Exception:
+                continue
+        max_field += pad
+        max_value += pad
         with dpg.table(
             tag=table_tag,
             parent=parent,
@@ -668,10 +708,20 @@ class ItemEditorPanel:
             borders_innerH=True,
             borders_outerH=True,
         ):
-            dpg.add_table_column(label="Field", width_stretch=True, tag=col_tags[0])
-            dpg.add_table_column(label="Value", width_stretch=True, tag=col_tags[1])
+            dpg.add_table_column(
+                label="Field",
+                width_fixed=True,
+                init_width_or_weight=max_field,
+                tag=col_tags[0],
+            )
+            dpg.add_table_column(
+                label="Value",
+                width_fixed=True,
+                init_width_or_weight=max_value,
+                tag=col_tags[1],
+            )
             dpg.add_table_column(label="Resolved / Preview", width_stretch=True, tag=col_tags[2])
-            for field_path, value_text, resolved_strref, bam_icon, resolved_is_resref in rows:
+            for idx, (field_path, value_text, resolved_strref, bam_icon, resolved_is_resref) in enumerate(rows):
                 row_height = 24 if bam_icon is not None else 0
                 with dpg.table_row(parent=table_tag, height=row_height):
                     field_tag = f"{table_tag}_field_{cell_idx}"
@@ -679,7 +729,9 @@ class ItemEditorPanel:
                     value_tag = f"{table_tag}_value_{cell_idx}"
                     cell_idx += 1
                     dpg.add_text(
-                        ItemEditorPanel._humanize_field_path(field_path, strip_prefix=strip_prefix),
+                        field_labels[idx] if idx < len(field_labels) else ItemEditorPanel._humanize_field_path(
+                            field_path, strip_prefix=strip_prefix
+                        ),
                         tag=field_tag,
                     )
                     dpg.add_text(value_text, tag=value_tag)
@@ -705,6 +757,7 @@ class ItemEditorPanel:
                             cell_idx += 1
                             dpg.add_text(resolved_strref, tag=resolved_tag)
                             wrap_targets.append((resolved_tag, 2))
+        self._wrap_tables[table_tag] = (col_tags, wrap_targets)
         self._schedule_wrap_update(table_tag, col_tags, wrap_targets)
 
     def _schedule_wrap_update(
@@ -731,9 +784,14 @@ class ItemEditorPanel:
     ) -> None:
         col_widths = self._measure_column_wrap_widths(table_tag, col_tags)
         if not any(col_widths):
-            if attempt < 3:
+            if attempt < 10:
                 self._schedule_wrap_update(table_tag, col_tags, wrap_targets, attempt + 1)
-            return
+                return
+            # Final fallback: use table/right width split into thirds.
+            fallback = self._measure_item_width(table_tag) or self._measure_item_width(self.right_tag)
+            if not fallback:
+                fallback = int(self._right_width or 720)
+            col_widths = [int(fallback / 3)] * 3
         right_w = self._measure_item_width(self.right_tag)
         for tag, col in wrap_targets:
             if not dpg.does_item_exist(tag):
@@ -745,6 +803,23 @@ class ItemEditorPanel:
                 dpg.configure_item(tag, wrap=max(80, int(width)))
             except Exception:
                 continue
+
+    def _refresh_table_wraps_now(self) -> None:
+        if not self._wrap_tables:
+            return
+        for table_tag, (col_tags, wrap_targets) in list(self._wrap_tables.items()):
+            if not dpg.does_item_exist(table_tag):
+                continue
+            self._apply_wrap_update(table_tag, col_tags, wrap_targets, attempt=0)
+
+    def _refresh_table_wraps_deferred(self) -> None:
+        if not self._wrap_tables:
+            return
+        for table_tag, (col_tags, wrap_targets) in list(self._wrap_tables.items()):
+            if not dpg.does_item_exist(table_tag):
+                continue
+            self._schedule_wrap_update(table_tag, col_tags, wrap_targets, attempt=0)
+
 
     def _measure_item_width(self, tag: str) -> int:
         try:
@@ -762,12 +837,7 @@ class ItemEditorPanel:
         self, table_tag: str, col_tags: tuple[str, str, str]
     ) -> list[int]:
         widths = [self._measure_item_width(tag) for tag in col_tags]
-        if all(w == 0 for w in widths):
-            table_w = self._measure_item_width(table_tag) or self._measure_item_width(self.right_tag)
-            if not table_w:
-                table_w = int(self._right_width or 720)
-            widths = [int(table_w / 3)] * 3
-        return [max(80, int(w)) for w in widths]
+        return [max(0, int(w)) for w in widths]
 
     @staticmethod
     def _humanize_field_path(field_path: str, *, strip_prefix: str = "") -> str:
@@ -1091,3 +1161,6 @@ class ItemEditorPanel:
             right_w = max(260, self._total_width - left_w - gap_width)
             body_h = max(0, self._total_height - 34 - 6)
             dpg.configure_item(self.right_tag, width=right_w, height=body_h)
+            if right_w != self._right_width:
+                self._right_width = right_w
+                self._refresh_table_wraps_now()
