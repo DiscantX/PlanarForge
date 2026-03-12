@@ -1,1839 +1,1356 @@
 """
-core/formats/are.py
-
-Parser and writer for the Infinity Engine ARE (Area) format.
-
-The ARE file is the master record for a game area.  It describes the area's
-properties and contains all of its dynamic content: actors, doors, containers,
-regions (triggers), entrances, ambient sounds, spawn points, animations, map
-notes, rest encounters, and tiled-door associations.  Static geometry (the
-tile layout and wall polygons) lives in a companion WED file referenced by
-the ARE header.
-
-Supported versions:
-    V1.0  — BG1, IWD1
-    V9.1  — BG2, BG2:EE, IWD:EE  (adds fog-of-war, explored mask, extra fields)
-    PST   — Planescape: Torment  (best-effort; version-specific tail stored raw)
-
-All sub-structures are fully parsed.
-
-IESDP references:
-    https://gibberlings3.github.io/iesdp/file_formats/ie_formats/are_v1.htm
-    https://gibberlings3.github.io/iesdp/file_formats/ie_formats/are_v91.htm
-
-Usage::
-
-    from core.formats.are import AreFile
-
-    area = AreFile.from_file("AR0602.are")
-    print(area.header.wed_resref)       # companion WED file
-    print(len(area.actors))             # number of actors placed in the area
-    for entrance in area.entrances:
-        print(entrance.name, entrance.x, entrance.y)
+core/formats/are.py  — ARE V1.0 parser.  M1-M4 complete.
+Milestones: [M1] Header [M2] Actors+Regions [M3] SpawnPoints+Entrances+Containers+Items
+            [M4] Ambients+Variables+Doors  [M5] Animations+AutomapNotes+TiledObjects+
+                 ProjectileTraps+SongEntries+RestInterruptions  [M6] round-trip tests
 """
+import struct, math
+from typing import List, Optional, Tuple
 
-from __future__ import annotations
+ARE_SIGNATURE  = b'AREA'
+ARE_VERSION_10 = b'V1.0'
 
-import json
-from dataclasses import dataclass, field
-from pathlib import Path
-from typing import List, Optional
+HEADER_SIZE            = 0x011C
+ACTOR_SIZE             = 0x0110
+REGION_SIZE            = 0x00C4
+SPAWN_POINT_SIZE       = 0x00C8
+ENTRANCE_SIZE          = 0x0068
+CONTAINER_SIZE         = 0x00C0
+ITEM_SIZE              = 0x0014
+AMBIENT_SIZE           = 0x00D4
+VARIABLE_SIZE          = 0x0054
+DOOR_SIZE              = 0x00C8
+ANIMATION_SIZE         = 0x004C
+AUTOMAP_NOTE_SIZE      = 0x0034
+AUTOMAP_NOTE_PST_SIZE  = 0x0214
+TILED_OBJECT_SIZE      = 0x006C
+PROJECTILE_TRAP_SIZE   = 0x001C
+SONG_ENTRIES_SIZE      = 0x0090
+REST_INTERRUPTION_SIZE = 0x00E4
+VERTEX_SIZE            = 4
 
-from core.util.binary import BinaryReader, BinaryWriter, SignatureMismatch
-from core.util.enums import (
-    ActorFlag,
-    AreaFlag,
-    AreaType,
-    ContainerType,
-    DoorFlag,
-    RegionType,
-    SpawnFlag,
-)
-from core.util.resref import ResRef
-from core.util.strref import StrRef, StrRefError
-
-
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
-
-SIGNATURE       = b"AREA"
-VERSION_V1      = b"V1.0"
-VERSION_V91     = b"V9.1"
-# PST uses "V1.0" signature but has extra fields; detected by context
-# when opened via game installation data.
-
-HEADER_SIZE_V1  = 0x11C   # 284 bytes
-HEADER_SIZE_V91 = 0x11C   # same base; V9.1 appends extra explored-mask data
-
-
-
-# ---------------------------------------------------------------------------
-# Vertex  (4 bytes — shared by regions, doors, containers)
-# ---------------------------------------------------------------------------
-
-@dataclass
-class Vertex:
-    x: int = 0   # int16
-    y: int = 0   # int16
-
-    @classmethod
-    def _read(cls, r: BinaryReader) -> "Vertex":
-        return cls(x=r.read_int16(), y=r.read_int16())
-
-    def _write(self, w: BinaryWriter) -> None:
-        w.write_int16(self.x)
-        w.write_int16(self.y)
-
-    def to_json(self) -> list:
-        return [self.x, self.y]
-
-    @classmethod
-    def from_json(cls, d) -> "Vertex":
-        if isinstance(d, (list, tuple)):
-            return cls(x=d[0], y=d[1])
-        return cls(x=d.get("x", 0), y=d.get("y", 0))
+def _resref(b): return b.rstrip(b'\x00').decode('latin-1')
+def _resref_encode(s): return s.encode('latin-1')[:8].ljust(8, b'\x00')
+def _str32(b): return b.rstrip(b'\x00').decode('latin-1')
+def _str32_encode(s): return s.encode('latin-1')[:32].ljust(32, b'\x00')
+def _strn_encode(s, n): return s.encode('latin-1')[:n].ljust(n, b'\x00')
+def _sparse(d): return {k: v for k, v in d.items() if v not in (0, '', None, [])}
+def _verts_from_pool(pool, first, count):
+    out = []
+    for i in range(count):
+        off = (first + i) * VERTEX_SIZE
+        if off + VERTEX_SIZE <= len(pool):
+            out.append(list(struct.unpack_from('<HH', pool, off)))
+    return out
 
 
-# ---------------------------------------------------------------------------
-# Actor  (272 bytes)
-# ---------------------------------------------------------------------------
-
-@dataclass
-class Actor:
-    """A creature placed in the area."""
-    name:            str   = ""            # 32-char label
-    x:               int   = 0             # uint16 — placement x
-    y:               int   = 0             # uint16
-    dest_x:          int   = 0             # uint16 — patrol destination
-    dest_y:          int   = 0             # uint16
-    flags:           int   = ActorFlag.NONE
-    has_been_spawned: int  = 0             # uint16
-    first_letter:    str   = ""            # char[1] — actor variable prefix
-    unknown:         int   = 0             # uint8
-    actor_remove:    StrRef   = StrRef(0xFFFFFFFF)   # uint32 — StrRef condition
-    activation_at:   int   = 0             # uint32 — schedule bitmask (BG2)
-    activation_day:  int   = 0             # uint32
-    cre_resref:      ResRef = ResRef("")     # ResRef — .cre file
-    cre_offset:      int   = 0             # uint32 — offset of embedded CRE (0 if in BIFF)
-    cre_size:        int   = 0             # uint32
-    dialog:          ResRef = ResRef("")     # ResRef
-    scripts:         List[ResRef] = field(default_factory=lambda: [ResRef("")] * 8)
+# ─────────────────────────────────────────────────────────────────────────────
+# Header
+# ─────────────────────────────────────────────────────────────────────────────
+class AreHeader:
+    __slots__ = [
+        'signature','version','area_wed','last_saved','area_flags',
+        'north_resref','north_flags','east_resref','east_flags',
+        'south_resref','south_flags','west_resref','west_flags',
+        'area_type','rain_probability','snow_probability','fog_probability',
+        'lightning_probability','wind_speed',
+        'actors_offset','actors_count','regions_count','regions_offset',
+        'spawn_points_offset','spawn_points_count',
+        'entrances_offset','entrances_count',
+        'containers_offset','containers_count','items_count','items_offset',
+        'vertices_offset','vertices_count','ambients_count','ambients_offset',
+        'variables_offset','variables_count',
+        'tiled_object_flags_offset','tiled_object_flags_count',
+        'area_script','explored_bitmask_size','explored_bitmask_offset',
+        'doors_count','doors_offset','animations_count','animations_offset',
+        'tiled_objects_count','tiled_objects_offset',
+        'song_entries_offset','rest_interruptions_offset',
+        'field_c4','field_c8','field_cc','projectile_traps_count',
+        'rest_movie_day','rest_movie_night','unused_e4',
+    ]
 
     @classmethod
-    def _read(cls, r: BinaryReader) -> "Actor":
-        name             = r.read_string(32)
-        x                = r.read_uint16()
-        y                = r.read_uint16()
-        dest_x           = r.read_uint16()
-        dest_y           = r.read_uint16()
-        flags            = r.read_uint32()
-        has_been_spawned = r.read_uint16()
-        first_letter     = r.read_bytes(1).decode("latin-1")
-        unknown          = r.read_uint8()
-        actor_remove     = StrRef(r.read_uint32())
-        activation_at    = r.read_uint32()
-        activation_day   = r.read_uint32()
-        r.skip(4)  # unknown
-        scripts          = [ResRef(r.read_resref()) for _ in range(8)]
-        cre_offset       = r.read_uint32()
-        cre_size         = r.read_uint32()
-        dialog           = ResRef(r.read_resref())
-        r.skip(8)  # padding
-        cre_resref       = ResRef(r.read_resref())
-        r.skip(112)  # reserved / CRE embed area handled separately
-        return cls(
-            name=name, x=x, y=y, dest_x=dest_x, dest_y=dest_y,
-            flags=flags, has_been_spawned=has_been_spawned,
-            first_letter=first_letter, unknown=unknown,
-            actor_remove=actor_remove, activation_at=activation_at,
-            activation_day=activation_day, cre_resref=cre_resref,
-            cre_offset=cre_offset, cre_size=cre_size,
-            dialog=dialog, scripts=scripts,
-        )
+    def from_bytes(cls, data):
+        assert len(data) >= HEADER_SIZE
+        h = cls.__new__(cls)
+        h.signature = data[0x00:0x04]; h.version = data[0x04:0x08]
+        assert h.signature == ARE_SIGNATURE
+        h.area_wed = _resref(data[0x08:0x10])
+        h.last_saved = struct.unpack_from('<I', data, 0x10)[0]
+        h.area_flags = struct.unpack_from('<I', data, 0x14)[0]
+        h.north_resref = _resref(data[0x18:0x20]); h.north_flags = struct.unpack_from('<I', data, 0x20)[0]
+        h.east_resref  = _resref(data[0x24:0x2c]); h.east_flags  = struct.unpack_from('<I', data, 0x2c)[0]
+        h.south_resref = _resref(data[0x30:0x38]); h.south_flags = struct.unpack_from('<I', data, 0x38)[0]
+        h.west_resref  = _resref(data[0x3c:0x44]); h.west_flags  = struct.unpack_from('<I', data, 0x44)[0]
+        h.area_type             = struct.unpack_from('<H', data, 0x48)[0]
+        h.rain_probability      = struct.unpack_from('<H', data, 0x4a)[0]
+        h.snow_probability      = struct.unpack_from('<H', data, 0x4c)[0]
+        h.fog_probability       = struct.unpack_from('<H', data, 0x4e)[0]
+        h.lightning_probability = struct.unpack_from('<H', data, 0x50)[0]
+        h.wind_speed            = struct.unpack_from('<H', data, 0x52)[0]
+        h.actors_offset  = struct.unpack_from('<I', data, 0x54)[0]
+        h.actors_count   = struct.unpack_from('<H', data, 0x58)[0]
+        h.regions_count  = struct.unpack_from('<H', data, 0x5a)[0]
+        h.regions_offset = struct.unpack_from('<I', data, 0x5c)[0]
+        h.spawn_points_offset = struct.unpack_from('<I', data, 0x60)[0]
+        h.spawn_points_count  = struct.unpack_from('<I', data, 0x64)[0]
+        h.entrances_offset = struct.unpack_from('<I', data, 0x68)[0]
+        h.entrances_count  = struct.unpack_from('<I', data, 0x6c)[0]
+        h.containers_offset = struct.unpack_from('<I', data, 0x70)[0]
+        h.containers_count  = struct.unpack_from('<H', data, 0x74)[0]
+        h.items_count       = struct.unpack_from('<H', data, 0x76)[0]
+        h.items_offset      = struct.unpack_from('<I', data, 0x78)[0]
+        h.vertices_offset = struct.unpack_from('<I', data, 0x7c)[0]
+        h.vertices_count  = struct.unpack_from('<H', data, 0x80)[0]
+        h.ambients_count  = struct.unpack_from('<H', data, 0x82)[0]
+        h.ambients_offset = struct.unpack_from('<I', data, 0x84)[0]
+        h.variables_offset = struct.unpack_from('<I', data, 0x88)[0]
+        h.variables_count  = struct.unpack_from('<I', data, 0x8c)[0]
+        h.tiled_object_flags_offset = struct.unpack_from('<H', data, 0x90)[0]
+        h.tiled_object_flags_count  = struct.unpack_from('<H', data, 0x92)[0]
+        h.area_script = _resref(data[0x94:0x9c])
+        h.explored_bitmask_size   = struct.unpack_from('<I', data, 0x9c)[0]
+        h.explored_bitmask_offset = struct.unpack_from('<I', data, 0xa0)[0]
+        h.doors_count  = struct.unpack_from('<I', data, 0xa4)[0]
+        h.doors_offset = struct.unpack_from('<I', data, 0xa8)[0]
+        h.animations_count  = struct.unpack_from('<I', data, 0xac)[0]
+        h.animations_offset = struct.unpack_from('<I', data, 0xb0)[0]
+        h.tiled_objects_count  = struct.unpack_from('<I', data, 0xb4)[0]
+        h.tiled_objects_offset = struct.unpack_from('<I', data, 0xb8)[0]
+        h.song_entries_offset       = struct.unpack_from('<I', data, 0xbc)[0]
+        h.rest_interruptions_offset = struct.unpack_from('<I', data, 0xc0)[0]
+        h.field_c4 = struct.unpack_from('<I', data, 0xc4)[0]
+        h.field_c8 = struct.unpack_from('<I', data, 0xc8)[0]
+        h.field_cc = struct.unpack_from('<I', data, 0xcc)[0]
+        h.projectile_traps_count = struct.unpack_from('<I', data, 0xd0)[0]
+        h.rest_movie_day   = _resref(data[0xd4:0xdc])
+        h.rest_movie_night = _resref(data[0xdc:0xe4])
+        h.unused_e4        = bytes(data[0xe4:0x11c])
+        return h
 
-    def _write(self, w: BinaryWriter) -> None:
-        name_enc = self.name.encode("latin-1", errors="replace")[:32].ljust(32, b"\x00")
-        w.write_bytes(name_enc)
-        w.write_uint16(self.x)
-        w.write_uint16(self.y)
-        w.write_uint16(self.dest_x)
-        w.write_uint16(self.dest_y)
-        w.write_uint32(self.flags)
-        w.write_uint16(self.has_been_spawned)
-        w.write_bytes(self.first_letter.encode("latin-1")[:1].ljust(1, b"\x00"))
-        w.write_uint8(self.unknown)
-        w.write_uint32(int(self.actor_remove))
-        w.write_uint32(self.activation_at)
-        w.write_uint32(self.activation_day)
-        w.write_padding(4)
-        for i in range(8):
-            s = self.scripts[i] if i < len(self.scripts) else ResRef("")
-            w.write_resref(str(s))
-        w.write_uint32(self.cre_offset)
-        w.write_uint32(self.cre_size)
-        w.write_resref(str(self.dialog))
-        w.write_padding(8)
-        w.write_resref(str(self.cre_resref))
-        w.write_padding(112)
+    def to_bytes(self):
+        buf = bytearray(HEADER_SIZE)
+        buf[0x00:0x04] = self.signature; buf[0x04:0x08] = self.version
+        buf[0x08:0x10] = _resref_encode(self.area_wed)
+        struct.pack_into('<I', buf, 0x10, self.last_saved)
+        struct.pack_into('<I', buf, 0x14, self.area_flags)
+        buf[0x18:0x20] = _resref_encode(self.north_resref); struct.pack_into('<I', buf, 0x20, self.north_flags)
+        buf[0x24:0x2c] = _resref_encode(self.east_resref);  struct.pack_into('<I', buf, 0x2c, self.east_flags)
+        buf[0x30:0x38] = _resref_encode(self.south_resref); struct.pack_into('<I', buf, 0x38, self.south_flags)
+        buf[0x3c:0x44] = _resref_encode(self.west_resref);  struct.pack_into('<I', buf, 0x44, self.west_flags)
+        struct.pack_into('<H', buf, 0x48, self.area_type)
+        struct.pack_into('<H', buf, 0x4a, self.rain_probability)
+        struct.pack_into('<H', buf, 0x4c, self.snow_probability)
+        struct.pack_into('<H', buf, 0x4e, self.fog_probability)
+        struct.pack_into('<H', buf, 0x50, self.lightning_probability)
+        struct.pack_into('<H', buf, 0x52, self.wind_speed)
+        struct.pack_into('<I', buf, 0x54, self.actors_offset)
+        struct.pack_into('<H', buf, 0x58, self.actors_count)
+        struct.pack_into('<H', buf, 0x5a, self.regions_count)
+        struct.pack_into('<I', buf, 0x5c, self.regions_offset)
+        struct.pack_into('<I', buf, 0x60, self.spawn_points_offset)
+        struct.pack_into('<I', buf, 0x64, self.spawn_points_count)
+        struct.pack_into('<I', buf, 0x68, self.entrances_offset)
+        struct.pack_into('<I', buf, 0x6c, self.entrances_count)
+        struct.pack_into('<I', buf, 0x70, self.containers_offset)
+        struct.pack_into('<H', buf, 0x74, self.containers_count)
+        struct.pack_into('<H', buf, 0x76, self.items_count)
+        struct.pack_into('<I', buf, 0x78, self.items_offset)
+        struct.pack_into('<I', buf, 0x7c, self.vertices_offset)
+        struct.pack_into('<H', buf, 0x80, self.vertices_count)
+        struct.pack_into('<H', buf, 0x82, self.ambients_count)
+        struct.pack_into('<I', buf, 0x84, self.ambients_offset)
+        struct.pack_into('<I', buf, 0x88, self.variables_offset)
+        struct.pack_into('<I', buf, 0x8c, self.variables_count)
+        struct.pack_into('<H', buf, 0x90, self.tiled_object_flags_offset)
+        struct.pack_into('<H', buf, 0x92, self.tiled_object_flags_count)
+        buf[0x94:0x9c] = _resref_encode(self.area_script)
+        struct.pack_into('<I', buf, 0x9c, self.explored_bitmask_size)
+        struct.pack_into('<I', buf, 0xa0, self.explored_bitmask_offset)
+        struct.pack_into('<I', buf, 0xa4, self.doors_count)
+        struct.pack_into('<I', buf, 0xa8, self.doors_offset)
+        struct.pack_into('<I', buf, 0xac, self.animations_count)
+        struct.pack_into('<I', buf, 0xb0, self.animations_offset)
+        struct.pack_into('<I', buf, 0xb4, self.tiled_objects_count)
+        struct.pack_into('<I', buf, 0xb8, self.tiled_objects_offset)
+        struct.pack_into('<I', buf, 0xbc, self.song_entries_offset)
+        struct.pack_into('<I', buf, 0xc0, self.rest_interruptions_offset)
+        struct.pack_into('<I', buf, 0xc4, self.field_c4)
+        struct.pack_into('<I', buf, 0xc8, self.field_c8)
+        struct.pack_into('<I', buf, 0xcc, self.field_cc)
+        struct.pack_into('<I', buf, 0xd0, self.projectile_traps_count)
+        buf[0xd4:0xdc] = _resref_encode(self.rest_movie_day)
+        buf[0xdc:0xe4] = _resref_encode(self.rest_movie_night)
+        buf[0xe4:0x11c] = self.unused_e4[:56]
+        return bytes(buf)
 
-    def to_json(self) -> dict:
-        d: dict = {"name": self.name, "x": self.x, "y": self.y,
-                   "cre_resref": self.cre_resref.to_json(), "flags": self.flags}
-        if self.dest_x != self.x or self.dest_y != self.y:
-            d["dest_x"] = self.dest_x
-            d["dest_y"] = self.dest_y
-        if self.dialog:          d["dialog"]       = self.dialog.to_json()
-        if self.activation_at:   d["activation_at"] = self.activation_at
-        if any(self.scripts):    d["scripts"]      = [s.to_json() for s in self.scripts]
-        return d
-
-    @classmethod
-    def from_json(cls, d: dict) -> "Actor":
-        return cls(
-            name=d.get("name",""), x=d.get("x",0), y=d.get("y",0),
-            dest_x=d.get("dest_x", d.get("x",0)),
-            dest_y=d.get("dest_y", d.get("y",0)),
-            flags=d.get("flags",0),
-            cre_resref=ResRef.from_json(d.get("cre_resref","")),
-            dialog=ResRef.from_json(d.get("dialog","")),
-            activation_at=d.get("activation_at",0),
-            activation_day=d.get("activation_day",0),
-            scripts=[ResRef.from_json(s) for s in d.get("scripts", [""] * 8)],
-        )
-
-
-# ---------------------------------------------------------------------------
-# Entrance  (104 bytes)
-# ---------------------------------------------------------------------------
-
-@dataclass
-class Entrance:
-    """A named entry point into the area."""
-    name:      str = ""    # 32-char label
-    x:         int = 0     # uint16
-    y:         int = 0     # uint16
-    facing:    int = 0     # uint16 — direction (0–15 clockwise from south)
-
-    @classmethod
-    def _read(cls, r: BinaryReader) -> "Entrance":
-        name   = r.read_string(32)
-        x      = r.read_uint16()
-        y      = r.read_uint16()
-        facing = r.read_uint16()
-        r.skip(66)  # reserved
-        return cls(name=name, x=x, y=y, facing=facing)
-
-    def _write(self, w: BinaryWriter) -> None:
-        w.write_bytes(self.name.encode("latin-1")[:32].ljust(32, b"\x00"))
-        w.write_uint16(self.x)
-        w.write_uint16(self.y)
-        w.write_uint16(self.facing)
-        w.write_padding(66)
-
-    def to_json(self) -> dict:
-        d: dict = {"name": self.name, "x": self.x, "y": self.y}
-        if self.facing: d["facing"] = self.facing
-        return d
-
-    @classmethod
-    def from_json(cls, d: dict) -> "Entrance":
-        return cls(name=d.get("name",""), x=d.get("x",0), y=d.get("y",0),
-                   facing=d.get("facing",0))
-
-
-# ---------------------------------------------------------------------------
-# Region  (trigger / info point / travel)  (136 bytes + vertices)
-# ---------------------------------------------------------------------------
-
-@dataclass
-class Region:
-    """An interactive area trigger — proximity trap, info point, or travel region."""
-    name:           str   = ""
-    region_type:    int   = RegionType.INFO_POINT   # uint16
-    bounding_box:   List[int] = field(default_factory=lambda: [0,0,0,0])  # x1,y1,x2,y2
-    vertex_count:   int   = 0    # uint16
-    vertex_index:   int   = 0    # uint32 — index into area vertex array
-    trigger_value:  int   = 0    # uint32
-    cursor_index:   int   = 0    # uint32
-    destination_area: ResRef = ResRef("")  # ResRef — for travel triggers
-    destination_entrance: str = ""  # 32-char
-    flags:          int   = 0    # uint32
-    info_text:      StrRef   = StrRef(0xFFFFFFFF)   # StrRef
-    trap_detect_dc: int   = 0    # uint16
-    trap_disarm_dc: int   = 0    # uint16
-    is_trapped:     int   = 0    # uint16
-    trap_detected:  int   = 0    # uint16
-    trap_launch_x:  int   = 0    # uint16
-    trap_launch_y:  int   = 0    # uint16
-    key_item:       ResRef = ResRef("")  # ResRef
-    region_script:  ResRef = ResRef("")  # ResRef
-    alt_use_point_x: int  = 0    # uint16
-    alt_use_point_y: int  = 0    # uint16
-    unknown:        bytes = b"\x00" * 44
-
-    # Populated after vertex array is read
-    vertices: List[Vertex] = field(default_factory=list)
+    def to_json(self):
+        return _sparse({
+            'area_wed': self.area_wed, 'last_saved': self.last_saved, 'area_flags': self.area_flags,
+            'north_resref': self.north_resref, 'north_flags': self.north_flags,
+            'east_resref':  self.east_resref,  'east_flags':  self.east_flags,
+            'south_resref': self.south_resref, 'south_flags': self.south_flags,
+            'west_resref':  self.west_resref,  'west_flags':  self.west_flags,
+            'area_type': self.area_type,
+            'rain_probability': self.rain_probability, 'snow_probability': self.snow_probability,
+            'fog_probability': self.fog_probability, 'lightning_probability': self.lightning_probability,
+            'wind_speed': self.wind_speed, 'area_script': self.area_script,
+            'field_c4': self.field_c4, 'field_c8': self.field_c8, 'field_cc': self.field_cc,
+            'projectile_traps_count': self.projectile_traps_count,
+            'rest_movie_day': self.rest_movie_day, 'rest_movie_night': self.rest_movie_night,
+        })
 
     @classmethod
-    def _read(cls, r: BinaryReader) -> "Region":
-        name          = r.read_string(32)
-        region_type   = r.read_uint16()
-        bbox          = [r.read_uint16() for _ in range(4)]
-        vertex_count  = r.read_uint16()
-        vertex_index  = r.read_uint32()
-        trigger_value = r.read_uint32()
-        cursor_index  = r.read_uint32()
-        dest_area     = ResRef(r.read_resref())
-        dest_entrance = r.read_string(32)
-        flags         = r.read_uint32()
-        info_text     = StrRef(r.read_uint32())
-        trap_detect   = r.read_uint16()
-        trap_disarm   = r.read_uint16()
-        is_trapped    = r.read_uint16()
-        trap_detected = r.read_uint16()
-        trap_x        = r.read_uint16()
-        trap_y        = r.read_uint16()
-        key_item      = ResRef(r.read_resref())
-        script        = ResRef(r.read_resref())
-        alt_x         = r.read_uint16()
-        alt_y         = r.read_uint16()
-        unknown       = r.read_bytes(44)
-        return cls(
-            name=name, region_type=region_type, bounding_box=bbox,
-            vertex_count=vertex_count, vertex_index=vertex_index,
-            trigger_value=trigger_value, cursor_index=cursor_index,
-            destination_area=dest_area, destination_entrance=dest_entrance,
-            flags=flags, info_text=info_text,
-            trap_detect_dc=trap_detect, trap_disarm_dc=trap_disarm,
-            is_trapped=is_trapped, trap_detected=trap_detected,
-            trap_launch_x=trap_x, trap_launch_y=trap_y,
-            key_item=key_item, region_script=script,
-            alt_use_point_x=alt_x, alt_use_point_y=alt_y,
-            unknown=unknown,
-        )
+    def from_json(cls, d, offsets):
+        h = cls.__new__(cls)
+        h.signature = ARE_SIGNATURE; h.version = ARE_VERSION_10
+        h.area_wed = d.get('area_wed',''); h.last_saved = d.get('last_saved',0); h.area_flags = d.get('area_flags',0)
+        h.north_resref=d.get('north_resref',''); h.north_flags=d.get('north_flags',0)
+        h.east_resref =d.get('east_resref', ''); h.east_flags =d.get('east_flags', 0)
+        h.south_resref=d.get('south_resref',''); h.south_flags=d.get('south_flags',0)
+        h.west_resref =d.get('west_resref', ''); h.west_flags =d.get('west_flags', 0)
+        h.area_type=d.get('area_type',0); h.rain_probability=d.get('rain_probability',0)
+        h.snow_probability=d.get('snow_probability',0); h.fog_probability=d.get('fog_probability',0)
+        h.lightning_probability=d.get('lightning_probability',0); h.wind_speed=d.get('wind_speed',0)
+        h.area_script=d.get('area_script','')
+        h.field_c4=d.get('field_c4',0); h.field_c8=d.get('field_c8',0); h.field_cc=d.get('field_cc',0)
+        h.projectile_traps_count=d.get('projectile_traps_count',0)
+        h.rest_movie_day=d.get('rest_movie_day',''); h.rest_movie_night=d.get('rest_movie_night','')
+        h.unused_e4=bytes(56)
+        for k,v in offsets.items(): setattr(h, k, v)
+        return h
 
-    def _write(self, w: BinaryWriter, vertex_index: int) -> None:
-        w.write_bytes(self.name.encode("latin-1")[:32].ljust(32, b"\x00"))
-        w.write_uint16(self.region_type)
-        for v in self.bounding_box[:4]:
-            w.write_uint16(v)
-        w.write_uint16(len(self.vertices))
-        w.write_uint32(vertex_index)
-        w.write_uint32(self.trigger_value)
-        w.write_uint32(self.cursor_index)
-        w.write_resref(str(self.destination_area))
-        w.write_bytes(self.destination_entrance.encode("latin-1")[:32].ljust(32, b"\x00"))
-        w.write_uint32(self.flags)
-        w.write_uint32(int(self.info_text))
-        w.write_uint16(self.trap_detect_dc)
-        w.write_uint16(self.trap_disarm_dc)
-        w.write_uint16(self.is_trapped)
-        w.write_uint16(self.trap_detected)
-        w.write_uint16(self.trap_launch_x)
-        w.write_uint16(self.trap_launch_y)
-        w.write_resref(str(self.key_item))
-        w.write_resref(str(self.region_script))
-        w.write_uint16(self.alt_use_point_x)
-        w.write_uint16(self.alt_use_point_y)
-        w.write_bytes(self.unknown[:44].ljust(44, b"\x00"))
 
-    def to_json(self) -> dict:
-        d: dict = {"name": self.name, "type": self.region_type,
-                   "bounding_box": self.bounding_box,
-                   "vertices": [v.to_json() for v in self.vertices]}
-        if self.destination_area:    d["destination_area"]     = self.destination_area.to_json()
-        if self.destination_entrance: d["destination_entrance"] = self.destination_entrance
-        if self.flags:               d["flags"]                = self.flags
-        if not self.info_text.is_none: d["info_text"]       = self.info_text.to_json()
-        if self.is_trapped:          d["is_trapped"]           = self.is_trapped
-        if self.key_item:            d["key_item"]             = self.key_item.to_json()
-        if self.region_script:       d["region_script"]        = self.region_script.to_json()
-        return d
+# ─────────────────────────────────────────────────────────────────────────────
+# Actors
+# ─────────────────────────────────────────────────────────────────────────────
+class AreActor:
+    """272 bytes. flags bit 0 INVERTED: clear = embedded CRE present."""
+    __slots__ = [
+        'name','current_x','current_y','destination_x','destination_y',
+        'flags','has_been_spawned','first_letter_cre','unused_2f',
+        'actor_animation','actor_orientation','unused_36','removal_timer',
+        'movement_restriction_distance','movement_restriction_distance_to_object',
+        'appearance_schedule','num_times_talked_to',
+        'dialog','script_override','script_general','script_class',
+        'script_race','script_default','script_specific',
+        'cre_file','cre_offset','cre_size','unused_90','embedded_cre',
+    ]
 
     @classmethod
-    def from_json(cls, d: dict) -> "Region":
-        r = cls(
-            name=d.get("name",""), region_type=d.get("type", RegionType.INFO_POINT),
-            bounding_box=d.get("bounding_box",[0,0,0,0]),
-            flags=d.get("flags",0),
-            destination_area=ResRef.from_json(d.get("destination_area","")),
-            destination_entrance=d.get("destination_entrance",""),
-            info_text=StrRef.from_json(d.get("info_text", 0xFFFFFFFF)),
-            is_trapped=d.get("is_trapped",0),
-            key_item=ResRef.from_json(d.get("key_item","")),
-            region_script=ResRef.from_json(d.get("region_script","")),
-        )
-        r.vertices = [Vertex.from_json(v) for v in d.get("vertices",[])]
+    def from_bytes(cls, data, file_data=None):
+        assert len(data) >= ACTOR_SIZE
+        a = cls.__new__(cls)
+        a.name=_str32(data[0x00:0x20]); a.current_x=struct.unpack_from('<H',data,0x20)[0]; a.current_y=struct.unpack_from('<H',data,0x22)[0]
+        a.destination_x=struct.unpack_from('<H',data,0x24)[0]; a.destination_y=struct.unpack_from('<H',data,0x26)[0]
+        a.flags=struct.unpack_from('<I',data,0x28)[0]; a.has_been_spawned=struct.unpack_from('<H',data,0x2c)[0]
+        a.first_letter_cre=data[0x2e]; a.unused_2f=data[0x2f]
+        a.actor_animation=struct.unpack_from('<I',data,0x30)[0]; a.actor_orientation=struct.unpack_from('<H',data,0x34)[0]
+        a.unused_36=struct.unpack_from('<H',data,0x36)[0]; a.removal_timer=struct.unpack_from('<I',data,0x38)[0]
+        a.movement_restriction_distance=struct.unpack_from('<H',data,0x3c)[0]
+        a.movement_restriction_distance_to_object=struct.unpack_from('<H',data,0x3e)[0]
+        a.appearance_schedule=struct.unpack_from('<I',data,0x40)[0]; a.num_times_talked_to=struct.unpack_from('<I',data,0x44)[0]
+        a.dialog=_resref(data[0x48:0x50]); a.script_override=_resref(data[0x50:0x58])
+        a.script_general=_resref(data[0x58:0x60]); a.script_class=_resref(data[0x60:0x68])
+        a.script_race=_resref(data[0x68:0x70]); a.script_default=_resref(data[0x70:0x78])
+        a.script_specific=_resref(data[0x78:0x80]); a.cre_file=_resref(data[0x80:0x88])
+        a.cre_offset=struct.unpack_from('<I',data,0x88)[0]; a.cre_size=struct.unpack_from('<I',data,0x8c)[0]
+        a.unused_90=bytes(data[0x90:0x110])
+        cre_attached = not (a.flags & 0x01)
+        a.embedded_cre = bytes(file_data[a.cre_offset:a.cre_offset+a.cre_size]) if (cre_attached and a.cre_size>0 and file_data) else None
+        return a
+
+    def to_bytes(self, embedded_cre_offset=0):
+        buf = bytearray(ACTOR_SIZE)
+        buf[0x00:0x20]=_str32_encode(self.name)
+        struct.pack_into('<H',buf,0x20,self.current_x); struct.pack_into('<H',buf,0x22,self.current_y)
+        struct.pack_into('<H',buf,0x24,self.destination_x); struct.pack_into('<H',buf,0x26,self.destination_y)
+        struct.pack_into('<I',buf,0x28,self.flags); struct.pack_into('<H',buf,0x2c,self.has_been_spawned)
+        buf[0x2e]=self.first_letter_cre; buf[0x2f]=self.unused_2f
+        struct.pack_into('<I',buf,0x30,self.actor_animation); struct.pack_into('<H',buf,0x34,self.actor_orientation)
+        struct.pack_into('<H',buf,0x36,self.unused_36); struct.pack_into('<I',buf,0x38,self.removal_timer)
+        struct.pack_into('<H',buf,0x3c,self.movement_restriction_distance)
+        struct.pack_into('<H',buf,0x3e,self.movement_restriction_distance_to_object)
+        struct.pack_into('<I',buf,0x40,self.appearance_schedule); struct.pack_into('<I',buf,0x44,self.num_times_talked_to)
+        buf[0x48:0x50]=_resref_encode(self.dialog); buf[0x50:0x58]=_resref_encode(self.script_override)
+        buf[0x58:0x60]=_resref_encode(self.script_general); buf[0x60:0x68]=_resref_encode(self.script_class)
+        buf[0x68:0x70]=_resref_encode(self.script_race); buf[0x70:0x78]=_resref_encode(self.script_default)
+        buf[0x78:0x80]=_resref_encode(self.script_specific); buf[0x80:0x88]=_resref_encode(self.cre_file)
+        if self.embedded_cre:
+            struct.pack_into('<I',buf,0x88,embedded_cre_offset); struct.pack_into('<I',buf,0x8c,len(self.embedded_cre))
+        else:
+            struct.pack_into('<I',buf,0x88,self.cre_offset); struct.pack_into('<I',buf,0x8c,self.cre_size)
+        buf[0x90:0x110]=self.unused_90
+        return bytes(buf)
+
+    def to_json(self):
+        d={'name':self.name,'current_x':self.current_x,'current_y':self.current_y,
+           'destination_x':self.destination_x,'destination_y':self.destination_y,
+           'flags':self.flags,'has_been_spawned':self.has_been_spawned,'first_letter_cre':self.first_letter_cre,
+           'actor_animation':self.actor_animation,'actor_orientation':self.actor_orientation,
+           'removal_timer':self.removal_timer,
+           'movement_restriction_distance':self.movement_restriction_distance,
+           'movement_restriction_distance_to_object':self.movement_restriction_distance_to_object,
+           'appearance_schedule':self.appearance_schedule,'num_times_talked_to':self.num_times_talked_to,
+           'dialog':self.dialog,'script_override':self.script_override,'script_general':self.script_general,
+           'script_class':self.script_class,'script_race':self.script_race,'script_default':self.script_default,
+           'script_specific':self.script_specific,'cre_file':self.cre_file}
+        if self.embedded_cre: d['embedded_cre']=self.embedded_cre.hex()
+        return _sparse(d)
+
+    @classmethod
+    def from_json(cls, d):
+        a=cls.__new__(cls)
+        a.name=d.get('name',''); a.current_x=d.get('current_x',0); a.current_y=d.get('current_y',0)
+        a.destination_x=d.get('destination_x',0); a.destination_y=d.get('destination_y',0)
+        a.flags=d.get('flags',0); a.has_been_spawned=d.get('has_been_spawned',0)
+        a.first_letter_cre=d.get('first_letter_cre',0); a.unused_2f=0
+        a.actor_animation=d.get('actor_animation',0); a.actor_orientation=d.get('actor_orientation',0); a.unused_36=0
+        a.removal_timer=d.get('removal_timer',0xFFFFFFFF)
+        a.movement_restriction_distance=d.get('movement_restriction_distance',0)
+        a.movement_restriction_distance_to_object=d.get('movement_restriction_distance_to_object',0)
+        a.appearance_schedule=d.get('appearance_schedule',0); a.num_times_talked_to=d.get('num_times_talked_to',0)
+        a.dialog=d.get('dialog',''); a.script_override=d.get('script_override','')
+        a.script_general=d.get('script_general',''); a.script_class=d.get('script_class','')
+        a.script_race=d.get('script_race',''); a.script_default=d.get('script_default','')
+        a.script_specific=d.get('script_specific',''); a.cre_file=d.get('cre_file','')
+        a.cre_offset=0; a.cre_size=0; a.unused_90=bytes(128)
+        raw=d.get('embedded_cre'); a.embedded_cre=bytes.fromhex(raw) if raw else None
+        return a
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Regions
+# ─────────────────────────────────────────────────────────────────────────────
+class AreRegion:
+    """196 bytes. Vertices inlined. PST fields always parsed."""
+    __slots__=['name','region_type','bounding_box','trigger_value','cursor_index',
+               'destination_area','entrance_name','flags','information_text',
+               'trap_detection_difficulty','trap_removal_difficulty',
+               'is_trapped','trap_detected','trap_launch_x','trap_launch_y',
+               'key_item','region_script','alt_use_point_x','alt_use_point_y',
+               'unknown_88','unknown_8c','sound','talk_location_x','talk_location_y',
+               'speaker_name','dialog_file','vertices']
+
+    @classmethod
+    def from_bytes(cls, data, vertex_pool, first_vi):
+        assert len(data) >= REGION_SIZE
+        r=cls.__new__(cls)
+        r.name=_str32(data[0x00:0x20]); r.region_type=struct.unpack_from('<H',data,0x20)[0]
+        r.bounding_box=list(struct.unpack_from('<4H',data,0x22))
+        vc=struct.unpack_from('<H',data,0x2a)[0]
+        r.trigger_value=struct.unpack_from('<I',data,0x30)[0]; r.cursor_index=struct.unpack_from('<I',data,0x34)[0]
+        r.destination_area=_resref(data[0x38:0x40]); r.entrance_name=_str32(data[0x40:0x60])
+        r.flags=struct.unpack_from('<I',data,0x60)[0]; r.information_text=struct.unpack_from('<I',data,0x64)[0]
+        r.trap_detection_difficulty=struct.unpack_from('<H',data,0x68)[0]
+        r.trap_removal_difficulty=struct.unpack_from('<H',data,0x6a)[0]
+        r.is_trapped=struct.unpack_from('<H',data,0x6c)[0]; r.trap_detected=struct.unpack_from('<H',data,0x6e)[0]
+        r.trap_launch_x=struct.unpack_from('<H',data,0x70)[0]; r.trap_launch_y=struct.unpack_from('<H',data,0x72)[0]
+        r.key_item=_resref(data[0x74:0x7c]); r.region_script=_resref(data[0x7c:0x84])
+        r.alt_use_point_x=struct.unpack_from('<H',data,0x84)[0]; r.alt_use_point_y=struct.unpack_from('<H',data,0x86)[0]
+        r.unknown_88=struct.unpack_from('<I',data,0x88)[0]; r.unknown_8c=bytes(data[0x8c:0xac])
+        r.sound=_resref(data[0xac:0xb4]); r.talk_location_x=struct.unpack_from('<H',data,0xb4)[0]
+        r.talk_location_y=struct.unpack_from('<H',data,0xb6)[0]; r.speaker_name=struct.unpack_from('<I',data,0xb8)[0]
+        r.dialog_file=_resref(data[0xbc:0xc4])
+        r.vertices=_verts_from_pool(vertex_pool,first_vi,vc)
+        return r
+
+    def to_bytes(self, first_vi):
+        buf=bytearray(REGION_SIZE)
+        buf[0x00:0x20]=_str32_encode(self.name); struct.pack_into('<H',buf,0x20,self.region_type)
+        struct.pack_into('<4H',buf,0x22,*self.bounding_box)
+        struct.pack_into('<H',buf,0x2a,len(self.vertices)); struct.pack_into('<I',buf,0x2c,first_vi)
+        struct.pack_into('<I',buf,0x30,self.trigger_value); struct.pack_into('<I',buf,0x34,self.cursor_index)
+        buf[0x38:0x40]=_resref_encode(self.destination_area); buf[0x40:0x60]=_str32_encode(self.entrance_name)
+        struct.pack_into('<I',buf,0x60,self.flags); struct.pack_into('<I',buf,0x64,self.information_text)
+        struct.pack_into('<H',buf,0x68,self.trap_detection_difficulty); struct.pack_into('<H',buf,0x6a,self.trap_removal_difficulty)
+        struct.pack_into('<H',buf,0x6c,self.is_trapped); struct.pack_into('<H',buf,0x6e,self.trap_detected)
+        struct.pack_into('<H',buf,0x70,self.trap_launch_x); struct.pack_into('<H',buf,0x72,self.trap_launch_y)
+        buf[0x74:0x7c]=_resref_encode(self.key_item); buf[0x7c:0x84]=_resref_encode(self.region_script)
+        struct.pack_into('<H',buf,0x84,self.alt_use_point_x); struct.pack_into('<H',buf,0x86,self.alt_use_point_y)
+        struct.pack_into('<I',buf,0x88,self.unknown_88); buf[0x8c:0xac]=self.unknown_8c[:32]
+        buf[0xac:0xb4]=_resref_encode(self.sound)
+        struct.pack_into('<H',buf,0xb4,self.talk_location_x); struct.pack_into('<H',buf,0xb6,self.talk_location_y)
+        struct.pack_into('<I',buf,0xb8,self.speaker_name); buf[0xbc:0xc4]=_resref_encode(self.dialog_file)
+        return bytes(buf)
+
+    def to_json(self):
+        return _sparse({'name':self.name,'region_type':self.region_type,'bounding_box':self.bounding_box,
+            'trigger_value':self.trigger_value,'cursor_index':self.cursor_index,
+            'destination_area':self.destination_area,'entrance_name':self.entrance_name,
+            'flags':self.flags,'information_text':self.information_text,
+            'trap_detection_difficulty':self.trap_detection_difficulty,
+            'trap_removal_difficulty':self.trap_removal_difficulty,
+            'is_trapped':self.is_trapped,'trap_detected':self.trap_detected,
+            'trap_launch_x':self.trap_launch_x,'trap_launch_y':self.trap_launch_y,
+            'key_item':self.key_item,'region_script':self.region_script,
+            'alt_use_point_x':self.alt_use_point_x,'alt_use_point_y':self.alt_use_point_y,
+            'unknown_88':self.unknown_88,
+            'unknown_8c':self.unknown_8c.hex() if any(self.unknown_8c) else None,
+            'sound':self.sound,'talk_location_x':self.talk_location_x,'talk_location_y':self.talk_location_y,
+            'speaker_name':self.speaker_name,'dialog_file':self.dialog_file,'vertices':self.vertices})
+
+    @classmethod
+    def from_json(cls, d):
+        r=cls.__new__(cls)
+        r.name=d.get('name',''); r.region_type=d.get('region_type',0)
+        r.bounding_box=d.get('bounding_box',[0,0,0,0])
+        r.trigger_value=d.get('trigger_value',0); r.cursor_index=d.get('cursor_index',0)
+        r.destination_area=d.get('destination_area',''); r.entrance_name=d.get('entrance_name','')
+        r.flags=d.get('flags',0); r.information_text=d.get('information_text',0)
+        r.trap_detection_difficulty=d.get('trap_detection_difficulty',0)
+        r.trap_removal_difficulty=d.get('trap_removal_difficulty',0)
+        r.is_trapped=d.get('is_trapped',0); r.trap_detected=d.get('trap_detected',0)
+        r.trap_launch_x=d.get('trap_launch_x',0); r.trap_launch_y=d.get('trap_launch_y',0)
+        r.key_item=d.get('key_item',''); r.region_script=d.get('region_script','')
+        r.alt_use_point_x=d.get('alt_use_point_x',0); r.alt_use_point_y=d.get('alt_use_point_y',0)
+        r.unknown_88=d.get('unknown_88',0)
+        unk=d.get('unknown_8c'); r.unknown_8c=bytes.fromhex(unk) if unk else bytes(32)
+        r.sound=d.get('sound',''); r.talk_location_x=d.get('talk_location_x',0)
+        r.talk_location_y=d.get('talk_location_y',0); r.speaker_name=d.get('speaker_name',0)
+        r.dialog_file=d.get('dialog_file',''); r.vertices=d.get('vertices',[])
         return r
 
 
-# ---------------------------------------------------------------------------
-# SpawnPoint  (200 bytes)
-# ---------------------------------------------------------------------------
-
-@dataclass
-class SpawnPoint:
-    """A point where creatures may be spawned."""
-    name:           str   = ""
-    x:              int   = 0
-    y:              int   = 0
-    creature_resrefs: List[ResRef] = field(default_factory=lambda: [ResRef("")] * 10)
-    creature_count: int   = 0    # uint16 — how many creatures in list
-    base_difficulty: int  = 0    # uint16
-    frequency:      int   = 0    # uint16 — respawn rate in seconds
-    method:         int   = 0    # uint16
-    actor_removal_time: int = 0  # uint32
-    adjacent_difficulty: int = 0 # uint16
-    unused:         int   = 0    # uint16
-    max_creatures:  int   = 0    # uint16
-    spawn_type:     int   = 0    # uint16
-    schedule:       int   = 0    # uint32 — active-hours bitmask
-    probability_day:   int = 100 # uint16
-    probability_night: int = 100 # uint16
-    flags:          int   = SpawnFlag.NONE  # uint32
+# ─────────────────────────────────────────────────────────────────────────────
+# Spawn Points
+# ─────────────────────────────────────────────────────────────────────────────
+class AreSpawnPoint:
+    """200 bytes. 10 creature slots. tail_90 (56 bytes) stored verbatim."""
+    __slots__=['name','x','y','creature_resrefs','creature_count','base_creature_number',
+               'frequency','spawn_method','actor_removal_timer',
+               'movement_restriction_distance','movement_restriction_distance_to_object',
+               'max_creatures','enabled','appearance_schedule',
+               'probability_day','probability_night','tail_90']
 
     @classmethod
-    def _read(cls, r: BinaryReader) -> "SpawnPoint":
-        name        = r.read_string(32)
-        x           = r.read_uint16()
-        y           = r.read_uint16()
-        creatures   = [ResRef(r.read_resref()) for _ in range(10)]
-        cre_count   = r.read_uint16()
-        base_diff   = r.read_uint16()
-        frequency   = r.read_uint16()
-        method      = r.read_uint16()
-        removal     = r.read_uint32()
-        adj_diff    = r.read_uint16()
-        unused      = r.read_uint16()
-        max_cre     = r.read_uint16()
-        spawn_type  = r.read_uint16()
-        schedule    = r.read_uint32()
-        prob_day    = r.read_uint16()
-        prob_night  = r.read_uint16()
-        flags       = r.read_uint32()
-        r.skip(56)  # reserved
-        return cls(
-            name=name, x=x, y=y, creature_resrefs=creatures,
-            creature_count=cre_count, base_difficulty=base_diff,
-            frequency=frequency, method=method,
-            actor_removal_time=removal, adjacent_difficulty=adj_diff,
-            unused=unused, max_creatures=max_cre, spawn_type=spawn_type,
-            schedule=schedule, probability_day=prob_day,
-            probability_night=prob_night, flags=flags,
-        )
+    def from_bytes(cls, data):
+        assert len(data) >= SPAWN_POINT_SIZE
+        s=cls.__new__(cls)
+        s.name=_str32(data[0x00:0x20]); s.x=struct.unpack_from('<H',data,0x20)[0]; s.y=struct.unpack_from('<H',data,0x22)[0]
+        s.creature_resrefs=[_resref(data[0x24+i*8:0x24+i*8+8]) for i in range(10)]
+        s.creature_count=struct.unpack_from('<H',data,0x74)[0]; s.base_creature_number=struct.unpack_from('<H',data,0x76)[0]
+        s.frequency=struct.unpack_from('<H',data,0x78)[0]; s.spawn_method=struct.unpack_from('<H',data,0x7a)[0]
+        s.actor_removal_timer=struct.unpack_from('<I',data,0x7c)[0]
+        s.movement_restriction_distance=struct.unpack_from('<H',data,0x80)[0]
+        s.movement_restriction_distance_to_object=struct.unpack_from('<H',data,0x82)[0]
+        s.max_creatures=struct.unpack_from('<H',data,0x84)[0]; s.enabled=struct.unpack_from('<H',data,0x86)[0]
+        s.appearance_schedule=struct.unpack_from('<I',data,0x88)[0]
+        s.probability_day=struct.unpack_from('<H',data,0x8c)[0]; s.probability_night=struct.unpack_from('<H',data,0x8e)[0]
+        s.tail_90=bytes(data[0x90:0xc8])
+        return s
 
-    def _write(self, w: BinaryWriter) -> None:
-        w.write_bytes(self.name.encode("latin-1")[:32].ljust(32, b"\x00"))
-        w.write_uint16(self.x)
-        w.write_uint16(self.y)
-        for i in range(10):
-            w.write_resref(str(self.creature_resrefs[i]) if i < len(self.creature_resrefs) else "")
-        w.write_uint16(self.creature_count)
-        w.write_uint16(self.base_difficulty)
-        w.write_uint16(self.frequency)
-        w.write_uint16(self.method)
-        w.write_uint32(self.actor_removal_time)
-        w.write_uint16(self.adjacent_difficulty)
-        w.write_uint16(self.unused)
-        w.write_uint16(self.max_creatures)
-        w.write_uint16(self.spawn_type)
-        w.write_uint32(self.schedule)
-        w.write_uint16(self.probability_day)
-        w.write_uint16(self.probability_night)
-        w.write_uint32(self.flags)
-        w.write_padding(56)
+    def to_bytes(self):
+        buf=bytearray(SPAWN_POINT_SIZE)
+        buf[0x00:0x20]=_str32_encode(self.name)
+        struct.pack_into('<H',buf,0x20,self.x); struct.pack_into('<H',buf,0x22,self.y)
+        rr=(list(self.creature_resrefs)+['']*10)[:10]
+        for i in range(10): buf[0x24+i*8:0x24+i*8+8]=_resref_encode(rr[i])
+        struct.pack_into('<H',buf,0x74,self.creature_count); struct.pack_into('<H',buf,0x76,self.base_creature_number)
+        struct.pack_into('<H',buf,0x78,self.frequency); struct.pack_into('<H',buf,0x7a,self.spawn_method)
+        struct.pack_into('<I',buf,0x7c,self.actor_removal_timer)
+        struct.pack_into('<H',buf,0x80,self.movement_restriction_distance)
+        struct.pack_into('<H',buf,0x82,self.movement_restriction_distance_to_object)
+        struct.pack_into('<H',buf,0x84,self.max_creatures); struct.pack_into('<H',buf,0x86,self.enabled)
+        struct.pack_into('<I',buf,0x88,self.appearance_schedule)
+        struct.pack_into('<H',buf,0x8c,self.probability_day); struct.pack_into('<H',buf,0x8e,self.probability_night)
+        buf[0x90:0xc8]=self.tail_90[:56]
+        return bytes(buf)
 
-    def to_json(self) -> dict:
-        creatures = [c.to_json() for c in self.creature_resrefs if c]
-        d: dict = {"name": self.name, "x": self.x, "y": self.y,
-                   "creatures": creatures, "flags": self.flags}
-        if self.frequency:          d["frequency"]   = self.frequency
-        if self.max_creatures:      d["max_creatures"] = self.max_creatures
-        if self.schedule:           d["schedule"]    = self.schedule
-        if self.probability_day != 100:  d["probability_day"]   = self.probability_day
-        if self.probability_night != 100: d["probability_night"] = self.probability_night
-        return d
+    def to_json(self):
+        return _sparse({'name':self.name,'x':self.x,'y':self.y,
+            'creature_resrefs':[r for r in self.creature_resrefs if r],
+            'creature_count':self.creature_count,'base_creature_number':self.base_creature_number,
+            'frequency':self.frequency,'spawn_method':self.spawn_method,
+            'actor_removal_timer':self.actor_removal_timer,
+            'movement_restriction_distance':self.movement_restriction_distance,
+            'movement_restriction_distance_to_object':self.movement_restriction_distance_to_object,
+            'max_creatures':self.max_creatures,'enabled':self.enabled,
+            'appearance_schedule':self.appearance_schedule,
+            'probability_day':self.probability_day,'probability_night':self.probability_night,
+            'tail_90':self.tail_90.hex() if any(self.tail_90) else None})
 
     @classmethod
-    def from_json(cls, d: dict) -> "SpawnPoint":
-        creatures = d.get("creatures", [])
-        padded = ([ResRef.from_json(c) for c in creatures] + [ResRef("")] * 10)[:10]
-        return cls(
-            name=d.get("name",""), x=d.get("x",0), y=d.get("y",0),
-            creature_resrefs=padded, creature_count=len(creatures),
-            flags=d.get("flags", SpawnFlag.NONE),
-            frequency=d.get("frequency",0),
-            max_creatures=d.get("max_creatures",0),
-            schedule=d.get("schedule",0),
-            probability_day=d.get("probability_day",100),
-            probability_night=d.get("probability_night",100),
-        )
+    def from_json(cls, d):
+        s=cls.__new__(cls); s.name=d.get('name',''); s.x=d.get('x',0); s.y=d.get('y',0)
+        rr=d.get('creature_resrefs',[]); s.creature_resrefs=(rr+['']*10)[:10]
+        s.creature_count=d.get('creature_count',0); s.base_creature_number=d.get('base_creature_number',0)
+        s.frequency=d.get('frequency',0); s.spawn_method=d.get('spawn_method',0)
+        s.actor_removal_timer=d.get('actor_removal_timer',0xFFFFFFFF)
+        s.movement_restriction_distance=d.get('movement_restriction_distance',0)
+        s.movement_restriction_distance_to_object=d.get('movement_restriction_distance_to_object',0)
+        s.max_creatures=d.get('max_creatures',0); s.enabled=d.get('enabled',0)
+        s.appearance_schedule=d.get('appearance_schedule',0)
+        s.probability_day=d.get('probability_day',0); s.probability_night=d.get('probability_night',0)
+        t=d.get('tail_90'); s.tail_90=bytes.fromhex(t) if t else bytes(56)
+        return s
 
 
-# ---------------------------------------------------------------------------
-# Ambient  (212 bytes)
-# ---------------------------------------------------------------------------
-
-@dataclass
-class Ambient:
-    """An ambient sound source in the area."""
-    name:           str   = ""
-    x:              int   = 0
-    y:              int   = 0
-    radius:         int   = 0     # uint16 — activation radius in pixels
-    height:         int   = 0     # uint16
-    pitch_variance: int   = 0     # uint32
-    volume:         int   = 100   # uint16 — 0-100
-    volume_variance: int  = 0     # uint16
-    sounds:         List[ResRef] = field(default_factory=lambda: [ResRef("")] * 10)
-    sound_count:    int   = 0
-    interval:       int   = 0     # uint16 — seconds between plays
-    interval_variance: int = 0    # uint16
-    schedule:       int   = 0     # uint32 — active-hours bitmask
-    flags:          int   = 0     # uint32
+# ─────────────────────────────────────────────────────────────────────────────
+# Entrances
+# ─────────────────────────────────────────────────────────────────────────────
+class AreEntrance:
+    """104 bytes."""
+    __slots__=['name','x','y','orientation','unused_26']
 
     @classmethod
-    def _read(cls, r: BinaryReader) -> "Ambient":
-        name      = r.read_string(32)
-        x         = r.read_uint16()
-        y         = r.read_uint16()
-        radius    = r.read_uint16()
-        height    = r.read_uint16()
-        pitch_var = r.read_uint32()
-        volume    = r.read_uint16()
-        vol_var   = r.read_uint16()
-        sounds    = [ResRef(r.read_resref()) for _ in range(10)]
-        snd_count = r.read_uint16()
-        interval  = r.read_uint16()
-        int_var   = r.read_uint16()
-        r.skip(2)
-        schedule  = r.read_uint32()
-        flags     = r.read_uint32()
-        r.skip(64)
-        return cls(
-            name=name, x=x, y=y, radius=radius, height=height,
-            pitch_variance=pitch_var, volume=volume, volume_variance=vol_var,
-            sounds=sounds, sound_count=snd_count,
-            interval=interval, interval_variance=int_var,
-            schedule=schedule, flags=flags,
-        )
+    def from_bytes(cls, data):
+        assert len(data) >= ENTRANCE_SIZE
+        e=cls.__new__(cls)
+        e.name=_str32(data[0x00:0x20]); e.x=struct.unpack_from('<H',data,0x20)[0]
+        e.y=struct.unpack_from('<H',data,0x22)[0]; e.orientation=struct.unpack_from('<H',data,0x24)[0]
+        e.unused_26=bytes(data[0x26:0x68])
+        return e
 
-    def _write(self, w: BinaryWriter) -> None:
-        w.write_bytes(self.name.encode("latin-1")[:32].ljust(32, b"\x00"))
-        w.write_uint16(self.x)
-        w.write_uint16(self.y)
-        w.write_uint16(self.radius)
-        w.write_uint16(self.height)
-        w.write_uint32(self.pitch_variance)
-        w.write_uint16(self.volume)
-        w.write_uint16(self.volume_variance)
-        for i in range(10):
-            w.write_resref(str(self.sounds[i]) if i < len(self.sounds) else "")
-        w.write_uint16(self.sound_count)
-        w.write_uint16(self.interval)
-        w.write_uint16(self.interval_variance)
-        w.write_padding(2)
-        w.write_uint32(self.schedule)
-        w.write_uint32(self.flags)
-        w.write_padding(64)
+    def to_bytes(self):
+        buf=bytearray(ENTRANCE_SIZE)
+        buf[0x00:0x20]=_str32_encode(self.name)
+        struct.pack_into('<H',buf,0x20,self.x); struct.pack_into('<H',buf,0x22,self.y)
+        struct.pack_into('<H',buf,0x24,self.orientation); buf[0x26:0x68]=self.unused_26[:66]
+        return bytes(buf)
 
-    def to_json(self) -> dict:
-        sounds = [s.to_json() for s in self.sounds if s]
-        d: dict = {"name": self.name, "x": self.x, "y": self.y,
-                   "sounds": sounds, "radius": self.radius,
-                   "volume": self.volume, "flags": self.flags}
-        if self.interval:  d["interval"]  = self.interval
-        if self.schedule:  d["schedule"]  = self.schedule
-        return d
+    def to_json(self): return _sparse({'name':self.name,'x':self.x,'y':self.y,'orientation':self.orientation})
 
     @classmethod
-    def from_json(cls, d: dict) -> "Ambient":
-        sounds = d.get("sounds", [])
-        padded = ([ResRef.from_json(s) for s in sounds] + [ResRef("")] * 10)[:10]
-        return cls(
-            name=d.get("name",""), x=d.get("x",0), y=d.get("y",0),
-            radius=d.get("radius",0), volume=d.get("volume",100),
-            flags=d.get("flags",0), sounds=padded,
-            sound_count=len(sounds), interval=d.get("interval",0),
-            schedule=d.get("schedule",0),
-        )
+    def from_json(cls, d):
+        e=cls.__new__(cls); e.name=d.get('name',''); e.x=d.get('x',0); e.y=d.get('y',0)
+        e.orientation=d.get('orientation',0); e.unused_26=bytes(66)
+        return e
 
 
-# ---------------------------------------------------------------------------
-# Door  (200 bytes + vertices)
-# ---------------------------------------------------------------------------
-
-@dataclass
-class Door:
-    """A door in the area (links to a WED door record)."""
-    name:             str   = ""
-    door_id:          ResRef = ResRef("")  # ResRef — identifies this door in WED
-    flags:            int   = DoorFlag.NONE
-    open_vertex_index:  int = 0     # uint32 — into area vertex array
-    open_vertex_count:  int = 0     # uint16
-    close_vertex_index: int = 0     # uint32
-    close_vertex_count: int = 0     # uint16
-    open_bbox:        List[int] = field(default_factory=lambda: [0,0,0,0])
-    close_bbox:       List[int] = field(default_factory=lambda: [0,0,0,0])
-    open_cell_index:  int  = 0      # uint32 — impeded cell arrays (WED)
-    open_cell_count:  int  = 0      # uint16
-    close_cell_index: int  = 0      # uint32
-    close_cell_count: int  = 0      # uint16
-    hp:               int  = 0      # uint16
-    ac:               int  = 0      # uint16 — armour class
-    open_sound:       ResRef = ResRef("")  # ResRef
-    close_sound:      ResRef = ResRef("")  # ResRef
-    cursor_index:     int  = 0      # uint32
-    trap_detect_dc:   int  = 0      # uint16
-    trap_disarm_dc:   int  = 0      # uint16
-    is_trapped:       int  = 0      # uint16
-    trap_detected:    int  = 0      # uint16
-    trap_launch_x:    int  = 0      # uint16
-    trap_launch_y:    int  = 0      # uint16
-    key_item:         ResRef = ResRef("")  # ResRef
-    door_script:      ResRef = ResRef("")  # ResRef
-    detection_difficulty: int = 0   # uint32
-    lock_difficulty:  int  = 0      # uint32
-    open_use_point:   List[int] = field(default_factory=lambda: [0,0])
-    close_use_point:  List[int] = field(default_factory=lambda: [0,0])
-    lock_pick_string: StrRef  = StrRef(0xFFFFFFFF)
-    linked_info:      str  = ""     # 32-char
-    name_strref:      StrRef  = StrRef(0xFFFFFFFF)
-    door_open_anim:   ResRef = ResRef("")  # ResRef
-    dialog:           ResRef = ResRef("")  # ResRef
-
-    open_vertices:  List[Vertex] = field(default_factory=list)
-    close_vertices: List[Vertex] = field(default_factory=list)
+# ─────────────────────────────────────────────────────────────────────────────
+# Items
+# ─────────────────────────────────────────────────────────────────────────────
+class AreItem:
+    """20 bytes. Inlined per container."""
+    __slots__=['item_resref','expiration_time','charges_1','charges_2','charges_3','flags']
 
     @classmethod
-    def _read(cls, r: BinaryReader) -> "Door":
-        name               = r.read_string(32)
-        door_id            = ResRef(r.read_resref())
-        flags              = r.read_uint32()
-        open_vi            = r.read_uint32()
-        open_vc            = r.read_uint16()
-        close_vi           = r.read_uint32()
-        close_vc           = r.read_uint16()
-        open_bbox          = [r.read_uint16() for _ in range(4)]
-        close_bbox         = [r.read_uint16() for _ in range(4)]
-        open_ci            = r.read_uint32()
-        open_cc            = r.read_uint16()
-        close_ci           = r.read_uint32()
-        close_cc           = r.read_uint16()
-        hp                 = r.read_uint16()
-        ac                 = r.read_uint16()
-        open_snd           = ResRef(r.read_resref())
-        close_snd          = ResRef(r.read_resref())
-        cursor_index       = r.read_uint32()
-        trap_detect        = r.read_uint16()
-        trap_disarm        = r.read_uint16()
-        is_trapped         = r.read_uint16()
-        trap_detected      = r.read_uint16()
-        trap_x             = r.read_uint16()
-        trap_y             = r.read_uint16()
-        key_item           = ResRef(r.read_resref())
-        door_script        = ResRef(r.read_resref())
-        detect_diff        = r.read_uint32()
-        lock_diff          = r.read_uint32()
-        open_use           = [r.read_uint16(), r.read_uint16()]
-        close_use          = [r.read_uint16(), r.read_uint16()]
-        lock_pick_str      = r.read_uint32()
-        linked_info        = r.read_string(32)
-        name_str           = r.read_uint32()
-        door_open_anim     = ResRef(r.read_resref())
-        dialog             = ResRef(r.read_resref())
-        return cls(
-            name=name, door_id=door_id, flags=flags,
-            open_vertex_index=open_vi, open_vertex_count=open_vc,
-            close_vertex_index=close_vi, close_vertex_count=close_vc,
-            open_bbox=open_bbox, close_bbox=close_bbox,
-            open_cell_index=open_ci, open_cell_count=open_cc,
-            close_cell_index=close_ci, close_cell_count=close_cc,
-            hp=hp, ac=ac, open_sound=open_snd, close_sound=close_snd,
-            cursor_index=cursor_index,
-            trap_detect_dc=trap_detect, trap_disarm_dc=trap_disarm,
-            is_trapped=is_trapped, trap_detected=trap_detected,
-            trap_launch_x=trap_x, trap_launch_y=trap_y,
-            key_item=key_item, door_script=door_script,
-            detection_difficulty=detect_diff, lock_difficulty=lock_diff,
-            open_use_point=open_use, close_use_point=close_use,
-            lock_pick_string=StrRef(lock_pick_str), linked_info=linked_info,
-            name_strref=StrRef(name_str), door_open_anim=door_open_anim,
-            dialog=dialog,
-        )
+    def from_bytes(cls, data):
+        assert len(data) >= ITEM_SIZE
+        it=cls.__new__(cls)
+        it.item_resref=_resref(data[0x00:0x08]); it.expiration_time=struct.unpack_from('<H',data,0x08)[0]
+        it.charges_1=struct.unpack_from('<H',data,0x0a)[0]; it.charges_2=struct.unpack_from('<H',data,0x0c)[0]
+        it.charges_3=struct.unpack_from('<H',data,0x0e)[0]; it.flags=struct.unpack_from('<I',data,0x10)[0]
+        return it
 
-    def _write(self, w: BinaryWriter, open_vi: int, close_vi: int) -> None:
-        w.write_bytes(self.name.encode("latin-1")[:32].ljust(32, b"\x00"))
-        w.write_resref(str(self.door_id))
-        w.write_uint32(self.flags)
-        w.write_uint32(open_vi)
-        w.write_uint16(len(self.open_vertices))
-        w.write_uint32(close_vi)
-        w.write_uint16(len(self.close_vertices))
-        for v in self.open_bbox[:4]:  w.write_uint16(v)
-        for v in self.close_bbox[:4]: w.write_uint16(v)
-        w.write_uint32(self.open_cell_index)
-        w.write_uint16(self.open_cell_count)
-        w.write_uint32(self.close_cell_index)
-        w.write_uint16(self.close_cell_count)
-        w.write_uint16(self.hp)
-        w.write_uint16(self.ac)
-        w.write_resref(str(self.open_sound))
-        w.write_resref(str(self.close_sound))
-        w.write_uint32(self.cursor_index)
-        w.write_uint16(self.trap_detect_dc)
-        w.write_uint16(self.trap_disarm_dc)
-        w.write_uint16(self.is_trapped)
-        w.write_uint16(self.trap_detected)
-        w.write_uint16(self.trap_launch_x)
-        w.write_uint16(self.trap_launch_y)
-        w.write_resref(str(self.key_item))
-        w.write_resref(str(self.door_script))
-        w.write_uint32(self.detection_difficulty)
-        w.write_uint32(self.lock_difficulty)
-        for v in self.open_use_point[:2]:  w.write_uint16(v)
-        for v in self.close_use_point[:2]: w.write_uint16(v)
-        w.write_uint32(int(self.lock_pick_string))
-        w.write_bytes(self.linked_info.encode("latin-1")[:32].ljust(32, b"\x00"))
-        w.write_uint32(int(self.name_strref))
-        w.write_resref(str(self.door_open_anim))
-        w.write_resref(str(self.dialog))
+    def to_bytes(self):
+        buf=bytearray(ITEM_SIZE); buf[0x00:0x08]=_resref_encode(self.item_resref)
+        struct.pack_into('<H',buf,0x08,self.expiration_time); struct.pack_into('<H',buf,0x0a,self.charges_1)
+        struct.pack_into('<H',buf,0x0c,self.charges_2); struct.pack_into('<H',buf,0x0e,self.charges_3)
+        struct.pack_into('<I',buf,0x10,self.flags)
+        return bytes(buf)
 
-    def to_json(self) -> dict:
-        d: dict = {"name": self.name, "door_id": self.door_id.to_json(),
-                   "flags": self.flags,
-                   "open_vertices":  [v.to_json() for v in self.open_vertices],
-                   "close_vertices": [v.to_json() for v in self.close_vertices]}
-        if self.key_item:     d["key_item"]     = self.key_item.to_json()
-        if self.door_script:  d["door_script"]  = self.door_script.to_json()
-        if self.open_sound:   d["open_sound"]   = self.open_sound.to_json()
-        if self.close_sound:  d["close_sound"]  = self.close_sound.to_json()
-        if self.dialog:       d["dialog"]       = self.dialog.to_json()
-        if self.hp:           d["hp"]           = self.hp
-        if self.is_trapped:   d["is_trapped"]   = self.is_trapped
-        if not self.name_strref.is_none: d["name_strref"] = self.name_strref.to_json()
-        return d
+    def to_json(self): return _sparse({'item_resref':self.item_resref,'expiration_time':self.expiration_time,
+        'charges_1':self.charges_1,'charges_2':self.charges_2,'charges_3':self.charges_3,'flags':self.flags})
 
     @classmethod
-    def from_json(cls, d: dict) -> "Door":
-        door = cls(
-            name=d.get("name",""), door_id=ResRef.from_json(d.get("door_id","")),
-            flags=d.get("flags",0),
-            key_item=ResRef.from_json(d.get("key_item","")),
-            door_script=ResRef.from_json(d.get("door_script","")),
-            open_sound=ResRef.from_json(d.get("open_sound","")),
-            close_sound=ResRef.from_json(d.get("close_sound","")),
-            dialog=ResRef.from_json(d.get("dialog","")), hp=d.get("hp",0),
-            is_trapped=d.get("is_trapped",0),
-            name_strref=StrRef.from_json(d.get("name_strref", 0xFFFFFFFF)),
-        )
-        door.open_vertices  = [Vertex.from_json(v) for v in d.get("open_vertices",[])]
-        door.close_vertices = [Vertex.from_json(v) for v in d.get("close_vertices",[])]
-        return door
+    def from_json(cls, d):
+        it=cls.__new__(cls); it.item_resref=d.get('item_resref',''); it.expiration_time=d.get('expiration_time',0)
+        it.charges_1=d.get('charges_1',0); it.charges_2=d.get('charges_2',0)
+        it.charges_3=d.get('charges_3',0); it.flags=d.get('flags',0)
+        return it
 
 
-# ---------------------------------------------------------------------------
-# Container  (192 bytes + vertices)
-# ---------------------------------------------------------------------------
-
-@dataclass
-class Container:
-    """A container object (chest, pile, etc.)."""
-    name:             str   = ""
-    x:                int   = 0
-    y:                int   = 0
-    container_type:   int   = ContainerType.PILE
-    lock_difficulty:  int   = 0
-    flags:            int   = 0
-    trap_detect_dc:   int   = 0
-    trap_disarm_dc:   int   = 0
-    is_trapped:       int   = 0
-    trap_detected:    int   = 0
-    trap_launch_x:    int   = 0
-    trap_launch_y:    int   = 0
-    bounding_box:     List[int] = field(default_factory=lambda: [0,0,0,0])
-    item_index:       int   = 0    # uint32 — first item in area item list
-    item_count:       int   = 0    # uint32
-    script_trap:      ResRef = ResRef("")  # ResRef
-    vertex_index:     int   = 0    # uint32
-    vertex_count:     int   = 0    # uint16
-    trigger_range:    int   = 0    # uint16
-    owner_name:       str   = ""   # 32-char
-    key_item:         ResRef = ResRef("")  # ResRef
-    break_difficulty: int   = 0
-    lock_pick_string: StrRef   = StrRef(0xFFFFFFFF)
-    unknown:          bytes = b"\x00" * 56
-
-    vertices: List[Vertex] = field(default_factory=list)
-    # Items in the container are stored in the area's global item list;
-    # item_index and item_count index into it.
+# ─────────────────────────────────────────────────────────────────────────────
+# Containers
+# ─────────────────────────────────────────────────────────────────────────────
+class AreContainer:
+    """192 bytes. Bounding box = 4 words at 0x0038 (IESDP typo corrected).
+    owner (0x0058) is 32-byte script name, not resref. Items+vertices inlined."""
+    __slots__=['name','x','y','container_type','lock_difficulty','flags',
+               'trap_detection_difficulty','trap_removal_difficulty',
+               'is_trapped','trap_detected','trap_launch_x','trap_launch_y',
+               'bounding_box','trap_script','trigger_range','owner',
+               'key_item','break_difficulty','lockpick_string','unused_88',
+               'items','vertices']
 
     @classmethod
-    def _read(cls, r: BinaryReader) -> "Container":
-        name          = r.read_string(32)
-        x             = r.read_uint16()
-        y             = r.read_uint16()
-        ctype         = r.read_uint16()
-        lock_diff     = r.read_uint16()
-        flags         = r.read_uint32()
-        trap_detect   = r.read_uint16()
-        trap_disarm   = r.read_uint16()
-        is_trapped    = r.read_uint16()
-        trap_detected = r.read_uint16()
-        trap_x        = r.read_uint16()
-        trap_y        = r.read_uint16()
-        bbox          = [r.read_uint16() for _ in range(4)]
-        item_index    = r.read_uint32()
-        item_count    = r.read_uint32()
-        script_trap   = ResRef(r.read_resref())
-        vi            = r.read_uint32()
-        vc            = r.read_uint16()
-        trig_range    = r.read_uint16()
-        owner         = r.read_string(32)
-        key_item      = ResRef(r.read_resref())
-        break_diff    = r.read_uint32()
-        lock_str      = r.read_uint32()
-        unknown       = r.read_bytes(56)
-        return cls(
-            name=name, x=x, y=y, container_type=ctype,
-            lock_difficulty=lock_diff, flags=flags,
-            trap_detect_dc=trap_detect, trap_disarm_dc=trap_disarm,
-            is_trapped=is_trapped, trap_detected=trap_detected,
-            trap_launch_x=trap_x, trap_launch_y=trap_y,
-            bounding_box=bbox, item_index=item_index, item_count=item_count,
-            script_trap=script_trap, vertex_index=vi, vertex_count=vc,
-            trigger_range=trig_range, owner_name=owner, key_item=key_item,
-            break_difficulty=break_diff, lock_pick_string=lock_str,
-            unknown=unknown,
-        )
+    def from_bytes(cls, data, item_pool, first_item_index, vertex_pool, first_vi):
+        assert len(data) >= CONTAINER_SIZE
+        c=cls.__new__(cls)
+        c.name=_str32(data[0x00:0x20]); c.x=struct.unpack_from('<H',data,0x20)[0]; c.y=struct.unpack_from('<H',data,0x22)[0]
+        c.container_type=struct.unpack_from('<H',data,0x24)[0]; c.lock_difficulty=struct.unpack_from('<H',data,0x26)[0]
+        c.flags=struct.unpack_from('<I',data,0x28)[0]
+        c.trap_detection_difficulty=struct.unpack_from('<H',data,0x2c)[0]
+        c.trap_removal_difficulty=struct.unpack_from('<H',data,0x2e)[0]
+        c.is_trapped=struct.unpack_from('<H',data,0x30)[0]; c.trap_detected=struct.unpack_from('<H',data,0x32)[0]
+        c.trap_launch_x=struct.unpack_from('<H',data,0x34)[0]; c.trap_launch_y=struct.unpack_from('<H',data,0x36)[0]
+        c.bounding_box=list(struct.unpack_from('<4H',data,0x38))
+        item_count=struct.unpack_from('<I',data,0x44)[0]; c.trap_script=_resref(data[0x48:0x50])
+        vertex_count=struct.unpack_from('<H',data,0x54)[0]; c.trigger_range=struct.unpack_from('<H',data,0x56)[0]
+        c.owner=_str32(data[0x58:0x78]); c.key_item=_resref(data[0x78:0x80])
+        c.break_difficulty=struct.unpack_from('<I',data,0x80)[0]; c.lockpick_string=struct.unpack_from('<I',data,0x84)[0]
+        c.unused_88=bytes(data[0x88:0xc0])
+        c.items=[AreItem.from_bytes(item_pool[(first_item_index+i)*ITEM_SIZE:(first_item_index+i)*ITEM_SIZE+ITEM_SIZE])
+                 for i in range(item_count) if (first_item_index+i)*ITEM_SIZE+ITEM_SIZE<=len(item_pool)]
+        c.vertices=_verts_from_pool(vertex_pool,first_vi,vertex_count)
+        return c
 
-    def _write(self, w: BinaryWriter, vertex_index: int, item_index: int) -> None:
-        w.write_bytes(self.name.encode("latin-1")[:32].ljust(32, b"\x00"))
-        w.write_uint16(self.x)
-        w.write_uint16(self.y)
-        w.write_uint16(self.container_type)
-        w.write_uint16(self.lock_difficulty)
-        w.write_uint32(self.flags)
-        w.write_uint16(self.trap_detect_dc)
-        w.write_uint16(self.trap_disarm_dc)
-        w.write_uint16(self.is_trapped)
-        w.write_uint16(self.trap_detected)
-        w.write_uint16(self.trap_launch_x)
-        w.write_uint16(self.trap_launch_y)
-        for v in self.bounding_box[:4]: w.write_uint16(v)
-        w.write_uint32(item_index)
-        w.write_uint32(len(self.items) if hasattr(self, "items") else self.item_count)
-        w.write_resref(str(self.script_trap))
-        w.write_uint32(vertex_index)
-        w.write_uint16(len(self.vertices))
-        w.write_uint16(self.trigger_range)
-        w.write_bytes(self.owner_name.encode("latin-1")[:32].ljust(32, b"\x00"))
-        w.write_resref(str(self.key_item))
-        w.write_uint32(self.break_difficulty)
-        w.write_uint32(int(self.lock_pick_string))
-        w.write_bytes(self.unknown[:56].ljust(56, b"\x00"))
+    def to_bytes(self, first_item_index, first_vi):
+        buf=bytearray(CONTAINER_SIZE)
+        buf[0x00:0x20]=_str32_encode(self.name)
+        struct.pack_into('<H',buf,0x20,self.x); struct.pack_into('<H',buf,0x22,self.y)
+        struct.pack_into('<H',buf,0x24,self.container_type); struct.pack_into('<H',buf,0x26,self.lock_difficulty)
+        struct.pack_into('<I',buf,0x28,self.flags)
+        struct.pack_into('<H',buf,0x2c,self.trap_detection_difficulty); struct.pack_into('<H',buf,0x2e,self.trap_removal_difficulty)
+        struct.pack_into('<H',buf,0x30,self.is_trapped); struct.pack_into('<H',buf,0x32,self.trap_detected)
+        struct.pack_into('<H',buf,0x34,self.trap_launch_x); struct.pack_into('<H',buf,0x36,self.trap_launch_y)
+        struct.pack_into('<4H',buf,0x38,*self.bounding_box)
+        struct.pack_into('<I',buf,0x40,first_item_index); struct.pack_into('<I',buf,0x44,len(self.items))
+        buf[0x48:0x50]=_resref_encode(self.trap_script)
+        struct.pack_into('<I',buf,0x50,first_vi); struct.pack_into('<H',buf,0x54,len(self.vertices))
+        struct.pack_into('<H',buf,0x56,self.trigger_range); buf[0x58:0x78]=_str32_encode(self.owner)
+        buf[0x78:0x80]=_resref_encode(self.key_item)
+        struct.pack_into('<I',buf,0x80,self.break_difficulty); struct.pack_into('<I',buf,0x84,self.lockpick_string)
+        buf[0x88:0xc0]=self.unused_88[:56]
+        return bytes(buf)
 
-    def to_json(self) -> dict:
-        d: dict = {"name": self.name, "x": self.x, "y": self.y,
-                   "type": self.container_type, "flags": self.flags,
-                   "vertices": [v.to_json() for v in self.vertices]}
-        if self.key_item:     d["key_item"]    = self.key_item.to_json()
-        if self.script_trap:  d["script_trap"] = self.script_trap.to_json()
-        if self.is_trapped:   d["is_trapped"]  = self.is_trapped
-        if self.lock_difficulty: d["lock_difficulty"] = self.lock_difficulty
-        if not self.lock_pick_string.is_none:
-            d["lock_pick_string"] = self.lock_pick_string.to_json()
-        return d
+    def to_json(self):
+        return _sparse({'name':self.name,'x':self.x,'y':self.y,
+            'container_type':self.container_type,'lock_difficulty':self.lock_difficulty,'flags':self.flags,
+            'trap_detection_difficulty':self.trap_detection_difficulty,
+            'trap_removal_difficulty':self.trap_removal_difficulty,
+            'is_trapped':self.is_trapped,'trap_detected':self.trap_detected,
+            'trap_launch_x':self.trap_launch_x,'trap_launch_y':self.trap_launch_y,
+            'bounding_box':self.bounding_box,'trap_script':self.trap_script,
+            'trigger_range':self.trigger_range,'owner':self.owner,'key_item':self.key_item,
+            'break_difficulty':self.break_difficulty,'lockpick_string':self.lockpick_string,
+            'items':[it.to_json() for it in self.items],'vertices':self.vertices})
 
     @classmethod
-    def from_json(cls, d: dict) -> "Container":
-        c = cls(
-            name=d.get("name",""), x=d.get("x",0), y=d.get("y",0),
-            container_type=d.get("type", ContainerType.PILE),
-            flags=d.get("flags",0),
-            key_item=ResRef.from_json(d.get("key_item","")),
-            script_trap=ResRef.from_json(d.get("script_trap","")),
-            is_trapped=d.get("is_trapped",0),
-            lock_difficulty=d.get("lock_difficulty",0),
-            lock_pick_string=StrRef.from_json(d.get("lock_pick_string", 0xFFFFFFFF)),
-        )
-        c.vertices = [Vertex.from_json(v) for v in d.get("vertices",[])]
+    def from_json(cls, d):
+        c=cls.__new__(cls); c.name=d.get('name',''); c.x=d.get('x',0); c.y=d.get('y',0)
+        c.container_type=d.get('container_type',0); c.lock_difficulty=d.get('lock_difficulty',0)
+        c.flags=d.get('flags',0); c.trap_detection_difficulty=d.get('trap_detection_difficulty',0)
+        c.trap_removal_difficulty=d.get('trap_removal_difficulty',0)
+        c.is_trapped=d.get('is_trapped',0); c.trap_detected=d.get('trap_detected',0)
+        c.trap_launch_x=d.get('trap_launch_x',0); c.trap_launch_y=d.get('trap_launch_y',0)
+        c.bounding_box=d.get('bounding_box',[0,0,0,0]); c.trap_script=d.get('trap_script','')
+        c.trigger_range=d.get('trigger_range',0); c.owner=d.get('owner',''); c.key_item=d.get('key_item','')
+        c.break_difficulty=d.get('break_difficulty',0); c.lockpick_string=d.get('lockpick_string',0)
+        c.unused_88=bytes(56)
+        c.items=[AreItem.from_json(it) for it in d.get('items',[])]
+        c.vertices=d.get('vertices',[])
         return c
 
 
-# ---------------------------------------------------------------------------
-# AreaAnimation  (76 bytes)
-# ---------------------------------------------------------------------------
-
-@dataclass
-class AreaAnimation:
-    """A looping visual animation placed in the area (fire, waterfall, etc.)."""
-    name:       str = ""
-    schedule:   int = 0      # uint32 — active-hours bitmask
-    x:          int = 0
-    y:          int = 0
-    animation:  ResRef = ResRef("")  # ResRef — BAM file
-    sequence:   int = 0      # uint16 — BAM sequence index
-    frame:      int = 0      # uint16 — starting frame
-    flags:      int = 0      # uint32
-    height:     int = 0      # int16 — render height offset
-    transparency: int = 0    # uint16 — 0=opaque
-    start_frame: int = 0     # uint16
-    looping_chance: int = 100 # uint8
-    skip_cycles: int = 0     # uint8
-    palette:    ResRef = ResRef("")  # ResRef — palette override
-    unknown:    int = 0      # uint16
-
-    @classmethod
-    def _read(cls, r: BinaryReader) -> "AreaAnimation":
-        name        = r.read_string(32)
-        schedule    = r.read_uint32()
-        x           = r.read_uint16()
-        y           = r.read_uint16()
-        animation   = ResRef(r.read_resref())
-        sequence    = r.read_uint16()
-        frame       = r.read_uint16()
-        flags       = r.read_uint32()
-        height      = r.read_int16()
-        transparency = r.read_uint16()
-        start_frame = r.read_uint16()
-        loop_chance = r.read_uint8()
-        skip        = r.read_uint8()
-        palette     = ResRef(r.read_resref())
-        unknown     = r.read_uint16()
-        return cls(
-            name=name, schedule=schedule, x=x, y=y, animation=animation,
-            sequence=sequence, frame=frame, flags=flags, height=height,
-            transparency=transparency, start_frame=start_frame,
-            looping_chance=loop_chance, skip_cycles=skip,
-            palette=palette, unknown=unknown,
-        )
-
-    def _write(self, w: BinaryWriter) -> None:
-        w.write_bytes(self.name.encode("latin-1")[:32].ljust(32, b"\x00"))
-        w.write_uint32(self.schedule)
-        w.write_uint16(self.x)
-        w.write_uint16(self.y)
-        w.write_resref(str(self.animation))
-        w.write_uint16(self.sequence)
-        w.write_uint16(self.frame)
-        w.write_uint32(self.flags)
-        w.write_int16(self.height)
-        w.write_uint16(self.transparency)
-        w.write_uint16(self.start_frame)
-        w.write_uint8(self.looping_chance)
-        w.write_uint8(self.skip_cycles)
-        w.write_resref(str(self.palette))
-        w.write_uint16(self.unknown)
-
-    def to_json(self) -> dict:
-        d: dict = {"name": self.name, "animation": self.animation.to_json(),
-                   "x": self.x, "y": self.y, "flags": self.flags}
-        if self.schedule:        d["schedule"]    = self.schedule
-        if self.transparency:    d["transparency"] = self.transparency
-        if self.palette:         d["palette"]     = self.palette.to_json()
-        if self.height:          d["height"]      = self.height
-        return d
-
-    @classmethod
-    def from_json(cls, d: dict) -> "AreaAnimation":
-        return cls(
-            name=d.get("name",""), animation=ResRef.from_json(d.get("animation","")),
-            x=d.get("x",0), y=d.get("y",0), flags=d.get("flags",0),
-            schedule=d.get("schedule",0), transparency=d.get("transparency",0),
-            palette=ResRef.from_json(d.get("palette","")), height=d.get("height",0),
-        )
-
-
-# ---------------------------------------------------------------------------
-# MapNote  (52 bytes)
-# ---------------------------------------------------------------------------
-
-@dataclass
-class MapNote:
-    """A note visible on the world map / area map."""
-    x:         int = 0
-    y:         int = 0
-    text:      StrRef = StrRef(0xFFFFFFFF)   # StrRef
-    color:     int = 0             # uint16
-
-    @classmethod
-    def _read(cls, r: BinaryReader) -> "MapNote":
-        x     = r.read_uint16()
-        y     = r.read_uint16()
-        text  = StrRef(r.read_uint32())
-        color = r.read_uint16()
-        r.skip(42)
-        return cls(x=x, y=y, text=text, color=color)
-
-    def _write(self, w: BinaryWriter) -> None:
-        w.write_uint16(self.x)
-        w.write_uint16(self.y)
-        w.write_uint32(int(self.text))
-        w.write_uint16(self.color)
-        w.write_padding(42)
-
-    def to_json(self) -> dict:
-        d: dict = {"x": self.x, "y": self.y, "text": self.text.to_json()}
-        if self.color: d["color"] = self.color
-        return d
-
-    @classmethod
-    def from_json(cls, d: dict) -> "MapNote":
-        return cls(x=d.get("x",0), y=d.get("y",0),
-                   text=StrRef.from_json(d.get("text", 0xFFFFFFFF)), color=d.get("color",0))
-
-
-# ---------------------------------------------------------------------------
-# RestEncounter  (228 bytes)
-# ---------------------------------------------------------------------------
-
-@dataclass
-class RestEncounter:
-    """Creatures that may ambush the party when resting in this area."""
-    name:            str   = ""
-    encounter_text:  List[StrRef] = field(default_factory=lambda: [StrRef(0xFFFFFFFF)]*10)
-    creature_resrefs: List[ResRef] = field(default_factory=lambda: [ResRef("")] * 10)
-    creature_count:  int   = 0
-    difficulty:      int   = 0
-    removal_time:    int   = 0
-    movement_rate:   int   = 0
-    dunno:           int   = 0
-    max_creatures:   int   = 0
-    enabled:         int   = 0
-
-    @classmethod
-    def _read(cls, r: BinaryReader) -> "RestEncounter":
-        name       = r.read_string(32)
-        enc_texts  = [StrRef(r.read_uint32()) for _ in range(10)]
-        creatures  = [ResRef(r.read_resref()) for _ in range(10)]
-        cre_count  = r.read_uint16()
-        difficulty = r.read_uint16()
-        removal    = r.read_uint32()
-        movement   = r.read_uint16()
-        dunno      = r.read_uint16()
-        max_cre    = r.read_uint16()
-        enabled    = r.read_uint16()
-        r.skip(56)
-        return cls(
-            name=name, encounter_text=enc_texts, creature_resrefs=creatures,
-            creature_count=cre_count, difficulty=difficulty,
-            removal_time=removal, movement_rate=movement, dunno=dunno,
-            max_creatures=max_cre, enabled=enabled,
-        )
-
-    def _write(self, w: BinaryWriter) -> None:
-        w.write_bytes(self.name.encode("latin-1")[:32].ljust(32, b"\x00"))
-        for t in (self.encounter_text + [StrRef(0xFFFFFFFF)]*10)[:10]:
-            w.write_uint32(int(t))
-        for i in range(10):
-            w.write_resref(str(self.creature_resrefs[i]) if i < len(self.creature_resrefs) else "")
-        w.write_uint16(self.creature_count)
-        w.write_uint16(self.difficulty)
-        w.write_uint32(self.removal_time)
-        w.write_uint16(self.movement_rate)
-        w.write_uint16(self.dunno)
-        w.write_uint16(self.max_creatures)
-        w.write_uint16(self.enabled)
-        w.write_padding(56)
-
-    def to_json(self) -> dict:
-        return {
-            "name": self.name,
-            "creatures": [c.to_json() for c in self.creature_resrefs if c],
-            "enabled": self.enabled,
-            "difficulty": self.difficulty,
-        }
-
-    @classmethod
-    def from_json(cls, d: dict) -> "RestEncounter":
-        creatures = d.get("creatures", [])
-        padded = ([ResRef.from_json(c) for c in creatures] + [ResRef("")] * 10)[:10]
-        return cls(
-            name=d.get("name",""), creature_resrefs=padded,
-            creature_count=len(creatures),
-            enabled=d.get("enabled",0), difficulty=d.get("difficulty",0),
-        )
-
-
-# ---------------------------------------------------------------------------
-# ARE header  (284 bytes for both V1.0 and V9.1 base)
-# ---------------------------------------------------------------------------
-
-@dataclass
-class AreHeader:
+# ─────────────────────────────────────────────────────────────────────────────
+# Ambients  (M4)
+# ─────────────────────────────────────────────────────────────────────────────
+class AreAmbient:
     """
-    The top-level area record.
+    212 bytes. Up to 10 sound slots; count_of_sounds (0x0080) governs how many
+    are active.  JSON stores only occupied slots; unused are zeroed on rebuild.
 
-    Offset fields are managed by :class:`AreFile` on write.
+    Flags (0x0090):
+      bit 0 enabled   bit 1 disable-env   bit 2 global
+      bit 3 random    bit 4 low-mem-1
     """
-    wed_resref:      ResRef = ResRef("")       # companion WED file
-    last_saved:      int   = 0             # uint32 — game-time timestamp
-    area_flags:      int   = AreaFlag.NONE
-    area_north:      ResRef = ResRef("")       # adjacent area N
-    area_east:       ResRef = ResRef("")
-    area_south:      ResRef = ResRef("")
-    area_west:       ResRef = ResRef("")
-    area_type:       int   = AreaType.DUNGEON
-    rain_probability: int  = 0             # uint16
-    snow_probability: int  = 0
-    fog_probability:  int  = 0
-    lightning_probability: int = 0
-    wind_speed:      int   = 0
-    area_script:     ResRef = ResRef("")       # ResRef
-    explored_mask_size: int = 0            # uint32 — for V9.1 fog-of-war
-    explored_mask_offset: int = 0          # uint32
-    # Music
-    day_song:        int   = 0             # uint16 — music table index
-    night_song:      int   = 0
-    win_song:        int   = 0
-    battle_song:     int   = 0
-    lose_song:       int   = 0
-    alt_music_1:     int   = 0
-    alt_music_2:     int   = 0
-    alt_music_3:     int   = 0
-    alt_music_4:     int   = 0
-    alt_music_5:     int   = 0
-
-    # Offsets/counts (managed on write)
-    actors_offset:        int = 0
-    actors_count:         int = 0
-    regions_offset:       int = 0
-    regions_count:        int = 0
-    spawn_offset:         int = 0
-    spawn_count:          int = 0
-    entrances_offset:     int = 0
-    entrances_count:      int = 0
-    containers_offset:    int = 0
-    containers_count:     int = 0
-    items_offset:         int = 0
-    items_count:          int = 0
-    vertices_offset:      int = 0
-    vertices_count:       int = 0
-    ambients_offset:      int = 0
-    ambients_count:       int = 0
-    variables_offset:     int = 0
-    variables_count:      int = 0
-    tiled_obj_offset:     int = 0
-    tiled_obj_count:      int = 0
-    doors_offset:         int = 0
-    doors_count:          int = 0
-    anims_offset:         int = 0
-    anims_count:          int = 0
-    notes_offset:         int = 0
-    notes_count:          int = 0
-    rest_offset:          int = 0
-    rest_count:           int = 0
-    unknown_offset:       int = 0   # V9.1 auto-map notes
-    unknown_count:        int = 0
-
-    # V9.1 extra fields (raw tail, same strategy as CRE v9_extra)
-    v91_extra: bytes = b""
+    __slots__=['name','x','y','radius','height','pitch_variance','volume_variance',
+               'volume','sounds','unused_82','base_time','base_time_deviation',
+               'appearance_schedule','flags','unused_94']
 
     @classmethod
-    def _read(cls, r: BinaryReader, version: bytes) -> "AreHeader":
-        wed_resref     = ResRef(r.read_resref())
-        last_saved     = r.read_uint32()
-        area_flags     = r.read_uint32()
-        area_north     = ResRef(r.read_resref())
-        area_east      = ResRef(r.read_resref())
-        area_south     = ResRef(r.read_resref())
-        area_west      = ResRef(r.read_resref())
-        area_type      = r.read_uint16()
-        rain_prob      = r.read_uint16()
-        snow_prob      = r.read_uint16()
-        fog_prob       = r.read_uint16()
-        lightning_prob = r.read_uint16()
-        wind_speed     = r.read_uint16()
-        actors_off     = r.read_uint32()
-        actors_cnt     = r.read_uint16()
-        regions_cnt    = r.read_uint16()
-        regions_off    = r.read_uint32()
-        spawn_off      = r.read_uint32()
-        spawn_cnt      = r.read_uint32()
-        entrances_off  = r.read_uint32()
-        entrances_cnt  = r.read_uint32()
-        containers_off = r.read_uint32()
-        containers_cnt = r.read_uint16()
-        items_cnt      = r.read_uint16()
-        items_off      = r.read_uint32()
-        vertices_off   = r.read_uint32()
-        vertices_cnt   = r.read_uint16()
-        ambients_cnt   = r.read_uint16()
-        ambients_off   = r.read_uint32()
-        variables_off  = r.read_uint32()
-        variables_cnt  = r.read_uint32()
-        tiled_obj_off  = r.read_uint32()
-        tiled_obj_cnt  = r.read_uint32()
-        area_script    = ResRef(r.read_resref())
-        expl_mask_size = r.read_uint32()
-        expl_mask_off  = r.read_uint32()
-        doors_off      = r.read_uint32()
-        doors_cnt      = r.read_uint32()
-        anims_off      = r.read_uint32()
-        anims_cnt      = r.read_uint32()
-        notes_off      = r.read_uint32()
-        notes_cnt      = r.read_uint32()
-        songs_raw      = [r.read_uint16() for _ in range(10)]
-        rest_off       = r.read_uint32()
-        rest_cnt       = r.read_uint32()
-        unknown_off    = r.read_uint32()
-        unknown_cnt    = r.read_uint32()
-        r.skip(72)     # reserved
+    def from_bytes(cls, data):
+        assert len(data) >= AMBIENT_SIZE
+        a=cls.__new__(cls)
+        a.name=_str32(data[0x00:0x20]); a.x=struct.unpack_from('<H',data,0x20)[0]; a.y=struct.unpack_from('<H',data,0x22)[0]
+        a.radius=struct.unpack_from('<H',data,0x24)[0]; a.height=struct.unpack_from('<H',data,0x26)[0]
+        a.pitch_variance=struct.unpack_from('<I',data,0x28)[0]; a.volume_variance=struct.unpack_from('<H',data,0x2c)[0]
+        a.volume=struct.unpack_from('<H',data,0x2e)[0]
+        count=struct.unpack_from('<H',data,0x80)[0]
+        all_snd=[_resref(data[0x30+i*8:0x30+i*8+8]) for i in range(10)]
+        a.sounds=all_snd[:count]
+        a.unused_82=struct.unpack_from('<H',data,0x82)[0]
+        a.base_time=struct.unpack_from('<I',data,0x84)[0]; a.base_time_deviation=struct.unpack_from('<I',data,0x88)[0]
+        a.appearance_schedule=struct.unpack_from('<I',data,0x8c)[0]; a.flags=struct.unpack_from('<I',data,0x90)[0]
+        a.unused_94=bytes(data[0x94:0xd4])
+        return a
 
-        # V9.1 appends extra fog-of-war and other data after the 284-byte base
-        v91_extra = b""
-        if version == VERSION_V91:
-            # Capture remaining header bytes; explored mask data follows
-            v91_extra = r.read_bytes_at(HEADER_SIZE_V1,
-                                         max(0, expl_mask_size)) if expl_mask_size else b""
+    def to_bytes(self):
+        buf=bytearray(AMBIENT_SIZE)
+        buf[0x00:0x20]=_str32_encode(self.name)
+        struct.pack_into('<H',buf,0x20,self.x); struct.pack_into('<H',buf,0x22,self.y)
+        struct.pack_into('<H',buf,0x24,self.radius); struct.pack_into('<H',buf,0x26,self.height)
+        struct.pack_into('<I',buf,0x28,self.pitch_variance); struct.pack_into('<H',buf,0x2c,self.volume_variance)
+        struct.pack_into('<H',buf,0x2e,self.volume)
+        snd=(list(self.sounds)+['']*10)[:10]
+        for i in range(10): buf[0x30+i*8:0x30+i*8+8]=_resref_encode(snd[i])
+        struct.pack_into('<H',buf,0x80,len(self.sounds)); struct.pack_into('<H',buf,0x82,self.unused_82)
+        struct.pack_into('<I',buf,0x84,self.base_time); struct.pack_into('<I',buf,0x88,self.base_time_deviation)
+        struct.pack_into('<I',buf,0x8c,self.appearance_schedule); struct.pack_into('<I',buf,0x90,self.flags)
+        buf[0x94:0xd4]=self.unused_94[:64]
+        return bytes(buf)
 
-        return cls(
-            wed_resref=wed_resref, last_saved=last_saved,
-            area_flags=area_flags,
-            area_north=area_north, area_east=area_east,
-            area_south=area_south, area_west=area_west,
-            area_type=area_type,
-            rain_probability=rain_prob, snow_probability=snow_prob,
-            fog_probability=fog_prob,
-            lightning_probability=lightning_prob, wind_speed=wind_speed,
-            area_script=area_script,
-            explored_mask_size=expl_mask_size,
-            explored_mask_offset=expl_mask_off,
-            day_song=songs_raw[0], night_song=songs_raw[1],
-            win_song=songs_raw[2], battle_song=songs_raw[3],
-            lose_song=songs_raw[4],
-            alt_music_1=songs_raw[5], alt_music_2=songs_raw[6],
-            alt_music_3=songs_raw[7], alt_music_4=songs_raw[8],
-            alt_music_5=songs_raw[9],
-            actors_offset=actors_off, actors_count=actors_cnt,
-            regions_offset=regions_off, regions_count=regions_cnt,
-            spawn_offset=spawn_off, spawn_count=spawn_cnt,
-            entrances_offset=entrances_off, entrances_count=entrances_cnt,
-            containers_offset=containers_off, containers_count=containers_cnt,
-            items_offset=items_off, items_count=items_cnt,
-            vertices_offset=vertices_off, vertices_count=vertices_cnt,
-            ambients_offset=ambients_off, ambients_count=ambients_cnt,
-            variables_offset=variables_off, variables_count=variables_cnt,
-            tiled_obj_offset=tiled_obj_off, tiled_obj_count=tiled_obj_cnt,
-            doors_offset=doors_off, doors_count=doors_cnt,
-            anims_offset=anims_off, anims_count=anims_cnt,
-            notes_offset=notes_off, notes_count=notes_cnt,
-            rest_offset=rest_off, rest_count=rest_cnt,
-            unknown_offset=unknown_off, unknown_count=unknown_cnt,
-            v91_extra=v91_extra,
-        )
-
-    def _write(self, w: BinaryWriter) -> None:
-        w.write_resref(str(self.wed_resref))
-        w.write_uint32(self.last_saved)
-        w.write_uint32(self.area_flags)
-        w.write_resref(str(self.area_north))
-        w.write_resref(str(self.area_east))
-        w.write_resref(str(self.area_south))
-        w.write_resref(str(self.area_west))
-        w.write_uint16(self.area_type)
-        w.write_uint16(self.rain_probability)
-        w.write_uint16(self.snow_probability)
-        w.write_uint16(self.fog_probability)
-        w.write_uint16(self.lightning_probability)
-        w.write_uint16(self.wind_speed)
-        w.write_uint32(self.actors_offset)
-        w.write_uint16(self.actors_count)
-        w.write_uint16(self.regions_count)
-        w.write_uint32(self.regions_offset)
-        w.write_uint32(self.spawn_offset)
-        w.write_uint32(self.spawn_count)
-        w.write_uint32(self.entrances_offset)
-        w.write_uint32(self.entrances_count)
-        w.write_uint32(self.containers_offset)
-        w.write_uint16(self.containers_count)
-        w.write_uint16(self.items_count)
-        w.write_uint32(self.items_offset)
-        w.write_uint32(self.vertices_offset)
-        w.write_uint16(self.vertices_count)
-        w.write_uint16(self.ambients_count)
-        w.write_uint32(self.ambients_offset)
-        w.write_uint32(self.variables_offset)
-        w.write_uint32(self.variables_count)
-        w.write_uint32(self.tiled_obj_offset)
-        w.write_uint32(self.tiled_obj_count)
-        w.write_resref(str(self.area_script))
-        w.write_uint32(self.explored_mask_size)
-        w.write_uint32(self.explored_mask_offset)
-        w.write_uint32(self.doors_offset)
-        w.write_uint32(self.doors_count)
-        w.write_uint32(self.anims_offset)
-        w.write_uint32(self.anims_count)
-        w.write_uint32(self.notes_offset)
-        w.write_uint32(self.notes_count)
-        for s in (self.day_song, self.night_song, self.win_song,
-                  self.battle_song, self.lose_song, self.alt_music_1,
-                  self.alt_music_2, self.alt_music_3, self.alt_music_4,
-                  self.alt_music_5):
-            w.write_uint16(s)
-        w.write_uint32(self.rest_offset)
-        w.write_uint32(self.rest_count)
-        w.write_uint32(self.unknown_offset)
-        w.write_uint32(self.unknown_count)
-        w.write_padding(72)
-
-
-# ---------------------------------------------------------------------------
-# Variable  (84 bytes)
-# ---------------------------------------------------------------------------
-
-@dataclass
-class AreaVariable:
-    """A local area variable (name + value)."""
-    name:  str = ""    # 32 chars
-    type_: int = 0     # uint16
-    res_b: int = 0     # uint8 — resource field B
-    res_c: int = 0
-    dword_val: int = 0
-    int_val:   int = 0
-    double_val: int = 0
-    script_name: str = ""  # 32 chars
+    def to_json(self):
+        return _sparse({'name':self.name,'x':self.x,'y':self.y,'radius':self.radius,'height':self.height,
+            'pitch_variance':self.pitch_variance,'volume_variance':self.volume_variance,'volume':self.volume,
+            'sounds':self.sounds,'base_time':self.base_time,'base_time_deviation':self.base_time_deviation,
+            'appearance_schedule':self.appearance_schedule,'flags':self.flags})
 
     @classmethod
-    def _read(cls, r: BinaryReader) -> "AreaVariable":
-        name       = r.read_string(32)
-        type_      = r.read_uint16()
-        res_b      = r.read_uint8()
-        res_c      = r.read_uint8()
-        dword_val  = r.read_uint32()
-        int_val    = r.read_int32()
-        double_val = r.read_uint32()  # stored as uint32 in file
-        script_name = r.read_string(32)
-        r.skip(8)
-        return cls(name=name, type_=type_, res_b=res_b, res_c=res_c,
-                   dword_val=dword_val, int_val=int_val, double_val=double_val,
-                   script_name=script_name)
+    def from_json(cls, d):
+        a=cls.__new__(cls); a.name=d.get('name',''); a.x=d.get('x',0); a.y=d.get('y',0)
+        a.radius=d.get('radius',0); a.height=d.get('height',0)
+        a.pitch_variance=d.get('pitch_variance',0); a.volume_variance=d.get('volume_variance',0)
+        a.volume=d.get('volume',0); a.sounds=d.get('sounds',[]); a.unused_82=0
+        a.base_time=d.get('base_time',0); a.base_time_deviation=d.get('base_time_deviation',0)
+        a.appearance_schedule=d.get('appearance_schedule',0); a.flags=d.get('flags',0)
+        a.unused_94=bytes(64)
+        return a
 
-    def _write(self, w: BinaryWriter) -> None:
-        w.write_bytes(self.name.encode("latin-1")[:32].ljust(32, b"\x00"))
-        w.write_uint16(self.type_)
-        w.write_uint8(self.res_b)
-        w.write_uint8(self.res_c)
-        w.write_uint32(self.dword_val)
-        w.write_int32(self.int_val)
-        w.write_uint32(self.double_val)
-        w.write_bytes(self.script_name.encode("latin-1")[:32].ljust(32, b"\x00"))
-        w.write_padding(8)
 
-    def to_json(self) -> dict:
-        d: dict = {"name": self.name, "type": self.type_}
-        if self.dword_val: d["dword_val"] = self.dword_val
-        if self.int_val:   d["int_val"]   = self.int_val
-        if self.script_name: d["script_name"] = self.script_name
+# ─────────────────────────────────────────────────────────────────────────────
+# Variables  (M4)
+# ─────────────────────────────────────────────────────────────────────────────
+class AreVariable:
+    """
+    84 bytes. var_type bitfield: bit0=int bit1=float bit2=scriptname
+              bit3=resref bit4=strref bit5=dword.
+    Engine only reads/writes INT; all fields stored for round-trip fidelity.
+    double_value at 0x002c is IEEE-754 64-bit; script_name at 0x0034 is 32-byte
+    char array (not a resref).
+    """
+    __slots__=['name','var_type','resource_type','dword_value','int_value','double_value','script_name']
+
+    @classmethod
+    def from_bytes(cls, data):
+        assert len(data) >= VARIABLE_SIZE
+        v=cls.__new__(cls)
+        v.name=_str32(data[0x00:0x20]); v.var_type=struct.unpack_from('<H',data,0x20)[0]
+        v.resource_type=struct.unpack_from('<H',data,0x22)[0]
+        v.dword_value=struct.unpack_from('<I',data,0x24)[0]; v.int_value=struct.unpack_from('<i',data,0x28)[0]
+        v.double_value=struct.unpack_from('<d',data,0x2c)[0]; v.script_name=_str32(data[0x34:0x54])
+        return v
+
+    def to_bytes(self):
+        buf=bytearray(VARIABLE_SIZE)
+        buf[0x00:0x20]=_str32_encode(self.name)
+        struct.pack_into('<H',buf,0x20,self.var_type); struct.pack_into('<H',buf,0x22,self.resource_type)
+        struct.pack_into('<I',buf,0x24,self.dword_value); struct.pack_into('<i',buf,0x28,self.int_value)
+        struct.pack_into('<d',buf,0x2c,self.double_value); buf[0x34:0x54]=_str32_encode(self.script_name)
+        return bytes(buf)
+
+    def to_json(self):
+        d={'name':self.name,'var_type':self.var_type,'resource_type':self.resource_type,
+           'dword_value':self.dword_value,'int_value':self.int_value,
+           'double_value':self.double_value,'script_name':self.script_name}
+        return _sparse(d)
+
+    @classmethod
+    def from_json(cls, d):
+        v=cls.__new__(cls); v.name=d.get('name',''); v.var_type=d.get('var_type',1)
+        v.resource_type=d.get('resource_type',0); v.dword_value=d.get('dword_value',0)
+        v.int_value=d.get('int_value',0); v.double_value=d.get('double_value',0.0)
+        v.script_name=d.get('script_name','')
+        return v
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Doors  (M4)
+# ─────────────────────────────────────────────────────────────────────────────
+class AreDoor:
+    """
+    200 bytes. Four vertex sets drawn from the shared global pool:
+      vertices_open / vertices_closed — door polygon outline
+      impeded_open  / impeded_closed  — search-map cell coords blocked
+    All four inlined as [[x,y],...] in JSON; AreFile rebuilds the pool.
+
+    door_id (0x0020): 8-byte char array linking to WED (not a resref).
+    approach_points (0x0090): two word-pairs [[x0,y0],[x1,y1]].
+    travel_trigger_name (0x009c): 24-byte char array.
+    bbox_open / bbox_closed (0x0038 / 0x0040): 4 words each [l,t,r,b].
+
+    IESDP field layout for vertex index/count pairs:
+      0x002c first_vertex_open (dword)    0x0030 count_open (word)
+      0x0032 count_closed (word)          0x0034 first_vertex_closed (dword)
+      0x0048 first_impeded_open (dword)   0x004c count_impeded_open (word)
+      0x004e count_impeded_closed (word)  0x0050 first_impeded_closed (dword)
+    """
+    __slots__=['name','door_id','flags','bbox_open','bbox_closed',
+               'hit_points','armor_class','open_sound','close_sound','cursor_index',
+               'trap_detection_difficulty','trap_removal_difficulty',
+               'is_trapped','trap_detected','trap_launch_x','trap_launch_y',
+               'key_item','door_script','detection_difficulty','lock_difficulty',
+               'approach_points','lockpick_string','travel_trigger_name',
+               'dialog_speaker_name','dialog_resref','unknown_c0',
+               'vertices_open','vertices_closed','impeded_open','impeded_closed']
+
+    @classmethod
+    def from_bytes(cls, data, vertex_pool,
+                   first_vi_open, count_vi_open,
+                   first_vi_closed, count_vi_closed,
+                   first_imp_open, count_imp_open,
+                   first_imp_closed, count_imp_closed):
+        assert len(data) >= DOOR_SIZE
+        d=cls.__new__(cls)
+        d.name=_str32(data[0x00:0x20]); d.door_id=data[0x20:0x28].rstrip(b'\x00').decode('latin-1')
+        d.flags=struct.unpack_from('<I',data,0x28)[0]
+        d.bbox_open=list(struct.unpack_from('<4H',data,0x38)); d.bbox_closed=list(struct.unpack_from('<4H',data,0x40))
+        d.hit_points=struct.unpack_from('<H',data,0x54)[0]; d.armor_class=struct.unpack_from('<H',data,0x56)[0]
+        d.open_sound=_resref(data[0x58:0x60]); d.close_sound=_resref(data[0x60:0x68])
+        d.cursor_index=struct.unpack_from('<I',data,0x68)[0]
+        d.trap_detection_difficulty=struct.unpack_from('<H',data,0x6c)[0]
+        d.trap_removal_difficulty=struct.unpack_from('<H',data,0x6e)[0]
+        d.is_trapped=struct.unpack_from('<H',data,0x70)[0]; d.trap_detected=struct.unpack_from('<H',data,0x72)[0]
+        d.trap_launch_x=struct.unpack_from('<H',data,0x74)[0]; d.trap_launch_y=struct.unpack_from('<H',data,0x76)[0]
+        d.key_item=_resref(data[0x78:0x80]); d.door_script=_resref(data[0x80:0x88])
+        d.detection_difficulty=struct.unpack_from('<I',data,0x88)[0]
+        d.lock_difficulty=struct.unpack_from('<I',data,0x8c)[0]
+        pts=struct.unpack_from('<4H',data,0x90)
+        d.approach_points=[[pts[0],pts[1]],[pts[2],pts[3]]]
+        d.lockpick_string=struct.unpack_from('<I',data,0x98)[0]
+        d.travel_trigger_name=data[0x9c:0xb4].rstrip(b'\x00').decode('latin-1')
+        d.dialog_speaker_name=struct.unpack_from('<I',data,0xb4)[0]
+        d.dialog_resref=_resref(data[0xb8:0xc0]); d.unknown_c0=bytes(data[0xc0:0xc8])
+        d.vertices_open  =_verts_from_pool(vertex_pool,first_vi_open,  count_vi_open)
+        d.vertices_closed=_verts_from_pool(vertex_pool,first_vi_closed,count_vi_closed)
+        d.impeded_open   =_verts_from_pool(vertex_pool,first_imp_open, count_imp_open)
+        d.impeded_closed =_verts_from_pool(vertex_pool,first_imp_closed,count_imp_closed)
         return d
 
+    def to_bytes(self, first_vi_open, first_vi_closed, first_imp_open, first_imp_closed):
+        buf=bytearray(DOOR_SIZE)
+        buf[0x00:0x20]=_str32_encode(self.name)
+        buf[0x20:0x28]=self.door_id.encode('latin-1')[:8].ljust(8,b'\x00')
+        struct.pack_into('<I',buf,0x28,self.flags)
+        struct.pack_into('<I',buf,0x2c,first_vi_open)
+        struct.pack_into('<H',buf,0x30,len(self.vertices_open))
+        struct.pack_into('<H',buf,0x32,len(self.vertices_closed))
+        struct.pack_into('<I',buf,0x34,first_vi_closed)
+        struct.pack_into('<4H',buf,0x38,*self.bbox_open)
+        struct.pack_into('<4H',buf,0x40,*self.bbox_closed)
+        struct.pack_into('<I',buf,0x48,first_imp_open)
+        struct.pack_into('<H',buf,0x4c,len(self.impeded_open))
+        struct.pack_into('<H',buf,0x4e,len(self.impeded_closed))
+        struct.pack_into('<I',buf,0x50,first_imp_closed)
+        struct.pack_into('<H',buf,0x54,self.hit_points); struct.pack_into('<H',buf,0x56,self.armor_class)
+        buf[0x58:0x60]=_resref_encode(self.open_sound); buf[0x60:0x68]=_resref_encode(self.close_sound)
+        struct.pack_into('<I',buf,0x68,self.cursor_index)
+        struct.pack_into('<H',buf,0x6c,self.trap_detection_difficulty)
+        struct.pack_into('<H',buf,0x6e,self.trap_removal_difficulty)
+        struct.pack_into('<H',buf,0x70,self.is_trapped); struct.pack_into('<H',buf,0x72,self.trap_detected)
+        struct.pack_into('<H',buf,0x74,self.trap_launch_x); struct.pack_into('<H',buf,0x76,self.trap_launch_y)
+        buf[0x78:0x80]=_resref_encode(self.key_item); buf[0x80:0x88]=_resref_encode(self.door_script)
+        struct.pack_into('<I',buf,0x88,self.detection_difficulty); struct.pack_into('<I',buf,0x8c,self.lock_difficulty)
+        p0=self.approach_points[0] if len(self.approach_points)>0 else [0,0]
+        p1=self.approach_points[1] if len(self.approach_points)>1 else [0,0]
+        struct.pack_into('<4H',buf,0x90,p0[0],p0[1],p1[0],p1[1])
+        struct.pack_into('<I',buf,0x98,self.lockpick_string)
+        buf[0x9c:0xb4]=_strn_encode(self.travel_trigger_name,24)
+        struct.pack_into('<I',buf,0xb4,self.dialog_speaker_name)
+        buf[0xb8:0xc0]=_resref_encode(self.dialog_resref); buf[0xc0:0xc8]=self.unknown_c0[:8]
+        return bytes(buf)
+
+    def to_json(self):
+        return _sparse({'name':self.name,'door_id':self.door_id,'flags':self.flags,
+            'bbox_open':self.bbox_open,'bbox_closed':self.bbox_closed,
+            'hit_points':self.hit_points,'armor_class':self.armor_class,
+            'open_sound':self.open_sound,'close_sound':self.close_sound,'cursor_index':self.cursor_index,
+            'trap_detection_difficulty':self.trap_detection_difficulty,
+            'trap_removal_difficulty':self.trap_removal_difficulty,
+            'is_trapped':self.is_trapped,'trap_detected':self.trap_detected,
+            'trap_launch_x':self.trap_launch_x,'trap_launch_y':self.trap_launch_y,
+            'key_item':self.key_item,'door_script':self.door_script,
+            'detection_difficulty':self.detection_difficulty,'lock_difficulty':self.lock_difficulty,
+            'approach_points':self.approach_points,'lockpick_string':self.lockpick_string,
+            'travel_trigger_name':self.travel_trigger_name,'dialog_speaker_name':self.dialog_speaker_name,
+            'dialog_resref':self.dialog_resref,
+            'unknown_c0':self.unknown_c0.hex() if any(self.unknown_c0) else None,
+            'vertices_open':self.vertices_open,'vertices_closed':self.vertices_closed,
+            'impeded_open':self.impeded_open,'impeded_closed':self.impeded_closed})
+
     @classmethod
-    def from_json(cls, d: dict) -> "AreaVariable":
-        return cls(name=d.get("name",""), type_=d.get("type",0),
-                   dword_val=d.get("dword_val",0), int_val=d.get("int_val",0),
-                   script_name=d.get("script_name",""))
+    def from_json(cls, d):
+        door=cls.__new__(cls); door.name=d.get('name',''); door.door_id=d.get('door_id','')
+        door.flags=d.get('flags',0); door.bbox_open=d.get('bbox_open',[0,0,0,0]); door.bbox_closed=d.get('bbox_closed',[0,0,0,0])
+        door.hit_points=d.get('hit_points',0); door.armor_class=d.get('armor_class',0)
+        door.open_sound=d.get('open_sound',''); door.close_sound=d.get('close_sound','')
+        door.cursor_index=d.get('cursor_index',0)
+        door.trap_detection_difficulty=d.get('trap_detection_difficulty',0)
+        door.trap_removal_difficulty=d.get('trap_removal_difficulty',0)
+        door.is_trapped=d.get('is_trapped',0); door.trap_detected=d.get('trap_detected',0)
+        door.trap_launch_x=d.get('trap_launch_x',0); door.trap_launch_y=d.get('trap_launch_y',0)
+        door.key_item=d.get('key_item',''); door.door_script=d.get('door_script','')
+        door.detection_difficulty=d.get('detection_difficulty',0)
+        door.lock_difficulty=d.get('lock_difficulty',0)
+        door.approach_points=d.get('approach_points',[[0,0],[0,0]])
+        door.lockpick_string=d.get('lockpick_string',0)
+        door.travel_trigger_name=d.get('travel_trigger_name','')
+        door.dialog_speaker_name=d.get('dialog_speaker_name',0)
+        door.dialog_resref=d.get('dialog_resref','')
+        uc=d.get('unknown_c0'); door.unknown_c0=bytes.fromhex(uc) if uc else bytes(8)
+        door.vertices_open  =d.get('vertices_open',[])
+        door.vertices_closed=d.get('vertices_closed',[])
+        door.impeded_open   =d.get('impeded_open',[])
+        door.impeded_closed =d.get('impeded_closed',[])
+        return door
 
 
-# ---------------------------------------------------------------------------
-# ContainerItem  (shared item record stored in area item list)  (20 bytes)
-# ---------------------------------------------------------------------------
-
-@dataclass
-class AreaItem:
-    """An item stored in a container within this area."""
-    resref:   ResRef = ResRef("")
-    flags:    int = 0     # uint16 — identified, stolen, etc.
-    charges1: int = 0
-    charges2: int = 0
-    charges3: int = 0
-
-    FLAG_IDENTIFIED  = 0x0001
-    FLAG_UNSTEALABLE = 0x0002
-    FLAG_STOLEN      = 0x0004
-    FLAG_UNDROPPABLE = 0x0008
-
-    @classmethod
-    def _read(cls, r: BinaryReader) -> "AreaItem":
-        resref   = ResRef(r.read_resref())
-        flags    = r.read_uint16()
-        charges1 = r.read_uint16()
-        charges2 = r.read_uint16()
-        charges3 = r.read_uint16()
-        r.skip(4)
-        return cls(resref=resref, flags=flags,
-                   charges1=charges1, charges2=charges2, charges3=charges3)
-
-    def _write(self, w: BinaryWriter) -> None:
-        w.write_resref(str(self.resref))
-        w.write_uint16(self.flags)
-        w.write_uint16(self.charges1)
-        w.write_uint16(self.charges2)
-        w.write_uint16(self.charges3)
-        w.write_padding(4)
-
-    def to_json(self) -> dict:
-        d: dict = {"resref": self.resref.to_json()}
-        if self.flags:    d["flags"]    = self.flags
-        if self.charges1: d["charges1"] = self.charges1
-        if self.charges2: d["charges2"] = self.charges2
-        if self.charges3: d["charges3"] = self.charges3
-        return d
-
-    @classmethod
-    def from_json(cls, d: dict) -> "AreaItem":
-        return cls(resref=ResRef.from_json(d.get("resref","")), flags=d.get("flags",0),
-                   charges1=d.get("charges1",0), charges2=d.get("charges2",0),
-                   charges3=d.get("charges3",0))
-
-
-# ---------------------------------------------------------------------------
-# AreFile — top-level container
-# ---------------------------------------------------------------------------
-
+# ─────────────────────────────────────────────────────────────────────────────
+# AreFile
+# ─────────────────────────────────────────────────────────────────────────────
 class AreFile:
     """
-    A complete ARE resource.
+    ARE V1.0 file container.
 
-    All sub-arrays are exposed as typed lists.  The global vertex array is
-    resolved into each structure's own ``vertices`` list on read, and
-    rebuilt from those lists on write.
+    Vertex pool layout (rebuilt on every to_bytes):
+      region[0..n] vertices | container[0..n] vertices |
+      door[0] verts_open | door[0] verts_closed | door[0] impeded_open | door[0] impeded_closed |
+      door[1] ... | ...
 
-    Attributes::
+    Item pool: rebuilt from containers in order.
 
-        header          — :class:`AreHeader`
-        actors          — List[:class:`Actor`]
-        regions         — List[:class:`Region`]       (triggers/info/travel)
-        spawn_points    — List[:class:`SpawnPoint`]
-        entrances       — List[:class:`Entrance`]
-        containers      — List[:class:`Container`]
-        items           — List[:class:`AreaItem`]     (container contents)
-        ambients        — List[:class:`Ambient`]
-        variables       — List[:class:`AreaVariable`]
-        doors           — List[:class:`Door`]
-        animations      — List[:class:`AreaAnimation`]
-        notes           — List[:class:`MapNote`]
-        rest_encounters — List[:class:`RestEncounter`]
+    Typed sections complete through M4:
+      actors, regions, spawn_points, entrances, containers, ambients, variables, doors
 
-    Usage::
-
-        area = AreFile.from_file("AR0602.are")
-        print(area.header.wed_resref)
-        for actor in area.actors:
-            print(actor.name, actor.cre_resref)
+    Raw blobs pending M5:
+      _raw_animations, _raw_automap_notes, _raw_tiled_objects,
+      _raw_projectile_traps, _raw_song_entries, _raw_rest_interruptions
     """
 
-    def __init__(
-        self,
-        header:          AreHeader,
-        actors:          List[Actor],
-        regions:         List[Region],
-        spawn_points:    List[SpawnPoint],
-        entrances:       List[Entrance],
-        containers:      List[Container],
-        items:           List[AreaItem],
-        ambients:        List[Ambient],
-        variables:       List[AreaVariable],
-        doors:           List[Door],
-        animations:      List[AreaAnimation],
-        notes:           List[MapNote],
-        rest_encounters: List[RestEncounter],
-        version:         bytes = VERSION_V1,
-        source_path:     Optional[Path] = None,
-    ) -> None:
-        self.header          = header
-        self.actors          = actors
-        self.regions         = regions
-        self.spawn_points    = spawn_points
-        self.entrances       = entrances
-        self.containers      = containers
-        self.items           = items
-        self.ambients        = ambients
-        self.variables       = variables
-        self.doors           = doors
-        self.animations      = animations
-        self.notes           = notes
-        self.rest_encounters = rest_encounters
-        self.version         = version
-        self.source_path     = source_path
+    def __init__(self):
+        self.header: Optional[AreHeader] = None
+        self.actors:       List[AreActor]      = []
+        self.regions:      List[AreRegion]     = []
+        self.spawn_points: List[AreSpawnPoint] = []
+        self.entrances:    List[AreEntrance]   = []
+        self.containers:   List[AreContainer]  = []
+        self.ambients:     List[AreAmbient]    = []
+        self.variables:    List[AreVariable]   = []
+        self.doors:        List[AreDoor]       = []
+        self._raw_explored_bitmask:   bytes = b''
+        self._raw_animations:         bytes = b''
+        self._raw_automap_notes:      bytes = b''
+        self._raw_tiled_objects:      bytes = b''
+        self._raw_projectile_traps:   bytes = b''
+        self._raw_song_entries:       bytes = b''
+        self._raw_rest_interruptions: bytes = b''
 
-    # ------------------------------------------------------------------
-    # Construction
-    # ------------------------------------------------------------------
+    # ── pool builders ─────────────────────────────────────────────────────────
 
-    @classmethod
-    def from_bytes(cls, data: bytes) -> "AreFile":
-        r = BinaryReader(data)
-        try:
-            r.expect_signature(SIGNATURE)
-            version = r.read_bytes(4)
-            if version not in (VERSION_V1, VERSION_V91):
-                # PST also uses V1.0 — parse best-effort
-                if version != VERSION_V1:
-                    raise ValueError(f"Unsupported ARE version {version!r}.")
-        except SignatureMismatch as exc:
-            raise ValueError(str(exc)) from exc
+    def _build_vertex_pool(self):
+        """Returns (pool_bytes, region_vis, container_vis, door_vis_4tuples)."""
+        pool = bytearray()
 
-        header = AreHeader._read(r, version)
-
-        # -- Global vertex array --
-        all_verts: List[Vertex] = []
-        if header.vertices_count:
-            r.seek(header.vertices_offset)
-            for _ in range(header.vertices_count):
-                all_verts.append(Vertex._read(r))
-
-        # -- Actors --
-        actors: List[Actor] = []
-        if header.actors_count:
-            r.seek(header.actors_offset)
-            for _ in range(header.actors_count):
-                actors.append(Actor._read(r))
-
-        # -- Regions --
-        regions: List[Region] = []
-        if header.regions_count:
-            r.seek(header.regions_offset)
-            for _ in range(header.regions_count):
-                reg = Region._read(r)
-                reg.vertices = all_verts[reg.vertex_index:
-                                         reg.vertex_index + reg.vertex_count]
-                regions.append(reg)
-
-        # -- Spawn points --
-        spawn_points: List[SpawnPoint] = []
-        if header.spawn_count:
-            r.seek(header.spawn_offset)
-            for _ in range(header.spawn_count):
-                spawn_points.append(SpawnPoint._read(r))
-
-        # -- Entrances --
-        entrances: List[Entrance] = []
-        if header.entrances_count:
-            r.seek(header.entrances_offset)
-            for _ in range(header.entrances_count):
-                entrances.append(Entrance._read(r))
-
-        # -- Items (area-level container contents) --
-        items: List[AreaItem] = []
-        if header.items_count:
-            r.seek(header.items_offset)
-            for _ in range(header.items_count):
-                items.append(AreaItem._read(r))
-
-        # -- Containers --
-        containers: List[Container] = []
-        if header.containers_count:
-            r.seek(header.containers_offset)
-            for _ in range(header.containers_count):
-                con = Container._read(r)
-                con.vertices = all_verts[con.vertex_index:
-                                          con.vertex_index + con.vertex_count]
-                containers.append(con)
-
-        # -- Ambients --
-        ambients: List[Ambient] = []
-        if header.ambients_count:
-            r.seek(header.ambients_offset)
-            for _ in range(header.ambients_count):
-                ambients.append(Ambient._read(r))
-
-        # -- Variables --
-        variables: List[AreaVariable] = []
-        if header.variables_count:
-            r.seek(header.variables_offset)
-            for _ in range(header.variables_count):
-                variables.append(AreaVariable._read(r))
-
-        # -- Doors --
-        doors: List[Door] = []
-        if header.doors_count:
-            r.seek(header.doors_offset)
-            for _ in range(header.doors_count):
-                door = Door._read(r)
-                door.open_vertices  = all_verts[door.open_vertex_index:
-                                                  door.open_vertex_index + door.open_vertex_count]
-                door.close_vertices = all_verts[door.close_vertex_index:
-                                                  door.close_vertex_index + door.close_vertex_count]
-                doors.append(door)
-
-        # -- Animations --
-        animations: List[AreaAnimation] = []
-        if header.anims_count:
-            r.seek(header.anims_offset)
-            for _ in range(header.anims_count):
-                animations.append(AreaAnimation._read(r))
-
-        # -- Map notes --
-        notes: List[MapNote] = []
-        if header.notes_count:
-            r.seek(header.notes_offset)
-            for _ in range(header.notes_count):
-                notes.append(MapNote._read(r))
-
-        # -- Rest encounters --
-        rest_encounters: List[RestEncounter] = []
-        if header.rest_count:
-            r.seek(header.rest_offset)
-            for _ in range(header.rest_count):
-                rest_encounters.append(RestEncounter._read(r))
-
-        return cls(
-            header=header, actors=actors, regions=regions,
-            spawn_points=spawn_points, entrances=entrances,
-            containers=containers, items=items, ambients=ambients,
-            variables=variables, doors=doors, animations=animations,
-            notes=notes, rest_encounters=rest_encounters,
-            version=version,
-        )
-
-    @classmethod
-    def from_file(cls, path: str | Path) -> "AreFile":
-        path = Path(path)
-        instance = cls.from_bytes(path.read_bytes())
-        instance.source_path = path
-        return instance
-
-    # ------------------------------------------------------------------
-    # Serialisation
-    # ------------------------------------------------------------------
-
-    def to_bytes(self) -> bytes:
-        # Rebuild the global vertex array from all structures that own vertices.
-        # Track per-structure starting indices as we go.
-        all_verts: List[Vertex] = []
-
-        def _alloc_verts(verts: List[Vertex]) -> int:
-            idx = len(all_verts)
-            all_verts.extend(verts)
+        def _append(verts):
+            idx = len(pool) // VERTEX_SIZE
+            for vx, vy in verts:
+                pool.extend(struct.pack('<HH', vx, vy))
             return idx
 
-        # Sections (fixed order matches IESDP)
-        HEADER_SIZE = HEADER_SIZE_V1  # same base for V9.1
+        region_vis    = [_append(r.vertices)  for r in self.regions]
+        container_vis = [_append(c.vertices)  for c in self.containers]
+        # Each door contributes 4 sets: open, closed, imp_open, imp_closed
+        door_vis = []
+        for door in self.doors:
+            vo  = _append(door.vertices_open)
+            vc  = _append(door.vertices_closed)
+            imo = _append(door.impeded_open)
+            imc = _append(door.impeded_closed)
+            door_vis.append((vo, vc, imo, imc))
 
-        # Build each section into a BinaryWriter, tracking offsets
-        w_actors   = BinaryWriter()
-        w_regions  = BinaryWriter()
-        w_spawn    = BinaryWriter()
-        w_enter    = BinaryWriter()
-        w_items    = BinaryWriter()
-        w_conts    = BinaryWriter()
-        w_ambients = BinaryWriter()
-        w_vars     = BinaryWriter()
-        w_doors    = BinaryWriter()
-        w_anims    = BinaryWriter()
-        w_notes    = BinaryWriter()
-        w_rest     = BinaryWriter()
-        # Vertices written after everything else so indices are known
+        return bytes(pool), region_vis, container_vis, door_vis
 
-        for actor in self.actors:
-            actor._write(w_actors)
+    def _build_item_pool(self):
+        """Returns (pool_bytes, first_item_index_per_container)."""
+        pool = bytearray()
+        indices = []
+        for cont in self.containers:
+            indices.append(len(pool) // ITEM_SIZE)
+            for item in cont.items:
+                pool.extend(item.to_bytes())
+        return bytes(pool), indices
 
-        for reg in self.regions:
-            vi = _alloc_verts(reg.vertices)
-            reg._write(w_regions, vi)
+    # ── from_bytes ────────────────────────────────────────────────────────────
 
-        for sp in self.spawn_points:
-            sp._write(w_spawn)
+    @classmethod
+    def from_bytes(cls, data: bytes) -> 'AreFile':
+        af = cls()
+        af.header = AreHeader.from_bytes(data)
+        h = af.header
 
-        for ent in self.entrances:
-            ent._write(w_enter)
+        vertex_pool = b''
+        if h.vertices_count > 0 and h.vertices_offset > 0:
+            vertex_pool = bytes(data[h.vertices_offset : h.vertices_offset + h.vertices_count * VERTEX_SIZE])
 
-        for item in self.items:
-            item._write(w_items)
+        item_pool = b''
+        if h.items_count > 0 and h.items_offset > 0:
+            item_pool = bytes(data[h.items_offset : h.items_offset + h.items_count * ITEM_SIZE])
 
-        running_item_idx = 0
-        for con in self.containers:
-            vi = _alloc_verts(con.vertices)
-            item_count = con.item_count
-            con._write(w_conts, vi, running_item_idx)
-            running_item_idx += item_count
+        for i in range(h.actors_count):
+            s = h.actors_offset + i * ACTOR_SIZE
+            af.actors.append(AreActor.from_bytes(data[s:s+ACTOR_SIZE], data))
 
-        for amb in self.ambients:
-            amb._write(w_ambients)
+        for i in range(h.regions_count):
+            s = h.regions_offset + i * REGION_SIZE
+            rec = data[s:s+REGION_SIZE]
+            first_vi = struct.unpack_from('<I', rec, 0x2c)[0]
+            af.regions.append(AreRegion.from_bytes(rec, vertex_pool, first_vi))
 
-        for var in self.variables:
-            var._write(w_vars)
+        for i in range(h.spawn_points_count):
+            s = h.spawn_points_offset + i * SPAWN_POINT_SIZE
+            af.spawn_points.append(AreSpawnPoint.from_bytes(data[s:s+SPAWN_POINT_SIZE]))
 
-        open_vi_map: dict = {}
-        close_vi_map: dict = {}
-        for i, door in enumerate(self.doors):
-            ovi  = _alloc_verts(door.open_vertices)
-            cvi  = _alloc_verts(door.close_vertices)
-            open_vi_map[i]  = ovi
-            close_vi_map[i] = cvi
-        for i, door in enumerate(self.doors):
-            door._write(w_doors, open_vi_map[i], close_vi_map[i])
+        for i in range(h.entrances_count):
+            s = h.entrances_offset + i * ENTRANCE_SIZE
+            af.entrances.append(AreEntrance.from_bytes(data[s:s+ENTRANCE_SIZE]))
 
-        for anim in self.animations:
-            anim._write(w_anims)
+        for i in range(h.containers_count):
+            s = h.containers_offset + i * CONTAINER_SIZE
+            rec = data[s:s+CONTAINER_SIZE]
+            fii = struct.unpack_from('<I', rec, 0x40)[0]
+            fvi = struct.unpack_from('<I', rec, 0x50)[0]
+            af.containers.append(AreContainer.from_bytes(rec, item_pool, fii, vertex_pool, fvi))
 
-        for note in self.notes:
-            note._write(w_notes)
+        for i in range(h.ambients_count):
+            s = h.ambients_offset + i * AMBIENT_SIZE
+            af.ambients.append(AreAmbient.from_bytes(data[s:s+AMBIENT_SIZE]))
 
-        for rest in self.rest_encounters:
-            rest._write(w_rest)
+        for i in range(h.variables_count):
+            s = h.variables_offset + i * VARIABLE_SIZE
+            af.variables.append(AreVariable.from_bytes(data[s:s+VARIABLE_SIZE]))
 
-        w_verts = BinaryWriter()
-        for v in all_verts:
-            v._write(w_verts)
+        for i in range(h.doors_count):
+            s = h.doors_offset + i * DOOR_SIZE
+            rec = data[s:s+DOOR_SIZE]
+            fvo  = struct.unpack_from('<I', rec, 0x2c)[0]
+            cvo  = struct.unpack_from('<H', rec, 0x30)[0]
+            cvc  = struct.unpack_from('<H', rec, 0x32)[0]
+            fvc  = struct.unpack_from('<I', rec, 0x34)[0]
+            fimo = struct.unpack_from('<I', rec, 0x48)[0]
+            cimo = struct.unpack_from('<H', rec, 0x4c)[0]
+            cimc = struct.unpack_from('<H', rec, 0x4e)[0]
+            fimc = struct.unpack_from('<I', rec, 0x50)[0]
+            af.doors.append(AreDoor.from_bytes(rec, vertex_pool,
+                                               fvo, cvo, fvc, cvc, fimo, cimo, fimc, cimc))
 
-        # Compute absolute offsets
-        cursor = HEADER_SIZE
-        def _off(w: BinaryWriter) -> int:
-            nonlocal cursor
-            off = cursor
-            cursor += w.pos
-            return off
+        def _raw(off, count, size):
+            return bytes(data[off:off+count*size]) if count > 0 and off > 0 else b''
 
-        actors_off   = _off(w_actors)
-        regions_off  = _off(w_regions)
-        spawn_off    = _off(w_spawn)
-        enter_off    = _off(w_enter)
-        items_off    = _off(w_items)
-        conts_off    = _off(w_conts)
-        ambients_off = _off(w_ambients)
-        vars_off     = _off(w_vars)
-        doors_off    = _off(w_doors)
-        anims_off    = _off(w_anims)
-        notes_off    = _off(w_notes)
-        rest_off     = _off(w_rest)
-        verts_off    = _off(w_verts)
+        if h.explored_bitmask_size > 0 and h.explored_bitmask_offset > 0:
+            af._raw_explored_bitmask = bytes(data[h.explored_bitmask_offset:
+                                                   h.explored_bitmask_offset+h.explored_bitmask_size])
+        af._raw_animations    = _raw(h.animations_offset,    h.animations_count,    ANIMATION_SIZE)
+        af._raw_tiled_objects = _raw(h.tiled_objects_offset, h.tiled_objects_count, TILED_OBJECT_SIZE)
+        if h.song_entries_offset > 0:
+            af._raw_song_entries = bytes(data[h.song_entries_offset:h.song_entries_offset+SONG_ENTRIES_SIZE])
+        if h.rest_interruptions_offset > 0:
+            af._raw_rest_interruptions = bytes(data[h.rest_interruptions_offset:
+                                                     h.rest_interruptions_offset+REST_INTERRUPTION_SIZE])
+        is_pst = (h.field_c4 == 0xFFFFFFFF)
+        automap_off   = h.field_c8 if is_pst else h.field_c4
+        automap_count = h.field_cc if is_pst else h.field_c8
+        proj_off      = 0 if is_pst else h.field_cc
+        note_size = AUTOMAP_NOTE_PST_SIZE if is_pst else AUTOMAP_NOTE_SIZE
+        af._raw_automap_notes = _raw(automap_off, automap_count, note_size)
+        af._raw_projectile_traps = _raw(proj_off, h.projectile_traps_count, PROJECTILE_TRAP_SIZE)
+        return af
 
-        # Patch header
+    @classmethod
+    def from_file(cls, path: str) -> 'AreFile':
+        with open(path, 'rb') as f:
+            return cls.from_bytes(f.read())
+
+    # ── to_bytes ──────────────────────────────────────────────────────────────
+
+    def to_bytes(self) -> bytes:
         h = self.header
-        h.actors_offset     = actors_off;   h.actors_count     = len(self.actors)
-        h.regions_offset    = regions_off;  h.regions_count    = len(self.regions)
-        h.spawn_offset      = spawn_off;    h.spawn_count      = len(self.spawn_points)
-        h.entrances_offset  = enter_off;    h.entrances_count  = len(self.entrances)
-        h.items_offset      = items_off;    h.items_count      = len(self.items)
-        h.containers_offset = conts_off;    h.containers_count = len(self.containers)
-        h.ambients_offset   = ambients_off; h.ambients_count   = len(self.ambients)
-        h.variables_offset  = vars_off;     h.variables_count  = len(self.variables)
-        h.doors_offset      = doors_off;    h.doors_count      = len(self.doors)
-        h.anims_offset      = anims_off;    h.anims_count      = len(self.animations)
-        h.notes_offset      = notes_off;    h.notes_count      = len(self.notes)
-        h.rest_offset       = rest_off;     h.rest_count       = len(self.rest_encounters)
-        h.vertices_offset   = verts_off;    h.vertices_count   = len(all_verts)
 
-        w = BinaryWriter()
-        w.write_bytes(SIGNATURE)
-        w.write_bytes(self.version)
-        h._write(w)
-        for section in (w_actors, w_regions, w_spawn, w_enter, w_items,
-                        w_conts, w_ambients, w_vars, w_doors, w_anims,
-                        w_notes, w_rest, w_verts):
-            w.write_bytes(section.to_bytes())
+        vertex_pool, region_vis, container_vis, door_vis = self._build_vertex_pool()
+        item_pool,   container_iis                       = self._build_item_pool()
 
-        return w.to_bytes()
+        vert_count  = len(vertex_pool) // VERTEX_SIZE
+        items_count = len(item_pool)   // ITEM_SIZE
 
-    def to_file(self, path: str | Path) -> None:
-        Path(path).write_bytes(self.to_bytes())
+        # ── layout pass ───────────────────────────────────────────────────────
+        pos = HEADER_SIZE
 
-    # ------------------------------------------------------------------
-    # JSON round-trip
-    # ------------------------------------------------------------------
+        def _place_blobs(blobs):
+            nonlocal pos
+            total = sum(len(b) for b in blobs)
+            if total == 0: return 0
+            off = pos; pos += total; return off
+
+        def _place_raw(raw):
+            nonlocal pos
+            if not raw: return 0
+            off = pos; pos += len(raw); return off
+
+        # Actors: serialise twice (correct CRE offsets unknown until end)
+        actor_blobs_tmp = [a.to_bytes(0) for a in self.actors]
+        actors_off  = _place_blobs(actor_blobs_tmp)
+        regions_off = _place_blobs([r.to_bytes(0) for r in self.regions])
+        sp_off      = _place_blobs([s.to_bytes()  for s in self.spawn_points])
+        ent_off     = _place_blobs([e.to_bytes()  for e in self.entrances])
+        cont_off    = _place_blobs([c.to_bytes(0, 0) for c in self.containers])
+        items_off   = _place_raw(item_pool)
+        vert_off    = _place_raw(vertex_pool)
+        amb_off     = _place_blobs([a.to_bytes() for a in self.ambients])
+        var_off     = _place_blobs([v.to_bytes() for v in self.variables])
+
+        expl_off = _place_raw(self._raw_explored_bitmask)
+
+        doors_off = _place_blobs([d.to_bytes(0,0,0,0) for d in self.doors])
+
+        anim_off  = _place_raw(self._raw_animations)
+        tiled_off = _place_raw(self._raw_tiled_objects)
+
+        song_off = 0
+        if self._raw_song_entries:
+            song_off = pos; pos += SONG_ENTRIES_SIZE
+        rest_off = 0
+        if self._raw_rest_interruptions:
+            rest_off = pos; pos += REST_INTERRUPTION_SIZE
+
+        is_pst = (h.field_c4 == 0xFFFFFFFF)
+        note_size  = AUTOMAP_NOTE_PST_SIZE if is_pst else AUTOMAP_NOTE_SIZE
+        note_count = len(self._raw_automap_notes) // note_size if self._raw_automap_notes else 0
+        automap_off = 0
+        if note_count > 0:
+            automap_off = pos; pos += note_count * note_size
+        proj_count = len(self._raw_projectile_traps) // PROJECTILE_TRAP_SIZE if self._raw_projectile_traps else 0
+        proj_off2 = 0
+        if proj_count > 0:
+            proj_off2 = pos; pos += proj_count * PROJECTILE_TRAP_SIZE
+
+        # Embedded CREs at end
+        cre_offsets = []
+        for actor in self.actors:
+            if actor.embedded_cre:
+                cre_offsets.append(pos); pos += len(actor.embedded_cre)
+            else:
+                cre_offsets.append(0)
+
+        # ── assemble ──────────────────────────────────────────────────────────
+        buf = bytearray(pos)
+
+        if is_pst:
+            fc4, fc8, fcc = 0xFFFFFFFF, automap_off, note_count
+        else:
+            fc4, fc8, fcc = automap_off, note_count, proj_off2
+
+        offsets = {
+            'actors_offset': actors_off,   'actors_count': len(self.actors),
+            'regions_offset': regions_off, 'regions_count': len(self.regions),
+            'spawn_points_offset': sp_off, 'spawn_points_count': len(self.spawn_points),
+            'entrances_offset': ent_off,   'entrances_count': len(self.entrances),
+            'containers_offset': cont_off, 'containers_count': len(self.containers),
+            'items_offset': items_off,     'items_count': items_count,
+            'vertices_offset': vert_off,   'vertices_count': vert_count,
+            'ambients_offset': amb_off,    'ambients_count': len(self.ambients),
+            'variables_offset': var_off,   'variables_count': len(self.variables),
+            'tiled_object_flags_offset': 0,'tiled_object_flags_count': 0,
+            'explored_bitmask_offset': expl_off,
+            'explored_bitmask_size': len(self._raw_explored_bitmask),
+            'doors_offset': doors_off,     'doors_count': len(self.doors),
+            'animations_offset': anim_off, 'animations_count': len(self._raw_animations)//ANIMATION_SIZE,
+            'tiled_objects_offset': tiled_off,
+            'tiled_objects_count': len(self._raw_tiled_objects)//TILED_OBJECT_SIZE,
+            'song_entries_offset': song_off,
+            'rest_interruptions_offset': rest_off,
+            'projectile_traps_count': proj_count,
+        }
+        new_hdr = AreHeader.from_json(h.to_json(), offsets)
+        new_hdr.field_c4  = fc4
+        new_hdr.field_c8  = fc8
+        new_hdr.field_cc  = fcc
+        new_hdr.unused_e4 = h.unused_e4
+        buf[0:HEADER_SIZE] = new_hdr.to_bytes()
+
+        def _write(off, raw):
+            if off and raw: buf[off:off+len(raw)] = raw
+
+        def _write_blobs(off, blobs):
+            if not off: return
+            p = off
+            for b in blobs:
+                buf[p:p+len(b)] = b; p += len(b)
+
+        # Re-serialise actors with correct CRE offsets
+        actor_blobs = [self.actors[i].to_bytes(cre_offsets[i]) for i in range(len(self.actors))]
+        _write_blobs(actors_off, actor_blobs)
+
+        # Regions with correct vertex indices
+        region_blobs = [self.regions[i].to_bytes(region_vis[i]) for i in range(len(self.regions))]
+        _write_blobs(regions_off, region_blobs)
+
+        _write_blobs(sp_off,  [s.to_bytes() for s in self.spawn_points])
+        _write_blobs(ent_off, [e.to_bytes() for e in self.entrances])
+
+        # Containers with correct item + vertex indices
+        cont_blobs = [self.containers[i].to_bytes(container_iis[i], container_vis[i])
+                      for i in range(len(self.containers))]
+        _write_blobs(cont_off, cont_blobs)
+
+        _write(items_off, item_pool)
+        _write(vert_off,  vertex_pool)
+
+        _write_blobs(amb_off, [a.to_bytes() for a in self.ambients])
+        _write_blobs(var_off, [v.to_bytes() for v in self.variables])
+
+        # Doors with correct vertex indices
+        door_blobs = [self.doors[i].to_bytes(*door_vis[i]) for i in range(len(self.doors))]
+        _write_blobs(doors_off, door_blobs)
+
+        _write(expl_off,    self._raw_explored_bitmask)
+        _write(anim_off,    self._raw_animations)
+        _write(tiled_off,   self._raw_tiled_objects)
+        _write(song_off,    self._raw_song_entries)
+        _write(rest_off,    self._raw_rest_interruptions)
+        _write(automap_off, self._raw_automap_notes)
+        _write(proj_off2,   self._raw_projectile_traps)
+
+        for i, actor in enumerate(self.actors):
+            if actor.embedded_cre and cre_offsets[i]:
+                o = cre_offsets[i]; buf[o:o+len(actor.embedded_cre)] = actor.embedded_cre
+
+        return bytes(buf)
+
+    def to_file(self, path: str) -> None:
+        with open(path, 'wb') as f:
+            f.write(self.to_bytes())
+
+    # ── JSON ──────────────────────────────────────────────────────────────────
 
     def to_json(self) -> dict:
-        h = self.header
-        hd: dict = {
-            "wed_resref":  h.wed_resref.to_json(),
-            "area_flags":  h.area_flags,
-            "area_type":   h.area_type,
-            "area_script": h.area_script.to_json(),
-            "day_song":    h.day_song,
-            "night_song":  h.night_song,
-            "battle_song": h.battle_song,
+        d = {
+            'header':       self.header.to_json(),
+            'actors':       [a.to_json()  for a in self.actors],
+            'regions':      [r.to_json()  for r in self.regions],
+            'spawn_points': [s.to_json()  for s in self.spawn_points],
+            'entrances':    [e.to_json()  for e in self.entrances],
+            'containers':   [c.to_json()  for c in self.containers],
+            'ambients':     [a.to_json()  for a in self.ambients],
+            'variables':    [v.to_json()  for v in self.variables],
+            'doors':        [dr.to_json() for dr in self.doors],
         }
-        for attr in ("area_north","area_east","area_south","area_west"):
-            v = getattr(h, attr)
-            if v: hd[attr] = v.to_json()
-        for attr in ("rain_probability","snow_probability","fog_probability",
-                     "lightning_probability","wind_speed"):
-            if getattr(h, attr): hd[attr] = getattr(h, attr)
-        if h.v91_extra: hd["v91_extra"] = h.v91_extra.hex()
-
-        d: dict = {"format": "are", "version": _version_str(self.version),
-                   "header": hd}
-        if self.actors:          d["actors"]          = [a.to_json() for a in self.actors]
-        if self.regions:         d["regions"]         = [r.to_json() for r in self.regions]
-        if self.spawn_points:    d["spawn_points"]    = [s.to_json() for s in self.spawn_points]
-        if self.entrances:       d["entrances"]       = [e.to_json() for e in self.entrances]
-        if self.containers:      d["containers"]      = [c.to_json() for c in self.containers]
-        if self.items:           d["items"]           = [i.to_json() for i in self.items]
-        if self.ambients:        d["ambients"]        = [a.to_json() for a in self.ambients]
-        if self.variables:       d["variables"]       = [v.to_json() for v in self.variables]
-        if self.doors:           d["doors"]           = [d.to_json() for d in self.doors]
-        if self.animations:      d["animations"]      = [a.to_json() for a in self.animations]
-        if self.notes:           d["notes"]           = [n.to_json() for n in self.notes]
-        if self.rest_encounters: d["rest_encounters"] = [r.to_json() for r in self.rest_encounters]
+        for key, raw in [
+            ('_raw_explored_bitmask',   self._raw_explored_bitmask),
+            ('_raw_animations',         self._raw_animations),
+            ('_raw_automap_notes',      self._raw_automap_notes),
+            ('_raw_tiled_objects',      self._raw_tiled_objects),
+            ('_raw_projectile_traps',   self._raw_projectile_traps),
+            ('_raw_song_entries',       self._raw_song_entries),
+            ('_raw_rest_interruptions', self._raw_rest_interruptions),
+        ]:
+            if raw: d[key] = raw.hex()
         return d
 
     @classmethod
-    def from_json(cls, d: dict) -> "AreFile":
-        ver_str = d.get("version", "V1.0")
-        version = VERSION_V91 if ver_str == "V9.1" else VERSION_V1
-        hd = d.get("header", {})
-        v91_hex = hd.get("v91_extra","")
-        header = AreHeader(
-            wed_resref=ResRef.from_json(hd.get("wed_resref","")),
-            area_flags=hd.get("area_flags",0),
-            area_type=hd.get("area_type", AreaType.DUNGEON),
-            area_script=ResRef.from_json(hd.get("area_script","")),
-            area_north=ResRef.from_json(hd.get("area_north","")),
-            area_east=ResRef.from_json(hd.get("area_east","")),
-            area_south=ResRef.from_json(hd.get("area_south","")),
-            area_west=ResRef.from_json(hd.get("area_west","")),
-            rain_probability=hd.get("rain_probability",0),
-            snow_probability=hd.get("snow_probability",0),
-            fog_probability=hd.get("fog_probability",0),
-            lightning_probability=hd.get("lightning_probability",0),
-            wind_speed=hd.get("wind_speed",0),
-            day_song=hd.get("day_song",0), night_song=hd.get("night_song",0),
-            win_song=hd.get("win_song",0), battle_song=hd.get("battle_song",0),
-            lose_song=hd.get("lose_song",0),
-            v91_extra=bytes.fromhex(v91_hex) if v91_hex else b"",
-        )
-        return cls(
-            header=header,
-            actors          = [Actor.from_json(x)          for x in d.get("actors",[])],
-            regions         = [Region.from_json(x)         for x in d.get("regions",[])],
-            spawn_points    = [SpawnPoint.from_json(x)     for x in d.get("spawn_points",[])],
-            entrances       = [Entrance.from_json(x)       for x in d.get("entrances",[])],
-            containers      = [Container.from_json(x)      for x in d.get("containers",[])],
-            items           = [AreaItem.from_json(x)       for x in d.get("items",[])],
-            ambients        = [Ambient.from_json(x)        for x in d.get("ambients",[])],
-            variables       = [AreaVariable.from_json(x)   for x in d.get("variables",[])],
-            doors           = [Door.from_json(x)           for x in d.get("doors",[])],
-            animations      = [AreaAnimation.from_json(x)  for x in d.get("animations",[])],
-            notes           = [MapNote.from_json(x)        for x in d.get("notes",[])],
-            rest_encounters = [RestEncounter.from_json(x)  for x in d.get("rest_encounters",[])],
-            version=version,
-        )
+    def from_json(cls, d: dict) -> 'AreFile':
+        af = cls()
+        af.actors       = [AreActor.from_json(a)      for a in d.get('actors', [])]
+        af.regions      = [AreRegion.from_json(r)     for r in d.get('regions', [])]
+        af.spawn_points = [AreSpawnPoint.from_json(s) for s in d.get('spawn_points', [])]
+        af.entrances    = [AreEntrance.from_json(e)   for e in d.get('entrances', [])]
+        af.containers   = [AreContainer.from_json(c)  for c in d.get('containers', [])]
+        af.ambients     = [AreAmbient.from_json(a)    for a in d.get('ambients', [])]
+        af.variables    = [AreVariable.from_json(v)   for v in d.get('variables', [])]
+        af.doors        = [AreDoor.from_json(dr)      for dr in d.get('doors', [])]
 
-    @classmethod
-    def from_json_file(cls, path: str | Path) -> "AreFile":
-        with open(path, "r", encoding="utf-8") as f:
-            return cls.from_json(json.load(f))
+        def _hex(k): return bytes.fromhex(d[k]) if k in d else b''
+        af._raw_explored_bitmask   = _hex('_raw_explored_bitmask')
+        af._raw_animations         = _hex('_raw_animations')
+        af._raw_automap_notes      = _hex('_raw_automap_notes')
+        af._raw_tiled_objects      = _hex('_raw_tiled_objects')
+        af._raw_projectile_traps   = _hex('_raw_projectile_traps')
+        af._raw_song_entries       = _hex('_raw_song_entries')
+        af._raw_rest_interruptions = _hex('_raw_rest_interruptions')
 
-    def to_json_file(self, path: str | Path) -> None:
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(self.to_json(), f, indent=2, ensure_ascii=False)
+        # Compute layout to fill header offsets
+        vertex_pool, _, _, _ = af._build_vertex_pool()
+        item_pool,   _       = af._build_item_pool()
+        vert_count  = len(vertex_pool) // VERTEX_SIZE
+        items_count = len(item_pool)   // ITEM_SIZE
 
-    # ------------------------------------------------------------------
-    # Informational
-    # ------------------------------------------------------------------
+        pos = HEADER_SIZE
+        def _lay(count, size):
+            nonlocal pos
+            if not count: return 0
+            off = pos; pos += count * size; return off
+        def _lay_raw(raw, size):
+            return _lay(len(raw)//size if raw else 0, size)
 
-    def __repr__(self) -> str:
-        src = self.source_path.name if self.source_path else "?"
-        return (
-            f"<AreFile {src!r} "
-            f"actors={len(self.actors)} "
-            f"doors={len(self.doors)} "
-            f"regions={len(self.regions)}>"
-        )
+        actors_off  = _lay(len(af.actors),       ACTOR_SIZE)
+        regions_off = _lay(len(af.regions),      REGION_SIZE)
+        sp_off      = _lay(len(af.spawn_points), SPAWN_POINT_SIZE)
+        ent_off     = _lay(len(af.entrances),    ENTRANCE_SIZE)
+        cont_off    = _lay(len(af.containers),   CONTAINER_SIZE)
+        items_off   = _lay(items_count,          ITEM_SIZE)
+        vert_off    = _lay(vert_count,           VERTEX_SIZE)
+        amb_off     = _lay(len(af.ambients),     AMBIENT_SIZE)
+        var_off     = _lay(len(af.variables),    VARIABLE_SIZE)
+        expl_off    = 0
+        if af._raw_explored_bitmask:
+            expl_off = pos; pos += len(af._raw_explored_bitmask)
+        doors_off   = _lay(len(af.doors),        DOOR_SIZE)
+        anim_off    = _lay_raw(af._raw_animations,    ANIMATION_SIZE)
+        tiled_off   = _lay_raw(af._raw_tiled_objects, TILED_OBJECT_SIZE)
+        song_off = 0
+        if af._raw_song_entries:
+            song_off = pos; pos += SONG_ENTRIES_SIZE
+        rest_off = 0
+        if af._raw_rest_interruptions:
+            rest_off = pos; pos += REST_INTERRUPTION_SIZE
 
+        hj = d.get('header', {})
+        is_pst = (hj.get('field_c4', 0) == 0xFFFFFFFF)
+        note_size  = AUTOMAP_NOTE_PST_SIZE if is_pst else AUTOMAP_NOTE_SIZE
+        note_count = len(af._raw_automap_notes)//note_size if af._raw_automap_notes else 0
+        automap_off = 0
+        if note_count > 0:
+            automap_off = pos; pos += note_count * note_size
+        proj_count = len(af._raw_projectile_traps)//PROJECTILE_TRAP_SIZE if af._raw_projectile_traps else 0
+        proj_off = 0
+        if proj_count > 0:
+            proj_off = pos; pos += proj_count * PROJECTILE_TRAP_SIZE
 
-def _version_str(version: bytes) -> str:
-    return version.decode("latin-1")
+        fc4 = 0xFFFFFFFF if is_pst else automap_off
+        fc8 = automap_off if is_pst else note_count
+        fcc = note_count  if is_pst else proj_off
+
+        offsets = {
+            'actors_offset': actors_off,   'actors_count': len(af.actors),
+            'regions_offset': regions_off, 'regions_count': len(af.regions),
+            'spawn_points_offset': sp_off, 'spawn_points_count': len(af.spawn_points),
+            'entrances_offset': ent_off,   'entrances_count': len(af.entrances),
+            'containers_offset': cont_off, 'containers_count': len(af.containers),
+            'items_offset': items_off,     'items_count': items_count,
+            'vertices_offset': vert_off,   'vertices_count': vert_count,
+            'ambients_offset': amb_off,    'ambients_count': len(af.ambients),
+            'variables_offset': var_off,   'variables_count': len(af.variables),
+            'tiled_object_flags_offset': 0,'tiled_object_flags_count': 0,
+            'explored_bitmask_offset': expl_off,
+            'explored_bitmask_size': len(af._raw_explored_bitmask),
+            'doors_offset': doors_off,     'doors_count': len(af.doors),
+            'animations_offset': anim_off, 'animations_count': len(af._raw_animations)//ANIMATION_SIZE,
+            'tiled_objects_offset': tiled_off,
+            'tiled_objects_count': len(af._raw_tiled_objects)//TILED_OBJECT_SIZE,
+            'song_entries_offset': song_off,
+            'rest_interruptions_offset': rest_off,
+            'projectile_traps_count': proj_count,
+        }
+        af.header = AreHeader.from_json(hj, offsets)
+        af.header.field_c4 = fc4; af.header.field_c8 = fc8; af.header.field_cc = fcc
+        return af
+
+    # ── diagnostics ───────────────────────────────────────────────────────────
+
+    def summary(self) -> str:
+        h = self.header
+        total_items = sum(len(c.items) for c in self.containers)
+        return '\n'.join([
+            f"ARE V1.0  WED={h.area_wed!r}  script={h.area_script!r}",
+            f"  actors={len(self.actors)}  regions={len(self.regions)}  "
+            f"spawn_points={len(self.spawn_points)}  entrances={len(self.entrances)}",
+            f"  containers={len(self.containers)}  items={total_items}  "
+            f"ambients={len(self.ambients)}  variables={len(self.variables)}",
+            f"  doors={len(self.doors)}  animations={h.animations_count}  "
+            f"tiled_objects={h.tiled_objects_count}  proj_traps={h.projectile_traps_count}",
+            f"  explored_bitmask={h.explored_bitmask_size} bytes  "
+            f"vertices(hdr)={h.vertices_count}",
+            f"  north={h.north_resref!r}  east={h.east_resref!r}  "
+            f"south={h.south_resref!r}  west={h.west_resref!r}",
+        ])
