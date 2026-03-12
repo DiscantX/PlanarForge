@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import threading
+from queue import Empty, Queue
 from enum import IntEnum, IntFlag
 from pathlib import Path
 from typing import Any
@@ -64,6 +66,15 @@ class ItemEditorPanel:
         self._dynamic_texture_tags: list[str] = []
         self._texture_counter = 0
         self._browser_icon_cache: dict[str, tuple[int, int, list[float]] | None] = {}
+        self._browser_icon_attempted: set[str] = set()
+        self._icon_load_threads: list[threading.Thread] = []
+        self._icon_load_stop: threading.Event | None = None
+        self._icon_load_queue: Queue[tuple[int, int, str, tuple[int, int, list[float]] | None]] = Queue()
+        self._icon_status_queue: Queue[tuple[int, str]] = Queue()
+        self._icon_work_queue: Queue[tuple[int, Any, str] | None] = Queue()
+        self._icon_status_backup: str | None = None
+        self._icon_load_token: int = 0
+        self._icon_pump_scheduled: bool = False
         
         # Panel sizing state
         self._total_width: int = 0
@@ -217,7 +228,9 @@ class ItemEditorPanel:
         try:
             self._set_status("Rebuilding index...")
             self.catalog.select_game(self._selected_game_id)
+            self._stop_icon_loader()
             self._browser_icon_cache.clear()
+            self._browser_icon_attempted.clear()
             self.catalog.load_index(force_rebuild=force_rebuild)
             self._set_status(f"Loaded ITM index for {self._selected_game_id}.")
             self._search("")
@@ -260,26 +273,180 @@ class ItemEditorPanel:
             (entry.display_name or str(entry.resref))
             for entry in self._results
         ]
-        grid_icons = None
         if include_icons:
-            grid_icons = [self._get_entry_icon(entry) for entry in self._results]
-        self._browser.populate_rows(
-            browser_data,
-            grid_labels=grid_labels,
-            grid_icons=grid_icons,
-        )
+            grid_icons: list[tuple[int, int, list[float]] | None] = []
+            to_load: list[tuple[int, Any, str]] = []
+            for idx, entry in enumerate(self._results):
+                resref = str(getattr(entry, "resref", "") or "").strip().upper()
+                if not resref:
+                    grid_icons.append(None)
+                    continue
+                if resref in self._browser_icon_attempted:
+                    grid_icons.append(self._browser_icon_cache.get(resref))
+                else:
+                    grid_icons.append(None)
+                    to_load.append((idx, entry, resref))
+            self._browser.populate_rows(
+                browser_data,
+                grid_labels=grid_labels,
+                grid_icons=grid_icons,
+            )
+            self._start_icon_loader(to_load)
+        else:
+            self._browser.populate_rows(
+                browser_data,
+                grid_labels=grid_labels,
+            )
+            self._stop_icon_loader()
 
-    def _get_entry_icon(self, entry: Any) -> tuple[int, int, list[float]] | None:
-        key = str(getattr(entry, "resref", "") or "").strip().upper()
-        if not key:
+    def _get_or_load_icon(self, entry: Any) -> tuple[int, int, list[float]] | None:
+        resref = str(getattr(entry, "resref", "") or "").strip().upper()
+        if not resref:
             return None
-        if key in self._browser_icon_cache:
-            return self._browser_icon_cache[key]
+        if resref in self._browser_icon_attempted:
+            return self._browser_icon_cache.get(resref)
         icon = self.catalog.load_item_icon(entry)
-        self._browser_icon_cache[key] = icon
+        self._browser_icon_cache[resref] = icon
+        self._browser_icon_attempted.add(resref)
         return icon
 
+    def _start_icon_loader(self, work_items: list[tuple[int, Any, str]]) -> None:
+        self._stop_icon_loader()
+        if not work_items:
+            return
+        if not self._selected_game_id:
+            return
+
+        self._icon_load_token += 1
+        token = self._icon_load_token
+        stop_event = threading.Event()
+        self._icon_load_stop = stop_event
+        self._icon_load_queue = Queue()
+        self._icon_status_queue = Queue()
+        self._icon_work_queue = Queue()
+        if self._icon_status_backup is None:
+            self._icon_status_backup = self._toolbar.get_status()
+
+        def worker(game_id: str) -> None:
+            local_catalog = ItmCatalog()
+            try:
+                local_catalog.select_game(game_id)
+            except Exception:
+                return
+            while not stop_event.is_set():
+                try:
+                    item = self._icon_work_queue.get(timeout=0.1)
+                except Exception:
+                    continue
+                if item is None:
+                    break
+                try:
+                    idx, entry, resref = item
+                    if stop_event.is_set():
+                        break
+                    icon_resref = ""
+                    try:
+                        header = (entry.data or {}).get("header", {})
+                        if isinstance(header, dict):
+                            icon_resref = str(header.get("item_icon", "") or "").strip().upper()
+                    except Exception:
+                        icon_resref = ""
+                    if not icon_resref:
+                        icon_resref = resref
+                    self._icon_status_queue.put((token, icon_resref))
+                    try:
+                        icon = local_catalog.load_item_icon(entry)
+                    except Exception:
+                        icon = None
+                    if stop_event.is_set():
+                        break
+                    self._icon_load_queue.put((token, idx, resref, icon))
+                except Exception:
+                    continue
+
+        for item in work_items:
+            self._icon_work_queue.put(item)
+        worker_count = min(3, max(1, len(work_items)))
+        for _ in range(worker_count):
+            self._icon_work_queue.put(None)
+            thread = threading.Thread(
+                target=worker,
+                args=(str(self._selected_game_id),),
+                daemon=True,
+            )
+            self._icon_load_threads.append(thread)
+            thread.start()
+        self._schedule_icon_pump()
+
+    def _stop_icon_loader(self) -> None:
+        if self._icon_load_stop is not None:
+            self._icon_load_stop.set()
+        self._icon_load_threads.clear()
+        self._icon_load_stop = None
+        self._icon_load_queue = Queue()
+        self._icon_status_queue = Queue()
+        self._icon_work_queue = Queue()
+        if self._icon_status_backup is not None:
+            self._set_status(self._icon_status_backup)
+        self._icon_status_backup = None
+        self._icon_pump_scheduled = False
+
+    def _schedule_icon_pump(self) -> None:
+        if self._icon_pump_scheduled:
+            return
+        self._icon_pump_scheduled = True
+        frame = dpg.get_frame_count() + 1
+        dpg.set_frame_callback(frame, self._pump_icon_queue)
+
+    def _pump_icon_queue(self) -> None:
+        self._icon_pump_scheduled = False
+        if self._browser.get_view_mode() != "grid":
+            return
+
+        status_message: str | None = None
+        status_processed = 0
+        while status_processed < 4:
+            try:
+                token, resref = self._icon_status_queue.get_nowait()
+            except Empty:
+                break
+            if token != self._icon_load_token:
+                continue
+            if resref:
+                status_message = f"Loading icon: {resref}"
+            else:
+                status_message = "Loading icon..."
+            status_processed += 1
+        if status_message:
+            self._set_status(status_message)
+
+        processed = 0
+        while processed < 8:
+            try:
+                token, idx, resref, icon = self._icon_load_queue.get_nowait()
+            except Empty:
+                break
+            if token != self._icon_load_token:
+                continue
+            if resref:
+                self._browser_icon_cache[resref] = icon
+                self._browser_icon_attempted.add(resref)
+            try:
+                self._browser.set_grid_icon(idx, icon)
+            except Exception:
+                pass
+            processed += 1
+
+        thread_alive = any(thread.is_alive() for thread in self._icon_load_threads)
+        if thread_alive or processed > 0 or status_processed > 0:
+            self._schedule_icon_pump()
+            return
+        if self._icon_status_backup is not None:
+            self._set_status(self._icon_status_backup)
+        self._icon_status_backup = None
+
     def _clear_rows(self) -> None:
+        self._stop_icon_loader()
         self._browser.clear_rows()
 
     def _on_row_selected(self, idx: int) -> None:
@@ -295,7 +462,12 @@ class ItemEditorPanel:
             self._render_error_details(str(exc))
             return
 
-        icon = self.catalog.load_item_icon(entry)
+        icon = self._get_or_load_icon(entry)
+        if self._browser.get_view_mode() == "grid":
+            try:
+                self._browser.set_grid_icon(idx, icon)
+            except Exception:
+                pass
         title = self._entry_title_text(entry, payload)
         self._render_structured(payload, icon, title)
         self._render_raw(payload)

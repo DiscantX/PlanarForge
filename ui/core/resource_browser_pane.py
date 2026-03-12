@@ -58,6 +58,8 @@ class ResourceBrowserPane:
         self._grid_icon_textures: list[tuple[str, int, int] | None] = []
         self._grid_texture_tags: list[str] = []
         self._grid_tile_tags: list[str] = []
+        self._grid_image_tags: list[int | str] = []
+        self._grid_icon_pad_tags: list[str] = []
         self._grid_texture_counter = 0
         self._grid_columns: int = 1
         self._grid_tile_width = 110
@@ -231,6 +233,8 @@ class ResourceBrowserPane:
         self._clear_grid_textures()
         self._grid_icon_textures.clear()
         self._grid_tile_tags.clear()
+        self._grid_image_tags.clear()
+        self._grid_icon_pad_tags.clear()
 
         if self._view_mode == "grid":
             self._render_grid()
@@ -276,6 +280,8 @@ class ResourceBrowserPane:
         self._grid_icons.clear()
         self._grid_icon_textures.clear()
         self._clear_grid_textures()
+        self._grid_image_tags.clear()
+        self._grid_icon_pad_tags.clear()
         self._selected_index = None
 
     def _on_row_clicked(self, _sender: Any, app_data: bool, user_data: int) -> None:
@@ -330,6 +336,8 @@ class ResourceBrowserPane:
     def _render_grid(self) -> None:
         dpg.delete_item(self.grid_tag, children_only=True)
         self._grid_tile_tags.clear()
+        self._grid_image_tags.clear()
+        self._grid_icon_pad_tags.clear()
 
         if not self._rows:
             return
@@ -391,15 +399,26 @@ class ResourceBrowserPane:
             dpg.add_spacer(height=4)
             with dpg.group(horizontal=True):
                 pad = max(0, int((self._grid_tile_width - draw_w) / 2))
-                if pad:
-                    dpg.add_spacer(width=pad)
-                dpg.add_image(icon_tag, width=draw_w, height=draw_h)
+                pad_tag = self._tag(f"grid_icon_pad_{idx}")
+                dpg.add_spacer(width=pad, tag=pad_tag)
+                image_tag = self._tag(f"grid_image_{idx}")
+                dpg.add_image(icon_tag, width=draw_w, height=draw_h, tag=image_tag)
             dpg.add_spacer(height=4)
             with dpg.group(horizontal=True):
                 dpg.add_spacer(width=4)
                 dpg.add_text(label, wrap=max(1, self._grid_tile_width - 8))
 
         dpg.bind_item_theme(tile_tag, self.grid_normal_theme_tag)
+
+        if idx >= len(self._grid_image_tags):
+            self._grid_image_tags.append(image_tag)
+        else:
+            self._grid_image_tags[idx] = image_tag
+
+        if idx >= len(self._grid_icon_pad_tags):
+            self._grid_icon_pad_tags.append(pad_tag)
+        else:
+            self._grid_icon_pad_tags[idx] = pad_tag
 
     def _update_grid_layout(self, pane_width: int) -> None:
         new_cols = self._compute_grid_columns(pane_width)
@@ -442,6 +461,56 @@ class ResourceBrowserPane:
             )
             self._grid_texture_tags.append(tag)
             self._grid_icon_textures.append((tag, int(width), int(height)))
+
+    def set_grid_icon(self, index: int, icon: tuple[int, int, list[float]] | None) -> bool:
+        """Update a grid tile's icon texture and refresh its image widget."""
+        if index < 0 or index >= len(self._rows):
+            return False
+
+        if index >= len(self._grid_icons):
+            self._grid_icons.extend([None] * (index + 1 - len(self._grid_icons)))
+        if index >= len(self._grid_icon_textures):
+            self._grid_icon_textures.extend([None] * (index + 1 - len(self._grid_icon_textures)))
+
+        self._grid_icons[index] = icon
+
+        icon_tex: tuple[str, int, int] | None = None
+        if icon is not None:
+            width, height, rgba = icon
+            self._grid_texture_counter += 1
+            tag = self._tag(f"grid_tex_{self._grid_texture_counter}")
+            dpg.add_static_texture(
+                width=max(1, int(width)),
+                height=max(1, int(height)),
+                default_value=rgba,
+                tag=tag,
+                parent="window_icon_textures",
+            )
+            self._grid_texture_tags.append(tag)
+            icon_tex = (tag, int(width), int(height))
+
+        self._grid_icon_textures[index] = icon_tex
+
+        if index >= len(self._grid_image_tags):
+            return False
+        image_tag = self._grid_image_tags[index]
+        if not dpg.does_item_exist(image_tag):
+            return False
+
+        if icon_tex is None:
+            icon_tag, iw, ih = self._ensure_default_grid_icon()
+        else:
+            icon_tag, iw, ih = icon_tex
+
+        draw_w, draw_h = self._scale_icon(iw, ih, self._grid_icon_size)
+        dpg.configure_item(image_tag, texture_tag=icon_tag, width=draw_w, height=draw_h)
+
+        if index < len(self._grid_icon_pad_tags):
+            pad_tag = self._grid_icon_pad_tags[index]
+            if dpg.does_item_exist(pad_tag):
+                pad = max(0, int((self._grid_tile_width - draw_w) / 2))
+                dpg.configure_item(pad_tag, width=pad)
+        return True
 
     def _clear_grid_textures(self) -> None:
         for tag in self._grid_texture_tags:
