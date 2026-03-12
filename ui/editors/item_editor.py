@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import threading
+import time
+import traceback
 from queue import Empty, Queue
 from enum import IntEnum, IntFlag
 from pathlib import Path
@@ -67,12 +69,8 @@ class ItemEditorPanel:
         self._texture_counter = 0
         self._browser_icon_cache: dict[str, tuple[int, int, list[float]] | None] = {}
         self._browser_icon_attempted: set[str] = set()
-        self._icon_load_threads: list[threading.Thread] = []
-        self._icon_load_stop: threading.Event | None = None
         self._icon_load_queue: Queue[tuple[int, int, str, tuple[int, int, list[float]] | None]] = Queue()
-        self._icon_status_queue: Queue[tuple[int, str]] = Queue()
-        self._icon_work_queue: Queue[tuple[int, Any, str] | None] = Queue()
-        self._icon_status_backup: str | None = None
+        self._icon_trace_enabled: bool = True
         self._icon_load_token: int = 0
         self._icon_pump_scheduled: bool = False
         
@@ -310,6 +308,10 @@ class ItemEditorPanel:
         self._browser_icon_attempted.add(resref)
         return icon
 
+    def _trace_icon(self, message: str) -> None:
+        if self._icon_trace_enabled:
+            print(f"[IconLoad] {message}")
+
     def _start_icon_loader(self, work_items: list[tuple[int, Any, str]]) -> None:
         self._stop_icon_loader()
         if not work_items:
@@ -321,52 +323,75 @@ class ItemEditorPanel:
         token = self._icon_load_token
         stop_event = threading.Event()
         self._icon_load_stop = stop_event
-        self._icon_load_queue = Queue()
-        self._icon_status_queue = Queue()
+        worker_count = min(2, max(1, len(work_items)))
+        self._icon_load_queue = Queue(maxsize=worker_count * 10)
         self._icon_work_queue = Queue()
-        if self._icon_status_backup is None:
-            self._icon_status_backup = self._toolbar.get_status()
+        # self._trace_icon(f"start token={self._icon_load_token + 1} items={len(work_items)}")
 
         def worker(game_id: str) -> None:
-            local_catalog = ItmCatalog()
             try:
-                local_catalog.select_game(game_id)
-            except Exception:
-                return
-            while not stop_event.is_set():
+                local_catalog = ItmCatalog()
                 try:
-                    item = self._icon_work_queue.get(timeout=0.1)
+                    local_catalog.select_game(game_id)
                 except Exception:
-                    continue
-                if item is None:
-                    break
-                try:
-                    idx, entry, resref = item
-                    if stop_event.is_set():
-                        break
-                    icon_resref = ""
+                    self._trace_icon(f"worker-select-game failed game={game_id}")
+                    return
+                # self._trace_icon(f"worker-start game={game_id}")
+                while not stop_event.is_set():
                     try:
-                        header = (entry.data or {}).get("header", {})
-                        if isinstance(header, dict):
-                            icon_resref = str(header.get("item_icon", "") or "").strip().upper()
-                    except Exception:
+                        item = self._icon_work_queue.get(timeout=0.1)
+                    except Empty:
+                        continue
+                    if item is None:
+                        break
+                    try:
+                        idx, entry, resref = item
+                        if stop_event.is_set():
+                            break
                         icon_resref = ""
-                    if not icon_resref:
-                        icon_resref = resref
-                    self._icon_status_queue.put((token, icon_resref))
-                    try:
-                        icon = local_catalog.load_item_icon(entry)
+                        try:
+                            header = (entry.data or {}).get("header", {})
+                            if isinstance(header, dict):
+                                icon_resref = str(header.get("item_icon", "") or "").strip().upper()
+                        except Exception:
+                            icon_resref = ""
+                        if not icon_resref:
+                            icon_resref = resref
+                        # self._trace_icon(f"load-start idx={idx} resref={resref} icon={icon_resref}")
+                        try:
+                            header = (entry.data or {}).get("header", {})
+                            if isinstance(header, dict):
+                                icon_resref = str(header.get("item_icon", "") or "").strip().upper()
+                            else:
+                                icon_resref = ""
+
+                            if not icon_resref:
+                                icon = None
+                            else:
+                                icon = local_catalog.load_bam_icon_by_resref(icon_resref)
+                        except Exception:
+                            formatted_exc = traceback.format_exc()
+                            self._trace_icon(f"worker-inner-exc idx={idx} resref={resref} exc={formatted_exc}")
+                            icon = None
+                        # self._trace_icon(f"load-done idx={idx} resref={resref} ok={'yes' if icon else 'no'}")
+                        if stop_event.is_set():
+                            break
+                        self._icon_load_queue.put((token, idx, resref, icon))
                     except Exception:
-                        icon = None
-                    if stop_event.is_set():
-                        break
-                    self._icon_load_queue.put((token, idx, resref, icon))
-                except Exception:
-                    continue
+                        formatted_exc = traceback.format_exc()
+                        self._trace_icon(f"worker-outer-exc exc={formatted_exc}")
+                        continue
+                    time.sleep(0.001)
+            finally:
+                with self._worker_lock:
+                    self._active_workers -= 1
 
         for item in work_items:
             self._icon_work_queue.put(item)
-        worker_count = min(3, max(1, len(work_items)))
+        worker_count = min(2, max(1, len(work_items)))
+        # self._trace_icon(f"workers={worker_count}")
+        with self._worker_lock:
+            self._active_workers = worker_count
         for _ in range(worker_count):
             self._icon_work_queue.put(None)
             thread = threading.Thread(
@@ -381,14 +406,13 @@ class ItemEditorPanel:
     def _stop_icon_loader(self) -> None:
         if self._icon_load_stop is not None:
             self._icon_load_stop.set()
+        for thread in self._icon_load_threads:
+            thread.join()
         self._icon_load_threads.clear()
         self._icon_load_stop = None
         self._icon_load_queue = Queue()
-        self._icon_status_queue = Queue()
         self._icon_work_queue = Queue()
-        if self._icon_status_backup is not None:
-            self._set_status(self._icon_status_backup)
-        self._icon_status_backup = None
+        # self._trace_icon("stop")
         self._icon_pump_scheduled = False
 
     def _schedule_icon_pump(self) -> None:
@@ -403,47 +427,36 @@ class ItemEditorPanel:
         if self._browser.get_view_mode() != "grid":
             return
 
-        status_message: str | None = None
-        status_processed = 0
-        while status_processed < 4:
-            try:
-                token, resref = self._icon_status_queue.get_nowait()
-            except Empty:
-                break
-            if token != self._icon_load_token:
-                continue
-            if resref:
-                status_message = f"Loading icon: {resref}"
-            else:
-                status_message = "Loading icon..."
-            status_processed += 1
-        if status_message:
-            self._set_status(status_message)
-
         processed = 0
-        while processed < 8:
+        while processed < 8 and not self._icon_load_queue.empty():
             try:
                 token, idx, resref, icon = self._icon_load_queue.get_nowait()
             except Empty:
                 break
+
             if token != self._icon_load_token:
                 continue
+
+            self._set_status(f"Displaying icon: {resref}")
+
             if resref:
                 self._browser_icon_cache[resref] = icon
                 self._browser_icon_attempted.add(resref)
             try:
                 self._browser.set_grid_icon(idx, icon)
             except Exception:
+                formatted_exc = traceback.format_exc()
+                self._trace_icon(f"Failed to set grid icon for idx={idx} resref={resref} exc={formatted_exc}")
                 pass
             processed += 1
 
-        thread_alive = any(thread.is_alive() for thread in self._icon_load_threads)
-        if thread_alive or processed > 0 or status_processed > 0:
+        with self._worker_lock:
+            thread_alive = self._active_workers > 0
+        if thread_alive or not self._icon_load_queue.empty():
             self._schedule_icon_pump()
             return
-        if self._icon_status_backup is not None:
-            self._set_status(self._icon_status_backup)
-        self._icon_status_backup = None
+        
+        self._set_status(f"{len(self._results)} item(s) found.")
 
     def _clear_rows(self) -> None:
         self._stop_icon_loader()

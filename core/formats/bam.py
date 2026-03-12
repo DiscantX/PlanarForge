@@ -17,6 +17,9 @@ class BamDecodeError(ValueError):
     """Raised when BAM data cannot be decoded."""
 
 
+# Guard against corrupt frames causing huge allocations/loops.
+MAX_FRAME_PIXELS = 1024 * 1024
+
 # Callback type: given a PVRZ page number returns a PvrzFile (with get_region_rgba) or None.
 PvrzLoader = Callable[[int], Optional[object]]
 
@@ -218,6 +221,8 @@ def _decode_v2_cycle_frame(
     )
     if width < 1 or height < 1:
         raise BamDecodeError(f"V2 frame has invalid dimensions {width}x{height}")
+    if width * height > MAX_FRAME_PIXELS:
+        raise BamDecodeError(f"V2 frame too large: {width}x{height}")
 
     # RGBA byte canvas, initially transparent
     canvas = bytearray(width * height * 4)
@@ -273,6 +278,8 @@ def _decode_frame_indices(
     width, height, _cx, _cy, frame_data_field = struct.unpack_from("<HHhhI", data, frame_off)
     if width < 1 or height < 1:
         raise BamDecodeError("Invalid BAM frame dimensions.")
+    if width * height > MAX_FRAME_PIXELS:
+        raise BamDecodeError(f"Frame too large: {width}x{height}")
 
     frame_data_off  = frame_data_field & 0x7FFFFFFF
     is_uncompressed = bool(frame_data_field & 0x80000000)
@@ -297,7 +304,7 @@ def _decompress_bamc_if_needed(raw: bytes) -> bytes:
         except zlib.error as exc:
             raise BamDecodeError(f"BAMC zlib decompression failed: {exc}") from exc
         if expected_size and len(decompressed) < expected_size:
-            raise BamDecodeError("BAMC decompressed payload is shorter than declared size.")
+            decompressed += b"\x00" * (expected_size - len(decompressed))
         return decompressed
     return raw
 
