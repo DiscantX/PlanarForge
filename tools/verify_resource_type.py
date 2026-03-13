@@ -33,6 +33,8 @@ from core.formats.mos import MosFile
 from core.formats.spl import SplFile
 from core.formats.tis import TisFile
 from core.formats.wed import WedFile
+from core.formats.wmp import WmpFile
+
 
 
 PARSERS: dict[ResType, type] = {
@@ -44,6 +46,7 @@ PARSERS: dict[ResType, type] = {
     ResType.SPL: SplFile,
     ResType.TIS: TisFile,
     ResType.WED: WedFile,
+    ResType.WMP: WmpFile,
 }
 
 

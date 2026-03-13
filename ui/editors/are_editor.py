@@ -7,7 +7,7 @@ Three tabs mirror the ITM editor:
   • JSON Tree   — collapsible tree of the raw JSON dict
   • Raw JSON    — read-only text box with full JSON
 
-The browser columns are: ResRef | WED | Version.
+The browser columns are: ResRef | Name | Version.
 """
 
 from __future__ import annotations
@@ -115,7 +115,7 @@ class AreEditorPanel:
             with dpg.group(tag=self.body_tag, horizontal=True):
                 self._browser = ResourceBrowserPane(
                     parent_tag=self.body_tag,
-                    columns=["ResRef", "WED", "Version"],
+                    columns=["ResRef", "Name", "Version"],
                     on_row_selected=self._on_row_selected,
                     tag_prefix=self._tag("browser"),
                 )

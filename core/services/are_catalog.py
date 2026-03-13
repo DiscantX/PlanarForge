@@ -16,6 +16,7 @@ from typing import Any, Callable, Optional
 
 from core.formats.are import AreFile
 from core.formats.key_biff import KeyFile
+from core.formats.wmp import WmpFile
 from core.util.enums import ResType
 from core.index import IndexEntry, ResourceIndex, SOURCE_BIFF
 from core.util.resref import ResRef
@@ -49,6 +50,7 @@ class AreCatalog:
         self._key: Optional[KeyFile] = None
         self._manager: Optional[StringManager] = None
         self._index: Optional[ResourceIndex] = None
+        self._area_names: dict[str, str] = {}   # resref.upper() → resolved caption
         self._progress_callback: Optional[Callable[[str], None]] = None
 
     # ------------------------------------------------------------------
@@ -66,6 +68,7 @@ class AreCatalog:
         self._key = None
         self._manager = None
         self._index = None
+        self._area_names = {}
 
     def set_progress_callback(self, callback: Optional[Callable[[str], None]]) -> None:
         self._progress_callback = callback
@@ -154,6 +157,28 @@ class AreCatalog:
             self._key = self._keyfile_cls.open(inst.chitin_key)
         if self._manager is None:
             self._manager = self._string_manager_cls.from_installation(inst)
+        if not self._area_names:
+            self._area_names = self._load_area_names()
+
+    def _load_area_names(self) -> dict[str, str]:
+        """Build a resref → resolved caption string map from WORLDMAP.WMP."""
+        assert self._key is not None
+        assert self._manager is not None
+        assert self._selected_game is not None
+        names: dict[str, str] = {}
+        try:
+            wmp_entry = self._key.find("WORLDMAP", ResType.WMP)
+            if wmp_entry is None:
+                return names
+            raw = self._key.read_resource(wmp_entry, game_root=self._selected_game)
+            wmp = WmpFile.from_bytes(raw)
+            for resref_str, strref in wmp.area_name_map().items():
+                text = self._manager.resolve(strref)
+                if text:
+                    names[resref_str.upper()] = text
+        except Exception:
+            pass
+        return names
 
     def _build_index(self) -> ResourceIndex:
         assert self._key is not None
@@ -179,12 +204,15 @@ class AreCatalog:
             except Exception:
                 pass
 
+            resref_upper = str(entry.resref).upper()
+            display_name = self._area_names.get(resref_upper) or wed
+
             index.add_or_update(
                 resref=ResRef(str(entry.resref)),
                 res_type=ResType.ARE,
                 source=SOURCE_BIFF,
                 data=data,
-                display_name=wed,
+                display_name=display_name,
             )
 
         return index
