@@ -1,11 +1,12 @@
 """
-core/formats/are.py  — ARE V1.0 parser.  M1-M4 complete.
+core/formats/are.py  — ARE V1.0 parser.
 Milestones: [M1] Header [M2] Actors+Regions [M3] SpawnPoints+Entrances+Containers+Items
-            [M4] Ambients+Variables+Doors  [M5] Animations+AutomapNotes+TiledObjects+
-                 ProjectileTraps+SongEntries+RestInterruptions  [M6] round-trip tests
+            [M4] Ambients+Variables+Doors
+            [M5] Animations+AutomapNotes+TiledObjects+ProjectileTraps+SongEntries+RestInterruption
+            [M6] round-trip tests
 """
-import struct, math
-from typing import List, Optional, Tuple
+import struct
+from typing import List, Optional
 
 ARE_SIGNATURE  = b'AREA'
 ARE_VERSION_10 = b'V1.0'
@@ -197,6 +198,7 @@ class AreHeader:
             'wind_speed': self.wind_speed, 'area_script': self.area_script,
             'field_c4': self.field_c4, 'field_c8': self.field_c8, 'field_cc': self.field_cc,
             'projectile_traps_count': self.projectile_traps_count,
+            'explored_bitmask_offset': self.explored_bitmask_offset,
             'rest_movie_day': self.rest_movie_day, 'rest_movie_night': self.rest_movie_night,
         })
 
@@ -276,37 +278,37 @@ class AreActor:
         buf[0x58:0x60]=_resref_encode(self.script_general); buf[0x60:0x68]=_resref_encode(self.script_class)
         buf[0x68:0x70]=_resref_encode(self.script_race); buf[0x70:0x78]=_resref_encode(self.script_default)
         buf[0x78:0x80]=_resref_encode(self.script_specific); buf[0x80:0x88]=_resref_encode(self.cre_file)
-        if self.embedded_cre:
-            struct.pack_into('<I',buf,0x88,embedded_cre_offset); struct.pack_into('<I',buf,0x8c,len(self.embedded_cre))
-        else:
-            struct.pack_into('<I',buf,0x88,self.cre_offset); struct.pack_into('<I',buf,0x8c,self.cre_size)
-        buf[0x90:0x110]=self.unused_90
+        struct.pack_into('<I',buf,0x88,embedded_cre_offset)
+        struct.pack_into('<I',buf,0x8c,len(self.embedded_cre) if self.embedded_cre else 0)
+        buf[0x90:0x110]=self.unused_90[:128]
         return bytes(buf)
 
     def to_json(self):
-        d={'name':self.name,'current_x':self.current_x,'current_y':self.current_y,
-           'destination_x':self.destination_x,'destination_y':self.destination_y,
-           'flags':self.flags,'has_been_spawned':self.has_been_spawned,'first_letter_cre':self.first_letter_cre,
-           'actor_animation':self.actor_animation,'actor_orientation':self.actor_orientation,
-           'removal_timer':self.removal_timer,
-           'movement_restriction_distance':self.movement_restriction_distance,
-           'movement_restriction_distance_to_object':self.movement_restriction_distance_to_object,
-           'appearance_schedule':self.appearance_schedule,'num_times_talked_to':self.num_times_talked_to,
-           'dialog':self.dialog,'script_override':self.script_override,'script_general':self.script_general,
-           'script_class':self.script_class,'script_race':self.script_race,'script_default':self.script_default,
-           'script_specific':self.script_specific,'cre_file':self.cre_file}
-        if self.embedded_cre: d['embedded_cre']=self.embedded_cre.hex()
-        return _sparse(d)
+        return _sparse({'name':self.name,'current_x':self.current_x,'current_y':self.current_y,
+            'destination_x':self.destination_x,'destination_y':self.destination_y,
+            'flags':self.flags,'has_been_spawned':self.has_been_spawned,
+            'first_letter_cre':self.first_letter_cre,'unused_2f':self.unused_2f,
+            'actor_animation':self.actor_animation,'actor_orientation':self.actor_orientation,
+            'unused_36':self.unused_36,
+            'removal_timer':self.removal_timer,
+            'movement_restriction_distance':self.movement_restriction_distance,
+            'movement_restriction_distance_to_object':self.movement_restriction_distance_to_object,
+            'appearance_schedule':self.appearance_schedule,'num_times_talked_to':self.num_times_talked_to,
+            'dialog':self.dialog,'script_override':self.script_override,
+            'script_general':self.script_general,'script_class':self.script_class,
+            'script_race':self.script_race,'script_default':self.script_default,
+            'script_specific':self.script_specific,'cre_file':self.cre_file,
+            'embedded_cre':self.embedded_cre.hex() if self.embedded_cre else None})
 
     @classmethod
     def from_json(cls, d):
-        a=cls.__new__(cls)
-        a.name=d.get('name',''); a.current_x=d.get('current_x',0); a.current_y=d.get('current_y',0)
+        a=cls.__new__(cls); a.name=d.get('name','')
+        a.current_x=d.get('current_x',0); a.current_y=d.get('current_y',0)
         a.destination_x=d.get('destination_x',0); a.destination_y=d.get('destination_y',0)
-        a.flags=d.get('flags',0); a.has_been_spawned=d.get('has_been_spawned',0)
-        a.first_letter_cre=d.get('first_letter_cre',0); a.unused_2f=0
-        a.actor_animation=d.get('actor_animation',0); a.actor_orientation=d.get('actor_orientation',0); a.unused_36=0
-        a.removal_timer=d.get('removal_timer',0xFFFFFFFF)
+        a.flags=d.get('flags',1); a.has_been_spawned=d.get('has_been_spawned',0)
+        a.first_letter_cre=d.get('first_letter_cre',0); a.unused_2f=d.get('unused_2f',0)
+        a.actor_animation=d.get('actor_animation',0); a.actor_orientation=d.get('actor_orientation',0)
+        a.unused_36=d.get('unused_36',0); a.removal_timer=d.get('removal_timer',0)
         a.movement_restriction_distance=d.get('movement_restriction_distance',0)
         a.movement_restriction_distance_to_object=d.get('movement_restriction_distance_to_object',0)
         a.appearance_schedule=d.get('appearance_schedule',0); a.num_times_talked_to=d.get('num_times_talked_to',0)
@@ -315,7 +317,7 @@ class AreActor:
         a.script_race=d.get('script_race',''); a.script_default=d.get('script_default','')
         a.script_specific=d.get('script_specific',''); a.cre_file=d.get('cre_file','')
         a.cre_offset=0; a.cre_size=0; a.unused_90=bytes(128)
-        raw=d.get('embedded_cre'); a.embedded_cre=bytes.fromhex(raw) if raw else None
+        ec=d.get('embedded_cre'); a.embedded_cre=bytes.fromhex(ec) if ec else None
         return a
 
 
@@ -323,14 +325,15 @@ class AreActor:
 # Regions
 # ─────────────────────────────────────────────────────────────────────────────
 class AreRegion:
-    """196 bytes. Vertices inlined. PST fields always parsed."""
+    """196 bytes. region_type: 0=proximity 1=info 2=travel."""
     __slots__=['name','region_type','bounding_box','trigger_value','cursor_index',
-               'destination_area','entrance_name','flags','information_text',
-               'trap_detection_difficulty','trap_removal_difficulty',
-               'is_trapped','trap_detected','trap_launch_x','trap_launch_y',
-               'key_item','region_script','alt_use_point_x','alt_use_point_y',
-               'unknown_88','unknown_8c','sound','talk_location_x','talk_location_y',
-               'speaker_name','dialog_file','vertices']
+               'destination_area','destination_entrance','flags','info_string',
+               'trap_detection_difficulty','trap_removal_difficulty','is_trapped','trap_detected',
+               'trap_launch_x','trap_launch_y','key_item','region_script',
+               'use_point_x','use_point_y','unknown_70','unused_78','journal_entry',
+               'saved_loc_x','saved_loc_y','saved_loc_orientation',
+               'area_point_name','travel_schedule','region_script_2','unknown_b0',
+               'vertices']
 
     @classmethod
     def from_bytes(cls, data, vertex_pool, first_vi):
@@ -338,77 +341,84 @@ class AreRegion:
         r=cls.__new__(cls)
         r.name=_str32(data[0x00:0x20]); r.region_type=struct.unpack_from('<H',data,0x20)[0]
         r.bounding_box=list(struct.unpack_from('<4H',data,0x22))
-        vc=struct.unpack_from('<H',data,0x2a)[0]
+        vertex_count=struct.unpack_from('<H',data,0x2a)[0]
         r.trigger_value=struct.unpack_from('<I',data,0x30)[0]; r.cursor_index=struct.unpack_from('<I',data,0x34)[0]
-        r.destination_area=_resref(data[0x38:0x40]); r.entrance_name=_str32(data[0x40:0x60])
-        r.flags=struct.unpack_from('<I',data,0x60)[0]; r.information_text=struct.unpack_from('<I',data,0x64)[0]
-        r.trap_detection_difficulty=struct.unpack_from('<H',data,0x68)[0]
-        r.trap_removal_difficulty=struct.unpack_from('<H',data,0x6a)[0]
-        r.is_trapped=struct.unpack_from('<H',data,0x6c)[0]; r.trap_detected=struct.unpack_from('<H',data,0x6e)[0]
-        r.trap_launch_x=struct.unpack_from('<H',data,0x70)[0]; r.trap_launch_y=struct.unpack_from('<H',data,0x72)[0]
-        r.key_item=_resref(data[0x74:0x7c]); r.region_script=_resref(data[0x7c:0x84])
-        r.alt_use_point_x=struct.unpack_from('<H',data,0x84)[0]; r.alt_use_point_y=struct.unpack_from('<H',data,0x86)[0]
-        r.unknown_88=struct.unpack_from('<I',data,0x88)[0]; r.unknown_8c=bytes(data[0x8c:0xac])
-        r.sound=_resref(data[0xac:0xb4]); r.talk_location_x=struct.unpack_from('<H',data,0xb4)[0]
-        r.talk_location_y=struct.unpack_from('<H',data,0xb6)[0]; r.speaker_name=struct.unpack_from('<I',data,0xb8)[0]
-        r.dialog_file=_resref(data[0xbc:0xc4])
-        r.vertices=_verts_from_pool(vertex_pool,first_vi,vc)
+        r.destination_area=_resref(data[0x38:0x40]); r.destination_entrance=_resref(data[0x40:0x48])
+        r.flags=struct.unpack_from('<I',data,0x48)[0]; r.info_string=struct.unpack_from('<I',data,0x4c)[0]
+        r.trap_detection_difficulty=struct.unpack_from('<H',data,0x50)[0]
+        r.trap_removal_difficulty=struct.unpack_from('<H',data,0x52)[0]
+        r.is_trapped=struct.unpack_from('<H',data,0x54)[0]; r.trap_detected=struct.unpack_from('<H',data,0x56)[0]
+        r.trap_launch_x=struct.unpack_from('<H',data,0x58)[0]; r.trap_launch_y=struct.unpack_from('<H',data,0x5a)[0]
+        r.key_item=_resref(data[0x5c:0x64]); r.region_script=_resref(data[0x64:0x6c])
+        r.use_point_x=struct.unpack_from('<H',data,0x6c)[0]; r.use_point_y=struct.unpack_from('<H',data,0x6e)[0]
+        r.unknown_70=bytes(data[0x70:0x78]); r.unused_78=bytes(data[0x78:0x80]); r.journal_entry=struct.unpack_from('<I',data,0x80)[0]
+        r.saved_loc_x=struct.unpack_from('<H',data,0x84)[0]; r.saved_loc_y=struct.unpack_from('<H',data,0x86)[0]
+        r.saved_loc_orientation=struct.unpack_from('<H',data,0x88)[0]
+        r.area_point_name=_resref(data[0x8a:0x92]); r.travel_schedule=struct.unpack_from('<I',data,0x92)[0]
+        r.region_script_2=_resref(data[0x96:0x9e]); r.unknown_b0=bytes(data[0x9e:0xc4])
+        r.vertices=_verts_from_pool(vertex_pool,first_vi,vertex_count)
         return r
 
     def to_bytes(self, first_vi):
         buf=bytearray(REGION_SIZE)
         buf[0x00:0x20]=_str32_encode(self.name); struct.pack_into('<H',buf,0x20,self.region_type)
         struct.pack_into('<4H',buf,0x22,*self.bounding_box)
-        struct.pack_into('<H',buf,0x2a,len(self.vertices)); struct.pack_into('<I',buf,0x2c,first_vi)
+        struct.pack_into('<H',buf,0x2a,len(self.vertices))
+        struct.pack_into('<I',buf,0x2c,first_vi)
         struct.pack_into('<I',buf,0x30,self.trigger_value); struct.pack_into('<I',buf,0x34,self.cursor_index)
-        buf[0x38:0x40]=_resref_encode(self.destination_area); buf[0x40:0x60]=_str32_encode(self.entrance_name)
-        struct.pack_into('<I',buf,0x60,self.flags); struct.pack_into('<I',buf,0x64,self.information_text)
-        struct.pack_into('<H',buf,0x68,self.trap_detection_difficulty); struct.pack_into('<H',buf,0x6a,self.trap_removal_difficulty)
-        struct.pack_into('<H',buf,0x6c,self.is_trapped); struct.pack_into('<H',buf,0x6e,self.trap_detected)
-        struct.pack_into('<H',buf,0x70,self.trap_launch_x); struct.pack_into('<H',buf,0x72,self.trap_launch_y)
-        buf[0x74:0x7c]=_resref_encode(self.key_item); buf[0x7c:0x84]=_resref_encode(self.region_script)
-        struct.pack_into('<H',buf,0x84,self.alt_use_point_x); struct.pack_into('<H',buf,0x86,self.alt_use_point_y)
-        struct.pack_into('<I',buf,0x88,self.unknown_88); buf[0x8c:0xac]=self.unknown_8c[:32]
-        buf[0xac:0xb4]=_resref_encode(self.sound)
-        struct.pack_into('<H',buf,0xb4,self.talk_location_x); struct.pack_into('<H',buf,0xb6,self.talk_location_y)
-        struct.pack_into('<I',buf,0xb8,self.speaker_name); buf[0xbc:0xc4]=_resref_encode(self.dialog_file)
+        buf[0x38:0x40]=_resref_encode(self.destination_area); buf[0x40:0x48]=_resref_encode(self.destination_entrance)
+        struct.pack_into('<I',buf,0x48,self.flags); struct.pack_into('<I',buf,0x4c,self.info_string)
+        struct.pack_into('<H',buf,0x50,self.trap_detection_difficulty); struct.pack_into('<H',buf,0x52,self.trap_removal_difficulty)
+        struct.pack_into('<H',buf,0x54,self.is_trapped); struct.pack_into('<H',buf,0x56,self.trap_detected)
+        struct.pack_into('<H',buf,0x58,self.trap_launch_x); struct.pack_into('<H',buf,0x5a,self.trap_launch_y)
+        buf[0x5c:0x64]=_resref_encode(self.key_item); buf[0x64:0x6c]=_resref_encode(self.region_script)
+        struct.pack_into('<H',buf,0x6c,self.use_point_x); struct.pack_into('<H',buf,0x6e,self.use_point_y)
+        buf[0x70:0x78]=self.unknown_70[:8]; buf[0x78:0x80]=self.unused_78[:8]; struct.pack_into('<I',buf,0x80,self.journal_entry)
+        struct.pack_into('<H',buf,0x84,self.saved_loc_x); struct.pack_into('<H',buf,0x86,self.saved_loc_y)
+        struct.pack_into('<H',buf,0x88,self.saved_loc_orientation)
+        buf[0x8a:0x92]=_resref_encode(self.area_point_name); struct.pack_into('<I',buf,0x92,self.travel_schedule)
+        buf[0x96:0x9e]=_resref_encode(self.region_script_2); buf[0x9e:0xc4]=self.unknown_b0[:38]
         return bytes(buf)
 
     def to_json(self):
         return _sparse({'name':self.name,'region_type':self.region_type,'bounding_box':self.bounding_box,
             'trigger_value':self.trigger_value,'cursor_index':self.cursor_index,
-            'destination_area':self.destination_area,'entrance_name':self.entrance_name,
-            'flags':self.flags,'information_text':self.information_text,
+            'destination_area':self.destination_area,'destination_entrance':self.destination_entrance,
+            'flags':self.flags,'info_string':self.info_string,
             'trap_detection_difficulty':self.trap_detection_difficulty,
             'trap_removal_difficulty':self.trap_removal_difficulty,
             'is_trapped':self.is_trapped,'trap_detected':self.trap_detected,
             'trap_launch_x':self.trap_launch_x,'trap_launch_y':self.trap_launch_y,
             'key_item':self.key_item,'region_script':self.region_script,
-            'alt_use_point_x':self.alt_use_point_x,'alt_use_point_y':self.alt_use_point_y,
-            'unknown_88':self.unknown_88,
-            'unknown_8c':self.unknown_8c.hex() if any(self.unknown_8c) else None,
-            'sound':self.sound,'talk_location_x':self.talk_location_x,'talk_location_y':self.talk_location_y,
-            'speaker_name':self.speaker_name,'dialog_file':self.dialog_file,'vertices':self.vertices})
+            'use_point_x':self.use_point_x,'use_point_y':self.use_point_y,
+            'unknown_70':self.unknown_70.hex() if any(self.unknown_70) else None,
+            'unused_78':self.unused_78.hex() if any(self.unused_78) else None,
+            'journal_entry':self.journal_entry,
+            'saved_loc_x':self.saved_loc_x,'saved_loc_y':self.saved_loc_y,
+            'saved_loc_orientation':self.saved_loc_orientation,
+            'area_point_name':self.area_point_name,'travel_schedule':self.travel_schedule,
+            'region_script_2':self.region_script_2,'vertices':self.vertices})
 
     @classmethod
     def from_json(cls, d):
-        r=cls.__new__(cls)
-        r.name=d.get('name',''); r.region_type=d.get('region_type',0)
-        r.bounding_box=d.get('bounding_box',[0,0,0,0])
-        r.trigger_value=d.get('trigger_value',0); r.cursor_index=d.get('cursor_index',0)
-        r.destination_area=d.get('destination_area',''); r.entrance_name=d.get('entrance_name','')
-        r.flags=d.get('flags',0); r.information_text=d.get('information_text',0)
-        r.trap_detection_difficulty=d.get('trap_detection_difficulty',0)
+        r=cls.__new__(cls); r.name=d.get('name',''); r.region_type=d.get('region_type',0)
+        r.bounding_box=d.get('bounding_box',[0,0,0,0]); r.trigger_value=d.get('trigger_value',0)
+        r.cursor_index=d.get('cursor_index',0); r.destination_area=d.get('destination_area','')
+        r.destination_entrance=d.get('destination_entrance',''); r.flags=d.get('flags',0)
+        r.info_string=d.get('info_string',0); r.trap_detection_difficulty=d.get('trap_detection_difficulty',0)
         r.trap_removal_difficulty=d.get('trap_removal_difficulty',0)
         r.is_trapped=d.get('is_trapped',0); r.trap_detected=d.get('trap_detected',0)
         r.trap_launch_x=d.get('trap_launch_x',0); r.trap_launch_y=d.get('trap_launch_y',0)
         r.key_item=d.get('key_item',''); r.region_script=d.get('region_script','')
-        r.alt_use_point_x=d.get('alt_use_point_x',0); r.alt_use_point_y=d.get('alt_use_point_y',0)
-        r.unknown_88=d.get('unknown_88',0)
-        unk=d.get('unknown_8c'); r.unknown_8c=bytes.fromhex(unk) if unk else bytes(32)
-        r.sound=d.get('sound',''); r.talk_location_x=d.get('talk_location_x',0)
-        r.talk_location_y=d.get('talk_location_y',0); r.speaker_name=d.get('speaker_name',0)
-        r.dialog_file=d.get('dialog_file',''); r.vertices=d.get('vertices',[])
+        r.use_point_x=d.get('use_point_x',0); r.use_point_y=d.get('use_point_y',0)
+        unk70=d.get('unknown_70'); r.unknown_70=bytes.fromhex(unk70) if unk70 else bytes(8)
+        unu78=d.get('unused_78');  r.unused_78 =bytes.fromhex(unu78) if unu78 else bytes(8)
+        r.journal_entry=d.get('journal_entry',0)
+        r.saved_loc_x=d.get('saved_loc_x',0); r.saved_loc_y=d.get('saved_loc_y',0)
+        r.saved_loc_orientation=d.get('saved_loc_orientation',0)
+        r.area_point_name=d.get('area_point_name',''); r.travel_schedule=d.get('travel_schedule',0)
+        r.region_script_2=d.get('region_script_2',''); r.unknown_b0=bytes(38)
+        r.vertices=d.get('vertices',[])
         return r
 
 
@@ -416,12 +426,12 @@ class AreRegion:
 # Spawn Points
 # ─────────────────────────────────────────────────────────────────────────────
 class AreSpawnPoint:
-    """200 bytes. 10 creature slots. tail_90 (56 bytes) stored verbatim."""
-    __slots__=['name','x','y','creature_resrefs','creature_count','base_creature_number',
-               'frequency','spawn_method','actor_removal_timer',
-               'movement_restriction_distance','movement_restriction_distance_to_object',
-               'max_creatures','enabled','appearance_schedule',
-               'probability_day','probability_night','tail_90']
+    """200 bytes."""
+    __slots__=['name','x','y','creature_resrefs','creature_count',
+               'base_count','frequency','spawn_method','actor_removal_timer',
+               'movement_restriction_distance','movement_restriction_to_object',
+               'enabled','spawn_schedule','probability_day','probability_night',
+               'unused_b4']
 
     @classmethod
     def from_bytes(cls, data):
@@ -429,60 +439,60 @@ class AreSpawnPoint:
         s=cls.__new__(cls)
         s.name=_str32(data[0x00:0x20]); s.x=struct.unpack_from('<H',data,0x20)[0]; s.y=struct.unpack_from('<H',data,0x22)[0]
         s.creature_resrefs=[_resref(data[0x24+i*8:0x24+i*8+8]) for i in range(10)]
-        s.creature_count=struct.unpack_from('<H',data,0x74)[0]; s.base_creature_number=struct.unpack_from('<H',data,0x76)[0]
+        s.creature_count=struct.unpack_from('<H',data,0x74)[0]; s.base_count=struct.unpack_from('<H',data,0x76)[0]
         s.frequency=struct.unpack_from('<H',data,0x78)[0]; s.spawn_method=struct.unpack_from('<H',data,0x7a)[0]
         s.actor_removal_timer=struct.unpack_from('<I',data,0x7c)[0]
         s.movement_restriction_distance=struct.unpack_from('<H',data,0x80)[0]
-        s.movement_restriction_distance_to_object=struct.unpack_from('<H',data,0x82)[0]
-        s.max_creatures=struct.unpack_from('<H',data,0x84)[0]; s.enabled=struct.unpack_from('<H',data,0x86)[0]
-        s.appearance_schedule=struct.unpack_from('<I',data,0x88)[0]
+        s.movement_restriction_to_object=struct.unpack_from('<H',data,0x82)[0]
+        s.enabled=struct.unpack_from('<H',data,0x84)[0]; s.unused_b4=bytes(data[0x86:0xb4]) # includes spawn_schedule area
+        s.spawn_schedule=struct.unpack_from('<I',data,0x88)[0]
         s.probability_day=struct.unpack_from('<H',data,0x8c)[0]; s.probability_night=struct.unpack_from('<H',data,0x8e)[0]
-        s.tail_90=bytes(data[0x90:0xc8])
         return s
 
     def to_bytes(self):
         buf=bytearray(SPAWN_POINT_SIZE)
         buf[0x00:0x20]=_str32_encode(self.name)
         struct.pack_into('<H',buf,0x20,self.x); struct.pack_into('<H',buf,0x22,self.y)
-        rr=(list(self.creature_resrefs)+['']*10)[:10]
-        for i in range(10): buf[0x24+i*8:0x24+i*8+8]=_resref_encode(rr[i])
-        struct.pack_into('<H',buf,0x74,self.creature_count); struct.pack_into('<H',buf,0x76,self.base_creature_number)
+        refs=(list(self.creature_resrefs)+['']*10)[:10]
+        for i in range(10): buf[0x24+i*8:0x24+i*8+8]=_resref_encode(refs[i])
+        struct.pack_into('<H',buf,0x74,self.creature_count); struct.pack_into('<H',buf,0x76,self.base_count)
         struct.pack_into('<H',buf,0x78,self.frequency); struct.pack_into('<H',buf,0x7a,self.spawn_method)
         struct.pack_into('<I',buf,0x7c,self.actor_removal_timer)
         struct.pack_into('<H',buf,0x80,self.movement_restriction_distance)
-        struct.pack_into('<H',buf,0x82,self.movement_restriction_distance_to_object)
-        struct.pack_into('<H',buf,0x84,self.max_creatures); struct.pack_into('<H',buf,0x86,self.enabled)
-        struct.pack_into('<I',buf,0x88,self.appearance_schedule)
+        struct.pack_into('<H',buf,0x82,self.movement_restriction_to_object)
+        struct.pack_into('<H',buf,0x84,self.enabled)
+        buf[0x86:0xb4]=self.unused_b4[:46]
+        struct.pack_into('<I',buf,0x88,self.spawn_schedule)
         struct.pack_into('<H',buf,0x8c,self.probability_day); struct.pack_into('<H',buf,0x8e,self.probability_night)
-        buf[0x90:0xc8]=self.tail_90[:56]
         return bytes(buf)
 
     def to_json(self):
         return _sparse({'name':self.name,'x':self.x,'y':self.y,
-            'creature_resrefs':[r for r in self.creature_resrefs if r],
-            'creature_count':self.creature_count,'base_creature_number':self.base_creature_number,
+            'creature_resrefs':self.creature_resrefs,
+            'creature_count':self.creature_count,'base_count':self.base_count,
             'frequency':self.frequency,'spawn_method':self.spawn_method,
             'actor_removal_timer':self.actor_removal_timer,
             'movement_restriction_distance':self.movement_restriction_distance,
-            'movement_restriction_distance_to_object':self.movement_restriction_distance_to_object,
-            'max_creatures':self.max_creatures,'enabled':self.enabled,
-            'appearance_schedule':self.appearance_schedule,
+            'movement_restriction_to_object':self.movement_restriction_to_object,
+            'enabled':self.enabled,'spawn_schedule':self.spawn_schedule,
             'probability_day':self.probability_day,'probability_night':self.probability_night,
-            'tail_90':self.tail_90.hex() if any(self.tail_90) else None})
+            'unused_b4':self.unused_b4.hex() if any(self.unused_b4) else None})
 
     @classmethod
     def from_json(cls, d):
         s=cls.__new__(cls); s.name=d.get('name',''); s.x=d.get('x',0); s.y=d.get('y',0)
-        rr=d.get('creature_resrefs',[]); s.creature_resrefs=(rr+['']*10)[:10]
-        s.creature_count=d.get('creature_count',0); s.base_creature_number=d.get('base_creature_number',0)
-        s.frequency=d.get('frequency',0); s.spawn_method=d.get('spawn_method',0)
-        s.actor_removal_timer=d.get('actor_removal_timer',0xFFFFFFFF)
+        refs=d.get('creature_resrefs',[])
+        s.creature_count=d.get('creature_count',0)
+        s.creature_resrefs=(refs+['']*10)[:10]
+        s.base_count=d.get('base_count',0); s.frequency=d.get('frequency',0)
+        s.spawn_method=d.get('spawn_method',0); s.actor_removal_timer=d.get('actor_removal_timer',0)
         s.movement_restriction_distance=d.get('movement_restriction_distance',0)
-        s.movement_restriction_distance_to_object=d.get('movement_restriction_distance_to_object',0)
-        s.max_creatures=d.get('max_creatures',0); s.enabled=d.get('enabled',0)
-        s.appearance_schedule=d.get('appearance_schedule',0)
+        s.movement_restriction_to_object=d.get('movement_restriction_to_object',0)
+        s.enabled=d.get('enabled',0); s.unused_b4=bytes(46)
+        ub = d.get('unused_b4')
+        s.unused_b4 = bytes.fromhex(ub) if ub else bytes(46)
+        s.spawn_schedule=d.get('spawn_schedule',0)
         s.probability_day=d.get('probability_day',0); s.probability_night=d.get('probability_night',0)
-        t=d.get('tail_90'); s.tail_90=bytes.fromhex(t) if t else bytes(56)
         return s
 
 
@@ -497,9 +507,8 @@ class AreEntrance:
     def from_bytes(cls, data):
         assert len(data) >= ENTRANCE_SIZE
         e=cls.__new__(cls)
-        e.name=_str32(data[0x00:0x20]); e.x=struct.unpack_from('<H',data,0x20)[0]
-        e.y=struct.unpack_from('<H',data,0x22)[0]; e.orientation=struct.unpack_from('<H',data,0x24)[0]
-        e.unused_26=bytes(data[0x26:0x68])
+        e.name=_str32(data[0x00:0x20]); e.x=struct.unpack_from('<H',data,0x20)[0]; e.y=struct.unpack_from('<H',data,0x22)[0]
+        e.orientation=struct.unpack_from('<H',data,0x24)[0]; e.unused_26=bytes(data[0x26:0x68])
         return e
 
     def to_bytes(self):
@@ -509,12 +518,15 @@ class AreEntrance:
         struct.pack_into('<H',buf,0x24,self.orientation); buf[0x26:0x68]=self.unused_26[:66]
         return bytes(buf)
 
-    def to_json(self): return _sparse({'name':self.name,'x':self.x,'y':self.y,'orientation':self.orientation})
+    def to_json(self):
+        return _sparse({'name':self.name,'x':self.x,'y':self.y,'orientation':self.orientation,
+            'unused_26':self.unused_26.hex() if any(self.unused_26) else None})
 
     @classmethod
     def from_json(cls, d):
         e=cls.__new__(cls); e.name=d.get('name',''); e.x=d.get('x',0); e.y=d.get('y',0)
-        e.orientation=d.get('orientation',0); e.unused_26=bytes(66)
+        e.orientation=d.get('orientation',0)
+        uu=d.get('unused_26'); e.unused_26=bytes.fromhex(uu) if uu else bytes(66)
         return e
 
 
@@ -522,33 +534,42 @@ class AreEntrance:
 # Items
 # ─────────────────────────────────────────────────────────────────────────────
 class AreItem:
-    """20 bytes. Inlined per container."""
-    __slots__=['item_resref','expiration_time','charges_1','charges_2','charges_3','flags']
+    """20 bytes."""
+    # IESDP layout: resref(8) expiry(2) qty1(2) qty2(2) qty3(2) flags(4) = 20 bytes
+    __slots__=['item_resref','expiry_time','quantity1','quantity2','quantity3','flags']
 
     @classmethod
     def from_bytes(cls, data):
         assert len(data) >= ITEM_SIZE
         it=cls.__new__(cls)
-        it.item_resref=_resref(data[0x00:0x08]); it.expiration_time=struct.unpack_from('<H',data,0x08)[0]
-        it.charges_1=struct.unpack_from('<H',data,0x0a)[0]; it.charges_2=struct.unpack_from('<H',data,0x0c)[0]
-        it.charges_3=struct.unpack_from('<H',data,0x0e)[0]; it.flags=struct.unpack_from('<I',data,0x10)[0]
+        it.item_resref=_resref(data[0x00:0x08])
+        it.expiry_time=struct.unpack_from('<H',data,0x08)[0]
+        it.quantity1  =struct.unpack_from('<H',data,0x0a)[0]
+        it.quantity2  =struct.unpack_from('<H',data,0x0c)[0]
+        it.quantity3  =struct.unpack_from('<H',data,0x0e)[0]
+        it.flags      =struct.unpack_from('<I',data,0x10)[0]
         return it
 
     def to_bytes(self):
-        buf=bytearray(ITEM_SIZE); buf[0x00:0x08]=_resref_encode(self.item_resref)
-        struct.pack_into('<H',buf,0x08,self.expiration_time); struct.pack_into('<H',buf,0x0a,self.charges_1)
-        struct.pack_into('<H',buf,0x0c,self.charges_2); struct.pack_into('<H',buf,0x0e,self.charges_3)
+        buf=bytearray(ITEM_SIZE)
+        buf[0x00:0x08]=_resref_encode(self.item_resref)
+        struct.pack_into('<H',buf,0x08,self.expiry_time)
+        struct.pack_into('<H',buf,0x0a,self.quantity1)
+        struct.pack_into('<H',buf,0x0c,self.quantity2)
+        struct.pack_into('<H',buf,0x0e,self.quantity3)
         struct.pack_into('<I',buf,0x10,self.flags)
         return bytes(buf)
 
-    def to_json(self): return _sparse({'item_resref':self.item_resref,'expiration_time':self.expiration_time,
-        'charges_1':self.charges_1,'charges_2':self.charges_2,'charges_3':self.charges_3,'flags':self.flags})
+    def to_json(self):
+        return _sparse({'item_resref':self.item_resref,'expiry_time':self.expiry_time,
+            'quantity1':self.quantity1,'quantity2':self.quantity2,
+            'quantity3':self.quantity3,'flags':self.flags})
 
     @classmethod
     def from_json(cls, d):
-        it=cls.__new__(cls); it.item_resref=d.get('item_resref',''); it.expiration_time=d.get('expiration_time',0)
-        it.charges_1=d.get('charges_1',0); it.charges_2=d.get('charges_2',0)
-        it.charges_3=d.get('charges_3',0); it.flags=d.get('flags',0)
+        it=cls.__new__(cls); it.item_resref=d.get('item_resref',''); it.expiry_time=d.get('expiry_time',0)
+        it.quantity1=d.get('quantity1',0); it.quantity2=d.get('quantity2',0)
+        it.quantity3=d.get('quantity3',0); it.flags=d.get('flags',0)
         return it
 
 
@@ -556,14 +577,12 @@ class AreItem:
 # Containers
 # ─────────────────────────────────────────────────────────────────────────────
 class AreContainer:
-    """192 bytes. Bounding box = 4 words at 0x0038 (IESDP typo corrected).
-    owner (0x0058) is 32-byte script name, not resref. Items+vertices inlined."""
+    """192 bytes."""
     __slots__=['name','x','y','container_type','lock_difficulty','flags',
-               'trap_detection_difficulty','trap_removal_difficulty',
-               'is_trapped','trap_detected','trap_launch_x','trap_launch_y',
-               'bounding_box','trap_script','trigger_range','owner',
-               'key_item','break_difficulty','lockpick_string','unused_88',
-               'items','vertices']
+               'trap_detection_difficulty','trap_removal_difficulty','is_trapped','trap_detected',
+               'trap_launch_x','trap_launch_y','bounding_box','trap_script',
+               'trigger_range','owner','key_item','break_difficulty','lockpick_string',
+               'unused_88','items','vertices']
 
     @classmethod
     def from_bytes(cls, data, item_pool, first_item_index, vertex_pool, first_vi):
@@ -636,19 +655,12 @@ class AreContainer:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Ambients  (M4)
+# Ambients
 # ─────────────────────────────────────────────────────────────────────────────
 class AreAmbient:
-    """
-    212 bytes. Up to 10 sound slots; count_of_sounds (0x0080) governs how many
-    are active.  JSON stores only occupied slots; unused are zeroed on rebuild.
-
-    Flags (0x0090):
-      bit 0 enabled   bit 1 disable-env   bit 2 global
-      bit 3 random    bit 4 low-mem-1
-    """
+    """212 bytes. Up to 10 sound slots."""
     __slots__=['name','x','y','radius','height','pitch_variance','volume_variance',
-               'volume','sounds','unused_82','base_time','base_time_deviation',
+               'volume','sounds','_raw_sound_slots','unused_82','base_time','base_time_deviation',
                'appearance_schedule','flags','unused_94']
 
     @classmethod
@@ -660,6 +672,7 @@ class AreAmbient:
         a.pitch_variance=struct.unpack_from('<I',data,0x28)[0]; a.volume_variance=struct.unpack_from('<H',data,0x2c)[0]
         a.volume=struct.unpack_from('<H',data,0x2e)[0]
         count=struct.unpack_from('<H',data,0x80)[0]
+        a._raw_sound_slots=bytes(data[0x30:0x80])
         all_snd=[_resref(data[0x30+i*8:0x30+i*8+8]) for i in range(10)]
         a.sounds=all_snd[:count]
         a.unused_82=struct.unpack_from('<H',data,0x82)[0]
@@ -675,8 +688,11 @@ class AreAmbient:
         struct.pack_into('<H',buf,0x24,self.radius); struct.pack_into('<H',buf,0x26,self.height)
         struct.pack_into('<I',buf,0x28,self.pitch_variance); struct.pack_into('<H',buf,0x2c,self.volume_variance)
         struct.pack_into('<H',buf,0x2e,self.volume)
-        snd=(list(self.sounds)+['']*10)[:10]
-        for i in range(10): buf[0x30+i*8:0x30+i*8+8]=_resref_encode(snd[i])
+        if self._raw_sound_slots:
+            buf[0x30:0x80]=self._raw_sound_slots[:80]
+        else:
+            snd=(list(self.sounds)+['']*10)[:10]
+            for i in range(10): buf[0x30+i*8:0x30+i*8+8]=_resref_encode(snd[i])
         struct.pack_into('<H',buf,0x80,len(self.sounds)); struct.pack_into('<H',buf,0x82,self.unused_82)
         struct.pack_into('<I',buf,0x84,self.base_time); struct.pack_into('<I',buf,0x88,self.base_time_deviation)
         struct.pack_into('<I',buf,0x8c,self.appearance_schedule); struct.pack_into('<I',buf,0x90,self.flags)
@@ -686,7 +702,9 @@ class AreAmbient:
     def to_json(self):
         return _sparse({'name':self.name,'x':self.x,'y':self.y,'radius':self.radius,'height':self.height,
             'pitch_variance':self.pitch_variance,'volume_variance':self.volume_variance,'volume':self.volume,
-            'sounds':self.sounds,'base_time':self.base_time,'base_time_deviation':self.base_time_deviation,
+            'sounds':self.sounds,
+            '_raw_sound_slots':self._raw_sound_slots.hex() if self._raw_sound_slots else None,
+            'base_time':self.base_time,'base_time_deviation':self.base_time_deviation,
             'appearance_schedule':self.appearance_schedule,'flags':self.flags})
 
     @classmethod
@@ -694,7 +712,10 @@ class AreAmbient:
         a=cls.__new__(cls); a.name=d.get('name',''); a.x=d.get('x',0); a.y=d.get('y',0)
         a.radius=d.get('radius',0); a.height=d.get('height',0)
         a.pitch_variance=d.get('pitch_variance',0); a.volume_variance=d.get('volume_variance',0)
-        a.volume=d.get('volume',0); a.sounds=d.get('sounds',[]); a.unused_82=0
+        a.volume=d.get('volume',0); a.sounds=d.get('sounds',[])
+        rss = d.get('_raw_sound_slots')
+        a._raw_sound_slots = bytes.fromhex(rss) if rss else None
+        a.unused_82=0
         a.base_time=d.get('base_time',0); a.base_time_deviation=d.get('base_time_deviation',0)
         a.appearance_schedule=d.get('appearance_schedule',0); a.flags=d.get('flags',0)
         a.unused_94=bytes(64)
@@ -702,16 +723,10 @@ class AreAmbient:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Variables  (M4)
+# Variables
 # ─────────────────────────────────────────────────────────────────────────────
 class AreVariable:
-    """
-    84 bytes. var_type bitfield: bit0=int bit1=float bit2=scriptname
-              bit3=resref bit4=strref bit5=dword.
-    Engine only reads/writes INT; all fields stored for round-trip fidelity.
-    double_value at 0x002c is IEEE-754 64-bit; script_name at 0x0034 is 32-byte
-    char array (not a resref).
-    """
+    """84 bytes."""
     __slots__=['name','var_type','resource_type','dword_value','int_value','double_value','script_name']
 
     @classmethod
@@ -733,10 +748,9 @@ class AreVariable:
         return bytes(buf)
 
     def to_json(self):
-        d={'name':self.name,'var_type':self.var_type,'resource_type':self.resource_type,
+        return _sparse({'name':self.name,'var_type':self.var_type,'resource_type':self.resource_type,
            'dword_value':self.dword_value,'int_value':self.int_value,
-           'double_value':self.double_value,'script_name':self.script_name}
-        return _sparse(d)
+           'double_value':self.double_value,'script_name':self.script_name})
 
     @classmethod
     def from_json(cls, d):
@@ -748,26 +762,10 @@ class AreVariable:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Doors  (M4)
+# Doors
 # ─────────────────────────────────────────────────────────────────────────────
 class AreDoor:
-    """
-    200 bytes. Four vertex sets drawn from the shared global pool:
-      vertices_open / vertices_closed — door polygon outline
-      impeded_open  / impeded_closed  — search-map cell coords blocked
-    All four inlined as [[x,y],...] in JSON; AreFile rebuilds the pool.
-
-    door_id (0x0020): 8-byte char array linking to WED (not a resref).
-    approach_points (0x0090): two word-pairs [[x0,y0],[x1,y1]].
-    travel_trigger_name (0x009c): 24-byte char array.
-    bbox_open / bbox_closed (0x0038 / 0x0040): 4 words each [l,t,r,b].
-
-    IESDP field layout for vertex index/count pairs:
-      0x002c first_vertex_open (dword)    0x0030 count_open (word)
-      0x0032 count_closed (word)          0x0034 first_vertex_closed (dword)
-      0x0048 first_impeded_open (dword)   0x004c count_impeded_open (word)
-      0x004e count_impeded_closed (word)  0x0050 first_impeded_closed (dword)
-    """
+    """200 bytes. Four vertex sets from the shared pool."""
     __slots__=['name','door_id','flags','bbox_open','bbox_closed',
                'hit_points','armor_class','open_sound','close_sound','cursor_index',
                'trap_detection_difficulty','trap_removal_difficulty',
@@ -889,11 +887,435 @@ class AreDoor:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Animations  (M5)
+# ─────────────────────────────────────────────────────────────────────────────
+class AreAnimation:
+    """76 bytes.
+    flags (0x38): bit0 enabled, bit1 blended, bit2 not_light_source,
+                  bit3 partial_anim, bit4 synchronized, bit5 random_start,
+                  bit6 not_covered, bit7 background, bit8 allcycles,
+                  bit9 once, bit10 paused.
+    animation_bam2 is BG2-specific (twin / mirror-image BAM slot).
+    """
+    __slots__ = [
+        'name', 'x', 'y', 'appearance_schedule',
+        'animation_bam', 'animation_bam2',
+        'flags', 'height', 'transparency', 'starting_frame',
+        'looping_chance', 'skip_cycles', 'palette', 'unknown_4a',
+    ]
+
+    @classmethod
+    def from_bytes(cls, data):
+        assert len(data) >= ANIMATION_SIZE
+        a = cls.__new__(cls)
+        a.name                = _str32(data[0x00:0x20])
+        a.x                   = struct.unpack_from('<H', data, 0x20)[0]
+        a.y                   = struct.unpack_from('<H', data, 0x22)[0]
+        a.appearance_schedule = struct.unpack_from('<I', data, 0x24)[0]
+        a.animation_bam       = _resref(data[0x28:0x30])
+        a.animation_bam2      = _resref(data[0x30:0x38])
+        a.flags               = struct.unpack_from('<H', data, 0x38)[0]
+        a.height              = struct.unpack_from('<H', data, 0x3a)[0]
+        a.transparency        = struct.unpack_from('<H', data, 0x3c)[0]
+        a.starting_frame      = struct.unpack_from('<H', data, 0x3e)[0]
+        a.looping_chance      = data[0x40]
+        a.skip_cycles         = data[0x41]
+        a.palette             = _resref(data[0x42:0x4a])
+        a.unknown_4a          = struct.unpack_from('<H', data, 0x4a)[0]
+        return a
+
+    def to_bytes(self):
+        buf = bytearray(ANIMATION_SIZE)
+        buf[0x00:0x20] = _str32_encode(self.name)
+        struct.pack_into('<H', buf, 0x20, self.x)
+        struct.pack_into('<H', buf, 0x22, self.y)
+        struct.pack_into('<I', buf, 0x24, self.appearance_schedule)
+        buf[0x28:0x30] = _resref_encode(self.animation_bam)
+        buf[0x30:0x38] = _resref_encode(self.animation_bam2)
+        struct.pack_into('<H', buf, 0x38, self.flags)
+        struct.pack_into('<H', buf, 0x3a, self.height)
+        struct.pack_into('<H', buf, 0x3c, self.transparency)
+        struct.pack_into('<H', buf, 0x3e, self.starting_frame)
+        buf[0x40] = self.looping_chance
+        buf[0x41] = self.skip_cycles
+        buf[0x42:0x4a] = _resref_encode(self.palette)
+        struct.pack_into('<H', buf, 0x4a, self.unknown_4a)
+        return bytes(buf)
+
+    def to_json(self):
+        return _sparse({
+            'name': self.name, 'x': self.x, 'y': self.y,
+            'appearance_schedule': self.appearance_schedule,
+            'animation_bam': self.animation_bam,
+            'animation_bam2': self.animation_bam2,
+            'flags': self.flags, 'height': self.height,
+            'transparency': self.transparency,
+            'starting_frame': self.starting_frame,
+            'looping_chance': self.looping_chance,
+            'skip_cycles': self.skip_cycles,
+            'palette': self.palette,
+            'unknown_4a': self.unknown_4a,
+        })
+
+    @classmethod
+    def from_json(cls, d):
+        a = cls.__new__(cls)
+        a.name                = d.get('name', '')
+        a.x                   = d.get('x', 0)
+        a.y                   = d.get('y', 0)
+        a.appearance_schedule = d.get('appearance_schedule', 0)
+        a.animation_bam       = d.get('animation_bam', '')
+        a.animation_bam2      = d.get('animation_bam2', '')
+        a.flags               = d.get('flags', 0)
+        a.height              = d.get('height', 0)
+        a.transparency        = d.get('transparency', 0)
+        a.starting_frame      = d.get('starting_frame', 0)
+        a.looping_chance      = d.get('looping_chance', 0)
+        a.skip_cycles         = d.get('skip_cycles', 0)
+        a.palette             = d.get('palette', '')
+        a.unknown_4a          = d.get('unknown_4a', 0)
+        return a
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Automap Notes  (M5)
+# Non-PST only.  PST notes (0x214 bytes) are kept as _raw_pst_automap_notes.
+# ─────────────────────────────────────────────────────────────────────────────
+class AreAutomapNote:
+    """52 bytes.
+    colour: 0=grey 1=violet 2=green 3=orange 4=red 5=blue 6=darkblue 7=darkgreen.
+    note_type: 0=user, 1=external.
+    """
+    __slots__ = ['x', 'y', 'text', 'colour', 'note_type', 'unknown_0c']
+
+    @classmethod
+    def from_bytes(cls, data):
+        assert len(data) >= AUTOMAP_NOTE_SIZE
+        n = cls.__new__(cls)
+        n.x         = struct.unpack_from('<H', data, 0x00)[0]
+        n.y         = struct.unpack_from('<H', data, 0x02)[0]
+        n.text      = struct.unpack_from('<I', data, 0x04)[0]
+        n.colour    = struct.unpack_from('<H', data, 0x08)[0]
+        n.note_type = struct.unpack_from('<H', data, 0x0a)[0]
+        n.unknown_0c = bytes(data[0x0c:0x34])
+        return n
+
+    def to_bytes(self):
+        buf = bytearray(AUTOMAP_NOTE_SIZE)
+        struct.pack_into('<H', buf, 0x00, self.x)
+        struct.pack_into('<H', buf, 0x02, self.y)
+        struct.pack_into('<I', buf, 0x04, self.text)
+        struct.pack_into('<H', buf, 0x08, self.colour)
+        struct.pack_into('<H', buf, 0x0a, self.note_type)
+        buf[0x0c:0x34] = self.unknown_0c[:40]
+        return bytes(buf)
+
+    def to_json(self):
+        return _sparse({
+            'x': self.x, 'y': self.y, 'text': self.text,
+            'colour': self.colour, 'note_type': self.note_type,
+        })
+
+    @classmethod
+    def from_json(cls, d):
+        n = cls.__new__(cls)
+        n.x         = d.get('x', 0)
+        n.y         = d.get('y', 0)
+        n.text      = d.get('text', 0)
+        n.colour    = d.get('colour', 0)
+        n.note_type = d.get('note_type', 0)
+        n.unknown_0c = bytes(40)
+        return n
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Tiled Objects  (M5)
+# ─────────────────────────────────────────────────────────────────────────────
+class AreTiledObject:
+    """108 bytes.
+    tiled_object_id: 8-byte char array linking to WED tiled-cell entry.
+    first_vertex_open / first_vertex_closed index into the tiled_object_flags
+    pool (header 0x90/0x92), NOT the main vertex pool.  The pool itself is
+    preserved verbatim as AreFile._raw_tiled_object_flags.
+    """
+    __slots__ = [
+        'name', 'tiled_object_id', 'flags',
+        'first_vertex_open', 'count_open',
+        'count_closed', 'first_vertex_closed',
+        'unknown_38',
+    ]
+
+    @classmethod
+    def from_bytes(cls, data):
+        assert len(data) >= TILED_OBJECT_SIZE
+        t = cls.__new__(cls)
+        t.name                = _str32(data[0x00:0x20])
+        t.tiled_object_id     = data[0x20:0x28].rstrip(b'\x00').decode('latin-1')
+        t.flags               = struct.unpack_from('<I', data, 0x28)[0]
+        t.first_vertex_open   = struct.unpack_from('<I', data, 0x2c)[0]
+        t.count_open          = struct.unpack_from('<H', data, 0x30)[0]
+        t.count_closed        = struct.unpack_from('<H', data, 0x32)[0]
+        t.first_vertex_closed = struct.unpack_from('<I', data, 0x34)[0]
+        t.unknown_38          = bytes(data[0x38:0x6c])
+        return t
+
+    def to_bytes(self):
+        buf = bytearray(TILED_OBJECT_SIZE)
+        buf[0x00:0x20] = _str32_encode(self.name)
+        buf[0x20:0x28] = self.tiled_object_id.encode('latin-1')[:8].ljust(8, b'\x00')
+        struct.pack_into('<I', buf, 0x28, self.flags)
+        struct.pack_into('<I', buf, 0x2c, self.first_vertex_open)
+        struct.pack_into('<H', buf, 0x30, self.count_open)
+        struct.pack_into('<H', buf, 0x32, self.count_closed)
+        struct.pack_into('<I', buf, 0x34, self.first_vertex_closed)
+        buf[0x38:0x6c] = self.unknown_38[:52]
+        return bytes(buf)
+
+    def to_json(self):
+        return _sparse({
+            'name': self.name,
+            'tiled_object_id': self.tiled_object_id,
+            'flags': self.flags,
+            'first_vertex_open': self.first_vertex_open,
+            'count_open': self.count_open,
+            'count_closed': self.count_closed,
+            'first_vertex_closed': self.first_vertex_closed,
+            'unknown_38': self.unknown_38.hex() if any(self.unknown_38) else None,
+        })
+
+    @classmethod
+    def from_json(cls, d):
+        t = cls.__new__(cls)
+        t.name                = d.get('name', '')
+        t.tiled_object_id     = d.get('tiled_object_id', '')
+        t.flags               = d.get('flags', 0)
+        t.first_vertex_open   = d.get('first_vertex_open', 0)
+        t.count_open          = d.get('count_open', 0)
+        t.count_closed        = d.get('count_closed', 0)
+        t.first_vertex_closed = d.get('first_vertex_closed', 0)
+        unk = d.get('unknown_38')
+        t.unknown_38 = bytes.fromhex(unk) if unk else bytes(52)
+        return t
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Projectile Traps  (M5)
+# ─────────────────────────────────────────────────────────────────────────────
+class AreProjectileTrap:
+    """28 bytes.
+    effects_offset is an absolute file offset pointing to the trap's effect
+    records; stored verbatim for round-trip fidelity (effects data not parsed).
+    """
+    __slots__ = [
+        'projectile_resref', 'effects_count',
+        'x', 'y', 'effects_offset',
+        'projectile_type', 'effect_expiry',
+        'orientation', 'unknown_1a',
+    ]
+
+    @classmethod
+    def from_bytes(cls, data):
+        assert len(data) >= PROJECTILE_TRAP_SIZE
+        p = cls.__new__(cls)
+        p.projectile_resref = _resref(data[0x00:0x08])
+        p.effects_count     = struct.unpack_from('<I', data, 0x08)[0]
+        p.x                 = struct.unpack_from('<H', data, 0x0c)[0]
+        p.y                 = struct.unpack_from('<H', data, 0x0e)[0]
+        p.effects_offset    = struct.unpack_from('<I', data, 0x10)[0]
+        p.projectile_type   = struct.unpack_from('<H', data, 0x14)[0]
+        p.effect_expiry     = struct.unpack_from('<H', data, 0x16)[0]
+        p.orientation       = struct.unpack_from('<H', data, 0x18)[0]
+        p.unknown_1a        = struct.unpack_from('<H', data, 0x1a)[0]
+        return p
+
+    def to_bytes(self):
+        buf = bytearray(PROJECTILE_TRAP_SIZE)
+        buf[0x00:0x08] = _resref_encode(self.projectile_resref)
+        struct.pack_into('<I', buf, 0x08, self.effects_count)
+        struct.pack_into('<H', buf, 0x0c, self.x)
+        struct.pack_into('<H', buf, 0x0e, self.y)
+        struct.pack_into('<I', buf, 0x10, self.effects_offset)
+        struct.pack_into('<H', buf, 0x14, self.projectile_type)
+        struct.pack_into('<H', buf, 0x16, self.effect_expiry)
+        struct.pack_into('<H', buf, 0x18, self.orientation)
+        struct.pack_into('<H', buf, 0x1a, self.unknown_1a)
+        return bytes(buf)
+
+    def to_json(self):
+        return _sparse({
+            'projectile_resref': self.projectile_resref,
+            'effects_count': self.effects_count,
+            'x': self.x, 'y': self.y,
+            'effects_offset': self.effects_offset,
+            'projectile_type': self.projectile_type,
+            'effect_expiry': self.effect_expiry,
+            'orientation': self.orientation,
+            'unknown_1a': self.unknown_1a,
+        })
+
+    @classmethod
+    def from_json(cls, d):
+        p = cls.__new__(cls)
+        p.projectile_resref = d.get('projectile_resref', '')
+        p.effects_count     = d.get('effects_count', 0)
+        p.x                 = d.get('x', 0)
+        p.y                 = d.get('y', 0)
+        p.effects_offset    = d.get('effects_offset', 0)
+        p.projectile_type   = d.get('projectile_type', 0)
+        p.effect_expiry     = d.get('effect_expiry', 0)
+        p.orientation       = d.get('orientation', 0)
+        p.unknown_1a        = d.get('unknown_1a', 0)
+        return p
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Song Entries  (M5 — singleton, 0x90 bytes)
+# ─────────────────────────────────────────────────────────────────────────────
+class AreSongEntries:
+    """144 bytes, single record per file.
+    Music/ambient indices for day, night, win, battle, lose, and five alternates.
+    main_ambients: resref for the daytime ambient sound set.
+    unknown_34: 92 bytes of unknown data preserved verbatim.
+    """
+    __slots__ = [
+        'day_song', 'night_song', 'win_song', 'battle_song', 'lose_song',
+        'alt_music',        # list of 5 dwords
+        'main_ambients', 'reverb',
+        'unknown_34',
+    ]
+
+    @classmethod
+    def from_bytes(cls, data):
+        assert len(data) >= SONG_ENTRIES_SIZE
+        s = cls.__new__(cls)
+        s.day_song    = struct.unpack_from('<I', data, 0x00)[0]
+        s.night_song  = struct.unpack_from('<I', data, 0x04)[0]
+        s.win_song    = struct.unpack_from('<I', data, 0x08)[0]
+        s.battle_song = struct.unpack_from('<I', data, 0x0c)[0]
+        s.lose_song   = struct.unpack_from('<I', data, 0x10)[0]
+        s.alt_music   = list(struct.unpack_from('<5I', data, 0x14))
+        s.main_ambients = _resref(data[0x28:0x30])
+        s.reverb      = struct.unpack_from('<I', data, 0x30)[0]
+        s.unknown_34  = bytes(data[0x34:0x90])
+        return s
+
+    def to_bytes(self):
+        buf = bytearray(SONG_ENTRIES_SIZE)
+        struct.pack_into('<I',  buf, 0x00, self.day_song)
+        struct.pack_into('<I',  buf, 0x04, self.night_song)
+        struct.pack_into('<I',  buf, 0x08, self.win_song)
+        struct.pack_into('<I',  buf, 0x0c, self.battle_song)
+        struct.pack_into('<I',  buf, 0x10, self.lose_song)
+        alts = (list(self.alt_music) + [0] * 5)[:5]
+        struct.pack_into('<5I', buf, 0x14, *alts)
+        buf[0x28:0x30] = _resref_encode(self.main_ambients)
+        struct.pack_into('<I',  buf, 0x30, self.reverb)
+        buf[0x34:0x90] = self.unknown_34[:92]
+        return bytes(buf)
+
+    def to_json(self):
+        return _sparse({
+            'day_song': self.day_song, 'night_song': self.night_song,
+            'win_song': self.win_song, 'battle_song': self.battle_song,
+            'lose_song': self.lose_song, 'alt_music': self.alt_music,
+            'main_ambients': self.main_ambients, 'reverb': self.reverb,
+            'unknown_34': self.unknown_34.hex() if any(self.unknown_34) else None,
+        })
+
+    @classmethod
+    def from_json(cls, d):
+        s = cls.__new__(cls)
+        s.day_song      = d.get('day_song', 0)
+        s.night_song    = d.get('night_song', 0)
+        s.win_song      = d.get('win_song', 0)
+        s.battle_song   = d.get('battle_song', 0)
+        s.lose_song     = d.get('lose_song', 0)
+        s.alt_music     = (d.get('alt_music', []) + [0] * 5)[:5]
+        s.main_ambients = d.get('main_ambients', '')
+        s.reverb        = d.get('reverb', 0)
+        unk34 = d.get('unknown_34')
+        s.unknown_34 = bytes.fromhex(unk34) if unk34 else bytes(92)
+        return s
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Rest Interruption  (M5 — singleton, 0xE4 bytes)
+# ─────────────────────────────────────────────────────────────────────────────
+class AreRestInterruption:
+    """228 bytes, single record per file.
+    Up to 10 creature resrefs that may spawn to interrupt a rest.
+    creature_count marks how many slots are active.
+    difficulty: spawn probability (1-100).
+    unknown_5c: 136 bytes preserved verbatim.
+    """
+    __slots__ = [
+        'creature_resrefs',     # list of up to 10 resrefs
+        'difficulty', 'removal_time',
+        'movement_restriction', 'unknown_56',
+        'creature_count', 'unknown_5a',
+        'unknown_5c',
+    ]
+
+    @classmethod
+    def from_bytes(cls, data):
+        assert len(data) >= REST_INTERRUPTION_SIZE
+        r = cls.__new__(cls)
+        r.creature_resrefs    = [_resref(data[i*8:(i+1)*8]) for i in range(10)]
+        r.difficulty          = struct.unpack_from('<H', data, 0x50)[0]
+        r.removal_time        = struct.unpack_from('<H', data, 0x52)[0]
+        r.movement_restriction = struct.unpack_from('<H', data, 0x54)[0]
+        r.unknown_56          = struct.unpack_from('<H', data, 0x56)[0]
+        r.creature_count      = struct.unpack_from('<H', data, 0x58)[0]
+        r.unknown_5a          = struct.unpack_from('<H', data, 0x5a)[0]
+        r.unknown_5c          = bytes(data[0x5c:0xe4])
+        return r
+
+    def to_bytes(self):
+        buf = bytearray(REST_INTERRUPTION_SIZE)
+        refs = (list(self.creature_resrefs) + [''] * 10)[:10]
+        for i in range(10):
+            buf[i*8:(i+1)*8] = _resref_encode(refs[i])
+        struct.pack_into('<H', buf, 0x50, self.difficulty)
+        struct.pack_into('<H', buf, 0x52, self.removal_time)
+        struct.pack_into('<H', buf, 0x54, self.movement_restriction)
+        struct.pack_into('<H', buf, 0x56, self.unknown_56)
+        struct.pack_into('<H', buf, 0x58, self.creature_count)
+        struct.pack_into('<H', buf, 0x5a, self.unknown_5a)
+        buf[0x5c:0xe4] = self.unknown_5c[:136]
+        return bytes(buf)
+
+    def to_json(self):
+        return _sparse({
+            'creature_resrefs': self.creature_resrefs,
+            'difficulty': self.difficulty,
+            'removal_time': self.removal_time,
+            'movement_restriction': self.movement_restriction,
+            'creature_count': self.creature_count,
+            'unknown_5c': self.unknown_5c.hex() if any(self.unknown_5c) else None,
+        })
+
+    @classmethod
+    def from_json(cls, d):
+        r = cls.__new__(cls)
+        refs = d.get('creature_resrefs', [])
+        r.creature_count       = d.get('creature_count', 0)
+        r.creature_resrefs     = (refs + [''] * 10)[:10]
+        r.difficulty           = d.get('difficulty', 0)
+        r.removal_time         = d.get('removal_time', 0)
+        r.movement_restriction = d.get('movement_restriction', 0)
+        r.unknown_56           = 0
+        r.unknown_5a           = 0
+        unk = d.get('unknown_5c')
+        r.unknown_5c = bytes.fromhex(unk) if unk else bytes(136)
+        return r
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # AreFile
 # ─────────────────────────────────────────────────────────────────────────────
 class AreFile:
     """
-    ARE V1.0 file container.
+    ARE V1.0 file container.  All sections are fully typed through M5.
 
     Vertex pool layout (rebuilt on every to_bytes):
       region[0..n] vertices | container[0..n] vertices |
@@ -902,31 +1324,37 @@ class AreFile:
 
     Item pool: rebuilt from containers in order.
 
-    Typed sections complete through M4:
-      actors, regions, spawn_points, entrances, containers, ambients, variables, doors
+    Tiled object flags pool: stored verbatim as _raw_tiled_object_flags.
+    Its stride (per-entry bytes) is undocumented and potentially game-specific,
+    so the pool is treated as an opaque blob referenced by AreTiledObject
+    first_vertex_open / first_vertex_closed indices.
 
-    Raw blobs pending M5:
-      _raw_animations, _raw_automap_notes, _raw_tiled_objects,
-      _raw_projectile_traps, _raw_song_entries, _raw_rest_interruptions
+    PST automap notes (0x214 bytes each) differ structurally from non-PST notes
+    (0x34 bytes each); the PST variant is stored as _raw_pst_automap_notes.
     """
 
     def __init__(self):
         self.header: Optional[AreHeader] = None
-        self.actors:       List[AreActor]      = []
-        self.regions:      List[AreRegion]     = []
-        self.spawn_points: List[AreSpawnPoint] = []
-        self.entrances:    List[AreEntrance]   = []
-        self.containers:   List[AreContainer]  = []
-        self.ambients:     List[AreAmbient]    = []
-        self.variables:    List[AreVariable]   = []
-        self.doors:        List[AreDoor]       = []
+        # M1-M4 typed sections
+        self.actors:       List[AreActor]       = []
+        self.regions:      List[AreRegion]      = []
+        self.spawn_points: List[AreSpawnPoint]  = []
+        self.entrances:    List[AreEntrance]    = []
+        self.containers:   List[AreContainer]   = []
+        self.ambients:     List[AreAmbient]     = []
+        self.variables:    List[AreVariable]    = []
+        self.doors:        List[AreDoor]        = []
+        # M5 typed sections
+        self.animations:        List[AreAnimation]          = []
+        self.automap_notes:     List[AreAutomapNote]        = []   # non-PST only
+        self.tiled_objects:     List[AreTiledObject]        = []
+        self.projectile_traps:  List[AreProjectileTrap]     = []
+        self.song_entries:      Optional[AreSongEntries]    = None
+        self.rest_interruption: Optional[AreRestInterruption] = None
+        # opaque blobs
         self._raw_explored_bitmask:   bytes = b''
-        self._raw_animations:         bytes = b''
-        self._raw_automap_notes:      bytes = b''
-        self._raw_tiled_objects:      bytes = b''
-        self._raw_projectile_traps:   bytes = b''
-        self._raw_song_entries:       bytes = b''
-        self._raw_rest_interruptions: bytes = b''
+        self._raw_pst_automap_notes:  bytes = b''   # PST only (field_c4 == 0xFFFFFFFF)
+        self._raw_tiled_object_flags: bytes = b''   # tiled_object_flags pool; stride opaque
 
     # ── pool builders ─────────────────────────────────────────────────────────
 
@@ -940,9 +1368,8 @@ class AreFile:
                 pool.extend(struct.pack('<HH', vx, vy))
             return idx
 
-        region_vis    = [_append(r.vertices)  for r in self.regions]
-        container_vis = [_append(c.vertices)  for c in self.containers]
-        # Each door contributes 4 sets: open, closed, imp_open, imp_closed
+        region_vis    = [_append(r.vertices) for r in self.regions]
+        container_vis = [_append(c.vertices) for c in self.containers]
         door_vis = []
         for door in self.doors:
             vo  = _append(door.vertices_open)
@@ -973,11 +1400,11 @@ class AreFile:
 
         vertex_pool = b''
         if h.vertices_count > 0 and h.vertices_offset > 0:
-            vertex_pool = bytes(data[h.vertices_offset : h.vertices_offset + h.vertices_count * VERTEX_SIZE])
+            vertex_pool = bytes(data[h.vertices_offset: h.vertices_offset + h.vertices_count * VERTEX_SIZE])
 
         item_pool = b''
         if h.items_count > 0 and h.items_offset > 0:
-            item_pool = bytes(data[h.items_offset : h.items_offset + h.items_count * ITEM_SIZE])
+            item_pool = bytes(data[h.items_offset: h.items_offset + h.items_count * ITEM_SIZE])
 
         for i in range(h.actors_count):
             s = h.actors_offset + i * ACTOR_SIZE
@@ -1026,26 +1453,68 @@ class AreFile:
             af.doors.append(AreDoor.from_bytes(rec, vertex_pool,
                                                fvo, cvo, fvc, cvc, fimo, cimo, fimc, cimc))
 
-        def _raw(off, count, size):
-            return bytes(data[off:off+count*size]) if count > 0 and off > 0 else b''
+        # M5: Animations
+        for i in range(h.animations_count):
+            s = h.animations_offset + i * ANIMATION_SIZE
+            if s + ANIMATION_SIZE <= len(data):
+                af.animations.append(AreAnimation.from_bytes(data[s:s+ANIMATION_SIZE]))
 
-        if h.explored_bitmask_size > 0 and h.explored_bitmask_offset > 0:
-            af._raw_explored_bitmask = bytes(data[h.explored_bitmask_offset:
-                                                   h.explored_bitmask_offset+h.explored_bitmask_size])
-        af._raw_animations    = _raw(h.animations_offset,    h.animations_count,    ANIMATION_SIZE)
-        af._raw_tiled_objects = _raw(h.tiled_objects_offset, h.tiled_objects_count, TILED_OBJECT_SIZE)
+        # M5: Tiled Objects
+        for i in range(h.tiled_objects_count):
+            s = h.tiled_objects_offset + i * TILED_OBJECT_SIZE
+            if s + TILED_OBJECT_SIZE <= len(data):
+                af.tiled_objects.append(AreTiledObject.from_bytes(data[s:s+TILED_OBJECT_SIZE]))
+
+        # M5: Tiled object flags pool (opaque — preserve verbatim)
+        tofp_off = h.tiled_object_flags_offset
+        tofp_cnt = h.tiled_object_flags_count
+        if tofp_off > 0 and tofp_cnt > 0:
+            # Each entry is a dword per IESDP; store the raw pool bytes.
+            af._raw_tiled_object_flags = bytes(data[tofp_off: tofp_off + tofp_cnt * 4])
+
+        # M5: Song Entries (singleton)
         if h.song_entries_offset > 0:
-            af._raw_song_entries = bytes(data[h.song_entries_offset:h.song_entries_offset+SONG_ENTRIES_SIZE])
+            se_end = h.song_entries_offset + SONG_ENTRIES_SIZE
+            if se_end <= len(data):
+                af.song_entries = AreSongEntries.from_bytes(data[h.song_entries_offset:se_end])
+
+        # M5: Rest Interruption (singleton)
         if h.rest_interruptions_offset > 0:
-            af._raw_rest_interruptions = bytes(data[h.rest_interruptions_offset:
-                                                     h.rest_interruptions_offset+REST_INTERRUPTION_SIZE])
-        is_pst = (h.field_c4 == 0xFFFFFFFF)
+            ri_end = h.rest_interruptions_offset + REST_INTERRUPTION_SIZE
+            if ri_end <= len(data):
+                af.rest_interruption = AreRestInterruption.from_bytes(
+                    data[h.rest_interruptions_offset:ri_end])
+
+        # Explored bitmask
+        if h.explored_bitmask_size > 0 and h.explored_bitmask_offset > 0:
+            af._raw_explored_bitmask = bytes(
+                data[h.explored_bitmask_offset: h.explored_bitmask_offset + h.explored_bitmask_size])
+
+        # M5: Automap Notes + Projectile Traps
+        # field_c4/c8/cc encode these differently for PST vs non-PST.
+        is_pst        = (h.field_c4 == 0xFFFFFFFF)
         automap_off   = h.field_c8 if is_pst else h.field_c4
         automap_count = h.field_cc if is_pst else h.field_c8
-        proj_off      = 0 if is_pst else h.field_cc
-        note_size = AUTOMAP_NOTE_PST_SIZE if is_pst else AUTOMAP_NOTE_SIZE
-        af._raw_automap_notes = _raw(automap_off, automap_count, note_size)
-        af._raw_projectile_traps = _raw(proj_off, h.projectile_traps_count, PROJECTILE_TRAP_SIZE)
+        proj_off      = 0           if is_pst else h.field_cc
+        note_size     = AUTOMAP_NOTE_PST_SIZE if is_pst else AUTOMAP_NOTE_SIZE
+
+        if is_pst:
+            # Keep PST notes verbatim; structure differs (0x214 bytes, string-embedded text)
+            if automap_off > 0 and automap_count > 0:
+                end = automap_off + automap_count * note_size
+                if end <= len(data):
+                    af._raw_pst_automap_notes = bytes(data[automap_off:end])
+        else:
+            for i in range(automap_count):
+                s = automap_off + i * AUTOMAP_NOTE_SIZE
+                if s + AUTOMAP_NOTE_SIZE <= len(data):
+                    af.automap_notes.append(AreAutomapNote.from_bytes(data[s:s+AUTOMAP_NOTE_SIZE]))
+
+        for i in range(h.projectile_traps_count):
+            s = proj_off + i * PROJECTILE_TRAP_SIZE
+            if proj_off > 0 and s + PROJECTILE_TRAP_SIZE <= len(data):
+                af.projectile_traps.append(AreProjectileTrap.from_bytes(data[s:s+PROJECTILE_TRAP_SIZE]))
+
         return af
 
     @classmethod
@@ -1064,56 +1533,62 @@ class AreFile:
         vert_count  = len(vertex_pool) // VERTEX_SIZE
         items_count = len(item_pool)   // ITEM_SIZE
 
+        is_pst = (h.field_c4 == 0xFFFFFFFF)
+
         # ── layout pass ───────────────────────────────────────────────────────
         pos = HEADER_SIZE
 
         def _place_blobs(blobs):
             nonlocal pos
             total = sum(len(b) for b in blobs)
-            if total == 0: return 0
             off = pos; pos += total; return off
 
         def _place_raw(raw):
             nonlocal pos
-            if not raw: return 0
-            off = pos; pos += len(raw); return off
+            off = pos
+            if raw: pos += len(raw)
+            return off
 
-        # Actors: serialise twice (correct CRE offsets unknown until end)
+        # Actors: serialise twice (CRE offsets unknown until end)
         actor_blobs_tmp = [a.to_bytes(0) for a in self.actors]
         actors_off  = _place_blobs(actor_blobs_tmp)
-        regions_off = _place_blobs([r.to_bytes(0) for r in self.regions])
-        sp_off      = _place_blobs([s.to_bytes()  for s in self.spawn_points])
-        ent_off     = _place_blobs([e.to_bytes()  for e in self.entrances])
-        cont_off    = _place_blobs([c.to_bytes(0, 0) for c in self.containers])
+        regions_off = _place_blobs([r.to_bytes(0)      for r in self.regions])
+        sp_off      = _place_blobs([s.to_bytes()        for s in self.spawn_points])
+        ent_off     = _place_blobs([e.to_bytes()        for e in self.entrances])
+        cont_off    = _place_blobs([c.to_bytes(0, 0)   for c in self.containers])
         items_off   = _place_raw(item_pool)
+        amb_off     = _place_blobs([a.to_bytes()        for a in self.ambients])
+        var_off     = _place_blobs([v.to_bytes()        for v in self.variables])
+        doors_off   = _place_blobs([d.to_bytes(0,0,0,0) for d in self.doors])
+        tiled_off   = _place_blobs([t.to_bytes()        for t in self.tiled_objects])
         vert_off    = _place_raw(vertex_pool)
-        amb_off     = _place_blobs([a.to_bytes() for a in self.ambients])
-        var_off     = _place_blobs([v.to_bytes() for v in self.variables])
+        expl_off    = _place_raw(self._raw_explored_bitmask)
 
-        expl_off = _place_raw(self._raw_explored_bitmask)
-
-        doors_off = _place_blobs([d.to_bytes(0,0,0,0) for d in self.doors])
-
-        anim_off  = _place_raw(self._raw_animations)
-        tiled_off = _place_raw(self._raw_tiled_objects)
+        # M5 layout
+        anim_off    = _place_blobs([a.to_bytes() for a in self.animations])
+        tofp_off    = _place_raw(self._raw_tiled_object_flags)
+        tofp_count  = len(self._raw_tiled_object_flags) // 4 if self._raw_tiled_object_flags else 0
 
         song_off = 0
-        if self._raw_song_entries:
+        if self.song_entries:
             song_off = pos; pos += SONG_ENTRIES_SIZE
         rest_off = 0
-        if self._raw_rest_interruptions:
+        if self.rest_interruption:
             rest_off = pos; pos += REST_INTERRUPTION_SIZE
 
-        is_pst = (h.field_c4 == 0xFFFFFFFF)
-        note_size  = AUTOMAP_NOTE_PST_SIZE if is_pst else AUTOMAP_NOTE_SIZE
-        note_count = len(self._raw_automap_notes) // note_size if self._raw_automap_notes else 0
-        automap_off = 0
-        if note_count > 0:
-            automap_off = pos; pos += note_count * note_size
-        proj_count = len(self._raw_projectile_traps) // PROJECTILE_TRAP_SIZE if self._raw_projectile_traps else 0
-        proj_off2 = 0
-        if proj_count > 0:
-            proj_off2 = pos; pos += proj_count * PROJECTILE_TRAP_SIZE
+        # Automap notes + projectile traps
+        automap_off   = 0
+        automap_count = 0
+        if is_pst:
+            automap_off   = _place_raw(self._raw_pst_automap_notes)
+            automap_count = (len(self._raw_pst_automap_notes) // AUTOMAP_NOTE_PST_SIZE
+                             if self._raw_pst_automap_notes else 0)
+        else:
+            note_blobs  = [n.to_bytes() for n in self.automap_notes]
+            automap_off   = _place_blobs(note_blobs)
+            automap_count = len(self.automap_notes)
+
+        proj_off2 = _place_blobs([p.to_bytes() for p in self.projectile_traps])
 
         # Embedded CREs at end
         cre_offsets = []
@@ -1127,30 +1602,38 @@ class AreFile:
         buf = bytearray(pos)
 
         if is_pst:
-            fc4, fc8, fcc = 0xFFFFFFFF, automap_off, note_count
+            fc4 = 0xFFFFFFFF
+            fc8 = automap_off if automap_count > 0 else h.field_c8
+            fcc = automap_count
         else:
-            fc4, fc8, fcc = automap_off, note_count, proj_off2
+            fc4 = automap_off if automap_count > 0 else h.field_c4
+            fc8 = automap_count
+            fcc = proj_off2 if self.projectile_traps else h.field_cc
+
+        # For zero-size explored_bitmask, preserve the original placeholder offset
+        if not self._raw_explored_bitmask:
+            expl_off = h.explored_bitmask_offset
 
         offsets = {
-            'actors_offset': actors_off,   'actors_count': len(self.actors),
-            'regions_offset': regions_off, 'regions_count': len(self.regions),
-            'spawn_points_offset': sp_off, 'spawn_points_count': len(self.spawn_points),
-            'entrances_offset': ent_off,   'entrances_count': len(self.entrances),
-            'containers_offset': cont_off, 'containers_count': len(self.containers),
-            'items_offset': items_off,     'items_count': items_count,
-            'vertices_offset': vert_off,   'vertices_count': vert_count,
-            'ambients_offset': amb_off,    'ambients_count': len(self.ambients),
-            'variables_offset': var_off,   'variables_count': len(self.variables),
-            'tiled_object_flags_offset': 0,'tiled_object_flags_count': 0,
+            'actors_offset': actors_off,    'actors_count': len(self.actors),
+            'regions_offset': regions_off,  'regions_count': len(self.regions),
+            'spawn_points_offset': sp_off,  'spawn_points_count': len(self.spawn_points),
+            'entrances_offset': ent_off,    'entrances_count': len(self.entrances),
+            'containers_offset': cont_off,  'containers_count': len(self.containers),
+            'items_offset': items_off,      'items_count': items_count,
+            'vertices_offset': vert_off,    'vertices_count': vert_count,
+            'ambients_offset': amb_off,     'ambients_count': len(self.ambients),
+            'variables_offset': var_off,    'variables_count': len(self.variables),
+            'tiled_object_flags_offset': tofp_off if tofp_count else 0,
+            'tiled_object_flags_count': tofp_count,
             'explored_bitmask_offset': expl_off,
             'explored_bitmask_size': len(self._raw_explored_bitmask),
-            'doors_offset': doors_off,     'doors_count': len(self.doors),
-            'animations_offset': anim_off, 'animations_count': len(self._raw_animations)//ANIMATION_SIZE,
-            'tiled_objects_offset': tiled_off,
-            'tiled_objects_count': len(self._raw_tiled_objects)//TILED_OBJECT_SIZE,
+            'doors_offset': doors_off,      'doors_count': len(self.doors),
+            'animations_offset': anim_off,  'animations_count': len(self.animations),
+            'tiled_objects_offset': tiled_off, 'tiled_objects_count': len(self.tiled_objects),
             'song_entries_offset': song_off,
             'rest_interruptions_offset': rest_off,
-            'projectile_traps_count': proj_count,
+            'projectile_traps_count': len(self.projectile_traps),
         }
         new_hdr = AreHeader.from_json(h.to_json(), offsets)
         new_hdr.field_c4  = fc4
@@ -1185,7 +1668,6 @@ class AreFile:
         _write_blobs(cont_off, cont_blobs)
 
         _write(items_off, item_pool)
-        _write(vert_off,  vertex_pool)
 
         _write_blobs(amb_off, [a.to_bytes() for a in self.ambients])
         _write_blobs(var_off, [v.to_bytes() for v in self.variables])
@@ -1194,13 +1676,24 @@ class AreFile:
         door_blobs = [self.doors[i].to_bytes(*door_vis[i]) for i in range(len(self.doors))]
         _write_blobs(doors_off, door_blobs)
 
-        _write(expl_off,    self._raw_explored_bitmask)
-        _write(anim_off,    self._raw_animations)
-        _write(tiled_off,   self._raw_tiled_objects)
-        _write(song_off,    self._raw_song_entries)
-        _write(rest_off,    self._raw_rest_interruptions)
-        _write(automap_off, self._raw_automap_notes)
-        _write(proj_off2,   self._raw_projectile_traps)
+        # M5 sections
+        _write_blobs(tiled_off,   [t.to_bytes() for t in self.tiled_objects])
+        _write(vert_off,          vertex_pool)
+        _write(expl_off,          self._raw_explored_bitmask)
+        _write_blobs(anim_off,    [a.to_bytes() for a in self.animations])
+        _write(tofp_off,          self._raw_tiled_object_flags)
+
+        if self.song_entries and song_off:
+            buf[song_off:song_off+SONG_ENTRIES_SIZE] = self.song_entries.to_bytes()
+        if self.rest_interruption and rest_off:
+            buf[rest_off:rest_off+REST_INTERRUPTION_SIZE] = self.rest_interruption.to_bytes()
+
+        if is_pst:
+            _write(automap_off, self._raw_pst_automap_notes)
+        else:
+            _write_blobs(automap_off, [n.to_bytes() for n in self.automap_notes])
+
+        _write_blobs(proj_off2, [p.to_bytes() for p in self.projectile_traps])
 
         for i, actor in enumerate(self.actors):
             if actor.embedded_cre and cre_offsets[i]:
@@ -1216,26 +1709,31 @@ class AreFile:
 
     def to_json(self) -> dict:
         d = {
-            'header':       self.header.to_json(),
-            'actors':       [a.to_json()  for a in self.actors],
-            'regions':      [r.to_json()  for r in self.regions],
-            'spawn_points': [s.to_json()  for s in self.spawn_points],
-            'entrances':    [e.to_json()  for e in self.entrances],
-            'containers':   [c.to_json()  for c in self.containers],
-            'ambients':     [a.to_json()  for a in self.ambients],
-            'variables':    [v.to_json()  for v in self.variables],
-            'doors':        [dr.to_json() for dr in self.doors],
+            'header':           self.header.to_json(),
+            'actors':           [a.to_json()  for a in self.actors],
+            'regions':          [r.to_json()  for r in self.regions],
+            'spawn_points':     [s.to_json()  for s in self.spawn_points],
+            'entrances':        [e.to_json()  for e in self.entrances],
+            'containers':       [c.to_json()  for c in self.containers],
+            'ambients':         [a.to_json()  for a in self.ambients],
+            'variables':        [v.to_json()  for v in self.variables],
+            'doors':            [dr.to_json() for dr in self.doors],
+            'animations':       [a.to_json()  for a in self.animations],
+            'automap_notes':    [n.to_json()  for n in self.automap_notes],
+            'tiled_objects':    [t.to_json()  for t in self.tiled_objects],
+            'projectile_traps': [p.to_json()  for p in self.projectile_traps],
         }
+        if self.song_entries:
+            d['song_entries'] = self.song_entries.to_json()
+        if self.rest_interruption:
+            d['rest_interruption'] = self.rest_interruption.to_json()
         for key, raw in [
-            ('_raw_explored_bitmask',   self._raw_explored_bitmask),
-            ('_raw_animations',         self._raw_animations),
-            ('_raw_automap_notes',      self._raw_automap_notes),
-            ('_raw_tiled_objects',      self._raw_tiled_objects),
-            ('_raw_projectile_traps',   self._raw_projectile_traps),
-            ('_raw_song_entries',       self._raw_song_entries),
-            ('_raw_rest_interruptions', self._raw_rest_interruptions),
+            ('_raw_explored_bitmask',    self._raw_explored_bitmask),
+            ('_raw_pst_automap_notes',   self._raw_pst_automap_notes),
+            ('_raw_tiled_object_flags',  self._raw_tiled_object_flags),
         ]:
-            if raw: d[key] = raw.hex()
+            if raw:
+                d[key] = raw.hex()
         return d
 
     @classmethod
@@ -1249,15 +1747,19 @@ class AreFile:
         af.ambients     = [AreAmbient.from_json(a)    for a in d.get('ambients', [])]
         af.variables    = [AreVariable.from_json(v)   for v in d.get('variables', [])]
         af.doors        = [AreDoor.from_json(dr)      for dr in d.get('doors', [])]
+        af.animations       = [AreAnimation.from_json(a)     for a in d.get('animations', [])]
+        af.automap_notes    = [AreAutomapNote.from_json(n)    for n in d.get('automap_notes', [])]
+        af.tiled_objects    = [AreTiledObject.from_json(t)    for t in d.get('tiled_objects', [])]
+        af.projectile_traps = [AreProjectileTrap.from_json(p) for p in d.get('projectile_traps', [])]
+        se = d.get('song_entries')
+        af.song_entries = AreSongEntries.from_json(se) if se is not None else None
+        ri = d.get('rest_interruption')
+        af.rest_interruption = AreRestInterruption.from_json(ri) if ri is not None else None
 
         def _hex(k): return bytes.fromhex(d[k]) if k in d else b''
         af._raw_explored_bitmask   = _hex('_raw_explored_bitmask')
-        af._raw_animations         = _hex('_raw_animations')
-        af._raw_automap_notes      = _hex('_raw_automap_notes')
-        af._raw_tiled_objects      = _hex('_raw_tiled_objects')
-        af._raw_projectile_traps   = _hex('_raw_projectile_traps')
-        af._raw_song_entries       = _hex('_raw_song_entries')
-        af._raw_rest_interruptions = _hex('_raw_rest_interruptions')
+        af._raw_pst_automap_notes  = _hex('_raw_pst_automap_notes')
+        af._raw_tiled_object_flags = _hex('_raw_tiled_object_flags')
 
         # Compute layout to fill header offsets
         vertex_pool, _, _, _ = af._build_vertex_pool()
@@ -1265,13 +1767,18 @@ class AreFile:
         vert_count  = len(vertex_pool) // VERTEX_SIZE
         items_count = len(item_pool)   // ITEM_SIZE
 
+        hj     = d.get('header', {})
+        is_pst = (hj.get('field_c4', 0) == 0xFFFFFFFF)
+
         pos = HEADER_SIZE
         def _lay(count, size):
             nonlocal pos
-            if not count: return 0
             off = pos; pos += count * size; return off
-        def _lay_raw(raw, size):
-            return _lay(len(raw)//size if raw else 0, size)
+        def _lay_raw(raw):
+            nonlocal pos
+            off = pos
+            if raw: pos += len(raw)
+            return off
 
         actors_off  = _lay(len(af.actors),       ACTOR_SIZE)
         regions_off = _lay(len(af.regions),      REGION_SIZE)
@@ -1279,61 +1786,71 @@ class AreFile:
         ent_off     = _lay(len(af.entrances),    ENTRANCE_SIZE)
         cont_off    = _lay(len(af.containers),   CONTAINER_SIZE)
         items_off   = _lay(items_count,          ITEM_SIZE)
-        vert_off    = _lay(vert_count,           VERTEX_SIZE)
         amb_off     = _lay(len(af.ambients),     AMBIENT_SIZE)
         var_off     = _lay(len(af.variables),    VARIABLE_SIZE)
-        expl_off    = 0
-        if af._raw_explored_bitmask:
-            expl_off = pos; pos += len(af._raw_explored_bitmask)
         doors_off   = _lay(len(af.doors),        DOOR_SIZE)
-        anim_off    = _lay_raw(af._raw_animations,    ANIMATION_SIZE)
-        tiled_off   = _lay_raw(af._raw_tiled_objects, TILED_OBJECT_SIZE)
+        tiled_off   = _lay(len(af.tiled_objects), TILED_OBJECT_SIZE)
+        vert_off    = _lay(vert_count,           VERTEX_SIZE)
+        expl_off    = _lay_raw(af._raw_explored_bitmask)
+        anim_off    = _lay(len(af.animations),   ANIMATION_SIZE)
+        tofp_off    = _lay_raw(af._raw_tiled_object_flags)
+        tofp_count  = len(af._raw_tiled_object_flags) // 4 if af._raw_tiled_object_flags else 0
+
         song_off = 0
-        if af._raw_song_entries:
+        if af.song_entries:
             song_off = pos; pos += SONG_ENTRIES_SIZE
         rest_off = 0
-        if af._raw_rest_interruptions:
+        if af.rest_interruption:
             rest_off = pos; pos += REST_INTERRUPTION_SIZE
 
-        hj = d.get('header', {})
-        is_pst = (hj.get('field_c4', 0) == 0xFFFFFFFF)
-        note_size  = AUTOMAP_NOTE_PST_SIZE if is_pst else AUTOMAP_NOTE_SIZE
-        note_count = len(af._raw_automap_notes)//note_size if af._raw_automap_notes else 0
-        automap_off = 0
-        if note_count > 0:
-            automap_off = pos; pos += note_count * note_size
-        proj_count = len(af._raw_projectile_traps)//PROJECTILE_TRAP_SIZE if af._raw_projectile_traps else 0
-        proj_off = 0
-        if proj_count > 0:
-            proj_off = pos; pos += proj_count * PROJECTILE_TRAP_SIZE
+        if is_pst:
+            automap_off   = _lay_raw(af._raw_pst_automap_notes)
+            automap_count = (len(af._raw_pst_automap_notes) // AUTOMAP_NOTE_PST_SIZE
+                             if af._raw_pst_automap_notes else 0)
+        else:
+            automap_off   = _lay(len(af.automap_notes), AUTOMAP_NOTE_SIZE)
+            automap_count = len(af.automap_notes)
 
-        fc4 = 0xFFFFFFFF if is_pst else automap_off
-        fc8 = automap_off if is_pst else note_count
-        fcc = note_count  if is_pst else proj_off
+        proj_off = _lay(len(af.projectile_traps), PROJECTILE_TRAP_SIZE)
+
+        if is_pst:
+            fc4 = 0xFFFFFFFF
+            fc8 = automap_off if automap_count > 0 else hj.get('field_c8', 0)
+            fcc = automap_count
+        else:
+            fc4 = automap_off if automap_count > 0 else hj.get('field_c4', 0)
+            fc8 = automap_count
+            fcc = proj_off if af.projectile_traps else hj.get('field_cc', 0)
+
+        # For zero-size explored_bitmask, preserve original placeholder offset
+        if not af._raw_explored_bitmask:
+            expl_off = hj.get('explored_bitmask_offset', expl_off)
 
         offsets = {
-            'actors_offset': actors_off,   'actors_count': len(af.actors),
-            'regions_offset': regions_off, 'regions_count': len(af.regions),
-            'spawn_points_offset': sp_off, 'spawn_points_count': len(af.spawn_points),
-            'entrances_offset': ent_off,   'entrances_count': len(af.entrances),
-            'containers_offset': cont_off, 'containers_count': len(af.containers),
-            'items_offset': items_off,     'items_count': items_count,
-            'vertices_offset': vert_off,   'vertices_count': vert_count,
-            'ambients_offset': amb_off,    'ambients_count': len(af.ambients),
-            'variables_offset': var_off,   'variables_count': len(af.variables),
-            'tiled_object_flags_offset': 0,'tiled_object_flags_count': 0,
+            'actors_offset': actors_off,    'actors_count': len(af.actors),
+            'regions_offset': regions_off,  'regions_count': len(af.regions),
+            'spawn_points_offset': sp_off,  'spawn_points_count': len(af.spawn_points),
+            'entrances_offset': ent_off,    'entrances_count': len(af.entrances),
+            'containers_offset': cont_off,  'containers_count': len(af.containers),
+            'items_offset': items_off,      'items_count': items_count,
+            'vertices_offset': vert_off,    'vertices_count': vert_count,
+            'ambients_offset': amb_off,     'ambients_count': len(af.ambients),
+            'variables_offset': var_off,    'variables_count': len(af.variables),
+            'tiled_object_flags_offset': tofp_off if tofp_count else 0,
+            'tiled_object_flags_count': tofp_count,
             'explored_bitmask_offset': expl_off,
             'explored_bitmask_size': len(af._raw_explored_bitmask),
-            'doors_offset': doors_off,     'doors_count': len(af.doors),
-            'animations_offset': anim_off, 'animations_count': len(af._raw_animations)//ANIMATION_SIZE,
-            'tiled_objects_offset': tiled_off,
-            'tiled_objects_count': len(af._raw_tiled_objects)//TILED_OBJECT_SIZE,
+            'doors_offset': doors_off,      'doors_count': len(af.doors),
+            'animations_offset': anim_off,  'animations_count': len(af.animations),
+            'tiled_objects_offset': tiled_off, 'tiled_objects_count': len(af.tiled_objects),
             'song_entries_offset': song_off,
             'rest_interruptions_offset': rest_off,
-            'projectile_traps_count': proj_count,
+            'projectile_traps_count': len(af.projectile_traps),
         }
         af.header = AreHeader.from_json(hj, offsets)
-        af.header.field_c4 = fc4; af.header.field_c8 = fc8; af.header.field_cc = fcc
+        af.header.field_c4 = fc4
+        af.header.field_c8 = fc8
+        af.header.field_cc = fcc
         return af
 
     # ── diagnostics ───────────────────────────────────────────────────────────
@@ -1341,14 +1858,20 @@ class AreFile:
     def summary(self) -> str:
         h = self.header
         total_items = sum(len(c.items) for c in self.containers)
+        ri = self.rest_interruption
         return '\n'.join([
             f"ARE V1.0  WED={h.area_wed!r}  script={h.area_script!r}",
             f"  actors={len(self.actors)}  regions={len(self.regions)}  "
             f"spawn_points={len(self.spawn_points)}  entrances={len(self.entrances)}",
             f"  containers={len(self.containers)}  items={total_items}  "
             f"ambients={len(self.ambients)}  variables={len(self.variables)}",
-            f"  doors={len(self.doors)}  animations={h.animations_count}  "
-            f"tiled_objects={h.tiled_objects_count}  proj_traps={h.projectile_traps_count}",
+            f"  doors={len(self.doors)}  animations={len(self.animations)}  "
+            f"tiled_objects={len(self.tiled_objects)}",
+            f"  automap_notes={len(self.automap_notes)}  "
+            f"projectile_traps={len(self.projectile_traps)}  "
+            f"song_entries={'yes' if self.song_entries else 'no'}  "
+            f"rest_interruption={'yes' if ri else 'no'}"
+            + (f" ({ri.creature_count} creatures)" if ri else ''),
             f"  explored_bitmask={h.explored_bitmask_size} bytes  "
             f"vertices(hdr)={h.vertices_count}",
             f"  north={h.north_resref!r}  east={h.east_resref!r}  "
