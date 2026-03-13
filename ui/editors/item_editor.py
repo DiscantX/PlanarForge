@@ -71,7 +71,8 @@ class ItemEditorPanel:
         self._browser_icon_attempted: set[str] = set()
         self._icon_load_queue: Queue[tuple[int, int, str, tuple[int, int, list[float]] | None]] = Queue()
         self._icon_trace_enabled: bool = True
-        self._icon_load_token: int = 0
+        self._icon_load_token: int = None
+        self._icon_load_threads = [] 
         self._icon_pump_scheduled: bool = False
         
         # Panel sizing state
@@ -404,7 +405,7 @@ class ItemEditorPanel:
         self._schedule_icon_pump()
 
     def _stop_icon_loader(self) -> None:
-        if self._icon_load_stop is not None:
+        if self._icon_load_token is not None:            
             self._icon_load_stop.set()
         for thread in self._icon_load_threads:
             thread.join()
