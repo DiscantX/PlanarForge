@@ -6,7 +6,7 @@ import json
 import threading
 import time
 import traceback
-from queue import Empty, Queue
+from queue import Empty, Full, Queue
 from enum import IntEnum, IntFlag
 from pathlib import Path
 from typing import Any
@@ -70,10 +70,13 @@ class ItemEditorPanel:
         self._browser_icon_cache: dict[str, tuple[int, int, list[float]] | None] = {}
         self._browser_icon_attempted: set[str] = set()
         self._icon_load_queue: Queue[tuple[int, int, str, tuple[int, int, list[float]] | None]] = Queue()
+        self._icon_work_queue: Queue[Any] = Queue()
         self._icon_trace_enabled: bool = True
         self._icon_load_token: int = 0
         self._icon_load_threads = [] 
         self._icon_pump_scheduled: bool = False
+        self._icon_load_stop: threading.Event | None = None
+        self._active_workers: int = 0
         self._worker_lock = threading.Lock()
         
         # Panel sizing state
@@ -329,16 +332,9 @@ class ItemEditorPanel:
         self._icon_load_queue = Queue(maxsize=worker_count * 10)
         self._icon_work_queue = Queue()
         self._trace_icon(f"start token={self._icon_load_token + 1} items={len(work_items)}")
-
-        def worker(game_id: str) -> None:
+ 
+        def worker() -> None:
             try:
-                local_catalog = ItmCatalog()
-                try:
-                    local_catalog.select_game(game_id)
-                except Exception:
-                    self._trace_icon(f"worker-select-game failed game={game_id}")
-                    return
-                # self._trace_icon(f"worker-start game={game_id}")
                 while not stop_event.is_set():
                     try:
                         item = self._icon_work_queue.get(timeout=0.1)
@@ -350,35 +346,32 @@ class ItemEditorPanel:
                         idx, entry, resref = item
                         if stop_event.is_set():
                             break
+                        
+                        icon = None
                         icon_resref = ""
                         try:
                             header = (entry.data or {}).get("header", {})
                             if isinstance(header, dict):
                                 icon_resref = str(header.get("item_icon", "") or "").strip().upper()
-                        except Exception:
-                            icon_resref = ""
-                        if not icon_resref:
-                            icon_resref = resref
-                        # self._trace_icon(f"load-start idx={idx} resref={resref} icon={icon_resref}")
-                        try:
-                            header = (entry.data or {}).get("header", {})
-                            if isinstance(header, dict):
-                                icon_resref = str(header.get("item_icon", "") or "").strip().upper()
-                            else:
-                                icon_resref = ""
 
                             if not icon_resref:
-                                icon = None
-                            else:
-                                icon = local_catalog.load_bam_icon_by_resref(icon_resref)
+                                icon_resref = resref
+                            
+                            if icon_resref:
+                                icon = self.catalog.load_bam_icon_by_resref(icon_resref)
                         except Exception:
                             formatted_exc = traceback.format_exc()
                             self._trace_icon(f"worker-inner-exc idx={idx} resref={resref} exc={formatted_exc}")
                             icon = None
-                        # self._trace_icon(f"load-done idx={idx} resref={resref} ok={'yes' if icon else 'no'}")
                         if stop_event.is_set():
                             break
-                        self._icon_load_queue.put((token, idx, resref, icon))
+                        
+                        while not stop_event.is_set():
+                            try:
+                                self._icon_load_queue.put((token, idx, resref, icon), timeout=0.05)
+                                break
+                            except Full:
+                                pass
                     except Exception:
                         formatted_exc = traceback.format_exc()
                         self._trace_icon(f"worker-outer-exc exc={formatted_exc}")
@@ -394,11 +387,10 @@ class ItemEditorPanel:
         # self._trace_icon(f"workers={worker_count}")
         with self._worker_lock:
             self._active_workers = worker_count
-        for _ in range(worker_count):
+        for _ in range(worker_count): # Send sentinels for new workers
             self._icon_work_queue.put(None)
             thread = threading.Thread(
                 target=worker,
-                args=(str(self._selected_game_id),),
                 daemon=True,
             )
             self._icon_load_threads.append(thread)
@@ -406,17 +398,15 @@ class ItemEditorPanel:
         self._schedule_icon_pump()
 
     def _stop_icon_loader(self) -> None:
-        if self._icon_load_token is not None:            
-            pass
-            # self._icon_load_stop.set()
+        if getattr(self, "_icon_load_stop", None) is not None:
+            self._icon_load_stop.set()
         for thread in self._icon_load_threads:
             thread.join()
         self._icon_load_threads.clear()
         self._icon_load_stop = None
-        self._icon_load_queue = Queue()
-        self._icon_work_queue = Queue()
-        # self._trace_icon("stop")
         self._icon_pump_scheduled = False
+        with self._worker_lock:
+            self._active_workers = 0
 
     def _schedule_icon_pump(self) -> None:
         if self._icon_pump_scheduled:
@@ -702,6 +692,7 @@ class ItemEditorPanel:
                 try:
                     resolved = self.catalog.resolve_ids(ids_name, raw_int)
                 except Exception:
+                    traceback.print_exc()
                     resolved = ""
         elif (
             self._is_strref_field(leaf)
@@ -710,6 +701,7 @@ class ItemEditorPanel:
             try:
                 resolved = self.catalog.resolve_strref(value)
             except Exception:
+                traceback.print_exc()
                 resolved = ""
         elif self._is_itm_resref_field(leaf):
             itm_resref = self._normalize_resrefish(value)
@@ -719,6 +711,7 @@ class ItemEditorPanel:
             resolved = itm_resref
             resolved_is_resref = True
             try:
+                traceback.print_exc()
                 bam_icon = self.catalog.load_item_icon_by_itm_resref(itm_resref)
             except Exception:
                 bam_icon = None
@@ -734,6 +727,7 @@ class ItemEditorPanel:
             try:
                 bam_icon, _status = self.catalog.load_bam_icon_by_resref_with_status(bam_resref)
             except Exception:
+                traceback.print_exc()
                 bam_icon = None
         elif leaf.startswith("kit_usability_") and isinstance(value, int):
             offset = 0
@@ -746,12 +740,14 @@ class ItemEditorPanel:
             try:
                 resolved = self.catalog.resolve_kit_usability_mask(value, bit_offset=offset)
             except Exception:
+                traceback.print_exc()
                 resolved = ""
         elif leaf == "opcode" and field_path.startswith("feature_blocks[") and isinstance(value, int):
             try:
                 name, desc = self.catalog.resolve_opcode(value)
                 resolved = self._format_opcode_resolved(name, desc)
             except Exception:
+                traceback.print_exc()
                 resolved = ""
         else:
             enum_cls = self._enum_for_field(field_path)
