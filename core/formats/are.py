@@ -198,6 +198,7 @@ class AreHeader:
             'wind_speed': self.wind_speed, 'area_script': self.area_script,
             'field_c4': self.field_c4, 'field_c8': self.field_c8, 'field_cc': self.field_cc,
             'projectile_traps_count': self.projectile_traps_count,
+            'explored_bitmask_offset': self.explored_bitmask_offset,
             'rest_movie_day': self.rest_movie_day, 'rest_movie_night': self.rest_movie_night,
         })
 
@@ -288,6 +289,7 @@ class AreActor:
             'flags':self.flags,'has_been_spawned':self.has_been_spawned,
             'first_letter_cre':self.first_letter_cre,'unused_2f':self.unused_2f,
             'actor_animation':self.actor_animation,'actor_orientation':self.actor_orientation,
+            'unused_36':self.unused_36,
             'removal_timer':self.removal_timer,
             'movement_restriction_distance':self.movement_restriction_distance,
             'movement_restriction_distance_to_object':self.movement_restriction_distance_to_object,
@@ -306,7 +308,7 @@ class AreActor:
         a.flags=d.get('flags',1); a.has_been_spawned=d.get('has_been_spawned',0)
         a.first_letter_cre=d.get('first_letter_cre',0); a.unused_2f=d.get('unused_2f',0)
         a.actor_animation=d.get('actor_animation',0); a.actor_orientation=d.get('actor_orientation',0)
-        a.unused_36=0; a.removal_timer=d.get('removal_timer',0)
+        a.unused_36=d.get('unused_36',0); a.removal_timer=d.get('removal_timer',0)
         a.movement_restriction_distance=d.get('movement_restriction_distance',0)
         a.movement_restriction_distance_to_object=d.get('movement_restriction_distance_to_object',0)
         a.appearance_schedule=d.get('appearance_schedule',0); a.num_times_talked_to=d.get('num_times_talked_to',0)
@@ -390,6 +392,7 @@ class AreRegion:
             'key_item':self.key_item,'region_script':self.region_script,
             'use_point_x':self.use_point_x,'use_point_y':self.use_point_y,
             'unknown_70':self.unknown_70.hex() if any(self.unknown_70) else None,
+            'unused_78':self.unused_78.hex() if any(self.unused_78) else None,
             'journal_entry':self.journal_entry,
             'saved_loc_x':self.saved_loc_x,'saved_loc_y':self.saved_loc_y,
             'saved_loc_orientation':self.saved_loc_orientation,
@@ -409,7 +412,8 @@ class AreRegion:
         r.key_item=d.get('key_item',''); r.region_script=d.get('region_script','')
         r.use_point_x=d.get('use_point_x',0); r.use_point_y=d.get('use_point_y',0)
         unk70=d.get('unknown_70'); r.unknown_70=bytes.fromhex(unk70) if unk70 else bytes(8)
-        r.unused_78=bytes(8); r.journal_entry=d.get('journal_entry',0)
+        unu78=d.get('unused_78');  r.unused_78 =bytes.fromhex(unu78) if unu78 else bytes(8)
+        r.journal_entry=d.get('journal_entry',0)
         r.saved_loc_x=d.get('saved_loc_x',0); r.saved_loc_y=d.get('saved_loc_y',0)
         r.saved_loc_orientation=d.get('saved_loc_orientation',0)
         r.area_point_name=d.get('area_point_name',''); r.travel_schedule=d.get('travel_schedule',0)
@@ -515,12 +519,14 @@ class AreEntrance:
         return bytes(buf)
 
     def to_json(self):
-        return _sparse({'name':self.name,'x':self.x,'y':self.y,'orientation':self.orientation})
+        return _sparse({'name':self.name,'x':self.x,'y':self.y,'orientation':self.orientation,
+            'unused_26':self.unused_26.hex() if any(self.unused_26) else None})
 
     @classmethod
     def from_json(cls, d):
         e=cls.__new__(cls); e.name=d.get('name',''); e.x=d.get('x',0); e.y=d.get('y',0)
-        e.orientation=d.get('orientation',0); e.unused_26=bytes(66)
+        e.orientation=d.get('orientation',0)
+        uu=d.get('unused_26'); e.unused_26=bytes.fromhex(uu) if uu else bytes(66)
         return e
 
 
@@ -529,36 +535,41 @@ class AreEntrance:
 # ─────────────────────────────────────────────────────────────────────────────
 class AreItem:
     """20 bytes."""
-    __slots__=['item_resref','expiry_time','user_flags','quantity1','quantity2','quantity3','flags']
+    # IESDP layout: resref(8) expiry(2) qty1(2) qty2(2) qty3(2) flags(4) = 20 bytes
+    __slots__=['item_resref','expiry_time','quantity1','quantity2','quantity3','flags']
 
     @classmethod
     def from_bytes(cls, data):
         assert len(data) >= ITEM_SIZE
         it=cls.__new__(cls)
-        it.item_resref=_resref(data[0x00:0x08]); it.expiry_time=struct.unpack_from('<H',data,0x08)[0]
-        it.user_flags=struct.unpack_from('<H',data,0x0a)[0]
-        it.quantity1=struct.unpack_from('<H',data,0x0c)[0]; it.quantity2=struct.unpack_from('<H',data,0x0e)[0]
-        it.quantity3=struct.unpack_from('<H',data,0x10)[0]; it.flags=struct.unpack_from('<I',data,0x12)[0]
+        it.item_resref=_resref(data[0x00:0x08])
+        it.expiry_time=struct.unpack_from('<H',data,0x08)[0]
+        it.quantity1  =struct.unpack_from('<H',data,0x0a)[0]
+        it.quantity2  =struct.unpack_from('<H',data,0x0c)[0]
+        it.quantity3  =struct.unpack_from('<H',data,0x0e)[0]
+        it.flags      =struct.unpack_from('<I',data,0x10)[0]
         return it
 
     def to_bytes(self):
         buf=bytearray(ITEM_SIZE)
-        buf[0x00:0x08]=_resref_encode(self.item_resref); struct.pack_into('<H',buf,0x08,self.expiry_time)
-        struct.pack_into('<H',buf,0x0a,self.user_flags)
-        struct.pack_into('<H',buf,0x0c,self.quantity1); struct.pack_into('<H',buf,0x0e,self.quantity2)
-        struct.pack_into('<H',buf,0x10,self.quantity3); struct.pack_into('<I',buf,0x12,self.flags)
+        buf[0x00:0x08]=_resref_encode(self.item_resref)
+        struct.pack_into('<H',buf,0x08,self.expiry_time)
+        struct.pack_into('<H',buf,0x0a,self.quantity1)
+        struct.pack_into('<H',buf,0x0c,self.quantity2)
+        struct.pack_into('<H',buf,0x0e,self.quantity3)
+        struct.pack_into('<I',buf,0x10,self.flags)
         return bytes(buf)
 
     def to_json(self):
         return _sparse({'item_resref':self.item_resref,'expiry_time':self.expiry_time,
-            'user_flags':self.user_flags,'quantity1':self.quantity1,'quantity2':self.quantity2,
+            'quantity1':self.quantity1,'quantity2':self.quantity2,
             'quantity3':self.quantity3,'flags':self.flags})
 
     @classmethod
     def from_json(cls, d):
         it=cls.__new__(cls); it.item_resref=d.get('item_resref',''); it.expiry_time=d.get('expiry_time',0)
-        it.user_flags=d.get('user_flags',0); it.quantity1=d.get('quantity1',0)
-        it.quantity2=d.get('quantity2',0); it.quantity3=d.get('quantity3',0); it.flags=d.get('flags',0)
+        it.quantity1=d.get('quantity1',0); it.quantity2=d.get('quantity2',0)
+        it.quantity3=d.get('quantity3',0); it.flags=d.get('flags',0)
         return it
 
 
@@ -1592,12 +1603,16 @@ class AreFile:
 
         if is_pst:
             fc4 = 0xFFFFFFFF
-            fc8 = automap_off if automap_count > 0 else 0
+            fc8 = automap_off if automap_count > 0 else h.field_c8
             fcc = automap_count
         else:
-            fc4 = automap_off if automap_count > 0 else 0
+            fc4 = automap_off if automap_count > 0 else h.field_c4
             fc8 = automap_count
-            fcc = proj_off2 if self.projectile_traps else 0
+            fcc = proj_off2 if self.projectile_traps else h.field_cc
+
+        # For zero-size explored_bitmask, preserve the original placeholder offset
+        if not self._raw_explored_bitmask:
+            expl_off = h.explored_bitmask_offset
 
         offsets = {
             'actors_offset': actors_off,    'actors_count': len(self.actors),
@@ -1800,12 +1815,16 @@ class AreFile:
 
         if is_pst:
             fc4 = 0xFFFFFFFF
-            fc8 = automap_off if automap_count > 0 else 0
+            fc8 = automap_off if automap_count > 0 else hj.get('field_c8', 0)
             fcc = automap_count
         else:
-            fc4 = automap_off if automap_count > 0 else 0
+            fc4 = automap_off if automap_count > 0 else hj.get('field_c4', 0)
             fc8 = automap_count
-            fcc = proj_off if af.projectile_traps else 0
+            fcc = proj_off if af.projectile_traps else hj.get('field_cc', 0)
+
+        # For zero-size explored_bitmask, preserve original placeholder offset
+        if not af._raw_explored_bitmask:
+            expl_off = hj.get('explored_bitmask_offset', expl_off)
 
         offsets = {
             'actors_offset': actors_off,    'actors_count': len(af.actors),
