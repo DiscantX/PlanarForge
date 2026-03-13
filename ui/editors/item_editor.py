@@ -71,9 +71,10 @@ class ItemEditorPanel:
         self._browser_icon_attempted: set[str] = set()
         self._icon_load_queue: Queue[tuple[int, int, str, tuple[int, int, list[float]] | None]] = Queue()
         self._icon_trace_enabled: bool = True
-        self._icon_load_token: int = None
+        self._icon_load_token: int = 0
         self._icon_load_threads = [] 
         self._icon_pump_scheduled: bool = False
+        self._worker_lock = threading.Lock()
         
         # Panel sizing state
         self._total_width: int = 0
@@ -327,7 +328,7 @@ class ItemEditorPanel:
         worker_count = min(2, max(1, len(work_items)))
         self._icon_load_queue = Queue(maxsize=worker_count * 10)
         self._icon_work_queue = Queue()
-        # self._trace_icon(f"start token={self._icon_load_token + 1} items={len(work_items)}")
+        self._trace_icon(f"start token={self._icon_load_token + 1} items={len(work_items)}")
 
         def worker(game_id: str) -> None:
             try:
@@ -406,7 +407,8 @@ class ItemEditorPanel:
 
     def _stop_icon_loader(self) -> None:
         if self._icon_load_token is not None:            
-            self._icon_load_stop.set()
+            pass
+            # self._icon_load_stop.set()
         for thread in self._icon_load_threads:
             thread.join()
         self._icon_load_threads.clear()
@@ -460,7 +462,7 @@ class ItemEditorPanel:
         self._set_status(f"{len(self._results)} item(s) found.")
 
     def _clear_rows(self) -> None:
-        self._stop_icon_loader()
+        # self._stop_icon_loader()
         self._browser.clear_rows()
 
     def _on_row_selected(self, idx: int) -> None:

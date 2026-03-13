@@ -6,6 +6,8 @@ from core.services.character_service import CharacterService
 from core.services.itm_catalog import ItmCatalog
 from ui.core import CustomTitleBarController
 from ui.editors import CharacterEditorPanel, ItemEditorPanel
+from core.services.are_catalog import AreCatalog
+from ui.editors.are_editor import AreEditorPanel
 
 VIEWPORT_WIDTH = 1100
 VIEWPORT_HEIGHT = 700
@@ -187,6 +189,9 @@ def on_viewport_resize(_sender, _app_data) -> None:
     character = ui_state.get("character_editor")
     if isinstance(character, CharacterEditorPanel):
         character.set_size(width=width, height=max(0, height - TITLEBAR_HEIGHT - CONTENT_GAP))
+    are = ui_state.get("are_editor")
+    if isinstance(are, AreEditorPanel):
+        are.set_size(width=width, height=max(0, height - TITLEBAR_HEIGHT - CONTENT_GAP))
 
 
 def show_home_view() -> None:
@@ -199,6 +204,9 @@ def show_home_view() -> None:
     character = ui_state.get("character_editor")
     if isinstance(character, CharacterEditorPanel):
         dpg.hide_item(character.root_tag)
+    are = ui_state.get("are_editor")
+    if isinstance(are, AreEditorPanel):
+        dpg.hide_item(are.root_tag)
 
 
 def show_itm_viewer() -> None:
@@ -208,6 +216,9 @@ def show_itm_viewer() -> None:
     character = ui_state.get("character_editor")
     if isinstance(character, CharacterEditorPanel):
         dpg.hide_item(character.root_tag)
+    are = ui_state.get("are_editor")
+    if isinstance(are, AreEditorPanel):
+        dpg.hide_item(are.root_tag)
 
     viewer = ui_state.get("itm_viewer")
     if isinstance(viewer, ItemEditorPanel):
@@ -222,9 +233,28 @@ def show_character_editor() -> None:
     viewer = ui_state.get("itm_viewer")
     if isinstance(viewer, ItemEditorPanel):
         dpg.hide_item(viewer.root_tag)
+    are = ui_state.get("are_editor")
+    if isinstance(are, AreEditorPanel):
+        dpg.hide_item(are.root_tag)
     character = ui_state.get("character_editor")
     if isinstance(character, CharacterEditorPanel):
         dpg.show_item(character.root_tag)
+
+
+def show_are_editor() -> None:
+    ui_state["active_view"] = "are"
+    if dpg.does_item_exist("home_view"):
+        dpg.hide_item("home_view")
+    viewer = ui_state.get("itm_viewer")
+    if isinstance(viewer, ItemEditorPanel):
+        dpg.hide_item(viewer.root_tag)
+    character = ui_state.get("character_editor")
+    if isinstance(character, CharacterEditorPanel):
+        dpg.hide_item(character.root_tag)
+    are = ui_state.get("are_editor")
+    if isinstance(are, AreEditorPanel):
+        dpg.show_item(are.root_tag)
+        are.refresh_results()
 
 
 def on_global_search_changed(_sender, app_data) -> None:
@@ -240,6 +270,10 @@ def on_global_search_changed(_sender, app_data) -> None:
         character = ui_state.get("character_editor")
         if isinstance(character, CharacterEditorPanel):
             character._refresh_character_list(search_query)
+    elif active_view == "are":
+        are = ui_state.get("are_editor")
+        if isinstance(are, AreEditorPanel):
+            are.refresh_results()
 
 
 dpg.create_context()
@@ -293,6 +327,7 @@ with dpg.window(
                 dpg.add_button(tag="menu_edit_btn", label="Edit")
                 dpg.add_button(tag="menu_view_btn", label="Item", callback=show_itm_viewer)
                 dpg.add_button(tag="menu_character_btn", label="Character", callback=show_character_editor)
+                dpg.add_button(tag="menu_are_btn", label="Area", callback=show_are_editor)
                 dpg.add_spacer(width=16)
             dpg.add_input_text(
                 tag="title_search",
@@ -333,6 +368,12 @@ character_service = CharacterService(itm_catalog=itm_catalog)
 character_editor = CharacterEditorPanel(parent_tag="content", service=character_service, tag_prefix="character")
 ui_state["character_editor"] = character_editor
 dpg.hide_item(character_editor.root_tag)
+
+are_catalog = AreCatalog()
+are_editor = AreEditorPanel(parent_tag="content", catalog=are_catalog, tag_prefix="are_editor")
+ui_state["are_editor"] = are_editor
+dpg.hide_item(are_editor.root_tag)
+
 show_home_view()
 on_viewport_resize(None, None)
 
@@ -375,6 +416,10 @@ def _divider_hit_test(screen_x: int, screen_y: int) -> bool:
             character = ui_state.get("character_editor")
             if isinstance(character, CharacterEditorPanel):
                 return character._browser.check_divider_hover(screen_x, screen_y)
+        elif active == "are":
+            are = ui_state.get("are_editor")
+            if isinstance(are, AreEditorPanel):
+                return are._browser.check_divider_hover(screen_x, screen_y)
     except Exception:
         pass
     return False
