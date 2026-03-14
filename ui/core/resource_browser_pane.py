@@ -269,6 +269,34 @@ class ResourceBrowserPane:
         """Get the currently selected row index."""
         return self._selected_index
 
+    def get_visible_indices(self) -> tuple[int, int] | None:
+        """
+        Calculates the range of visible item indices in the grid view.
+
+        Returns:
+            A tuple of (start_index, end_index) or None if not in grid view or not visible.
+        """
+        if self._view_mode != "grid" or not self._rows or not dpg.is_item_shown(self.root_tag):
+            return None
+
+        try:
+            scroll_y = dpg.get_y_scroll(self.root_tag)
+            pane_height = dpg.get_item_height(self.root_tag)
+            tile_height = self._grid_tile_height
+
+            if tile_height <= 0:
+                return 0, len(self._rows)
+
+            # Add a buffer to preload items just off-screen
+            buffer_rows = 2
+            start_row = max(0, int(scroll_y / tile_height) - buffer_rows)
+            rows_in_view = int(pane_height / tile_height) + (buffer_rows * 2)
+            end_row = start_row + rows_in_view
+
+            return start_row * self._grid_columns, (end_row + 1) * self._grid_columns
+        except Exception:
+            return 0, len(self._rows)
+
     def clear_rows(self) -> None:
         """Clear all rows from the table."""
         dpg.delete_item(self.table_tag, children_only=True, slot=1)

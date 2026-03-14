@@ -69,6 +69,7 @@ class ItemEditorPanel:
         self._texture_counter = 0
         self._browser_icon_cache: dict[str, tuple[int, int, list[float]] | None] = {}
         self._browser_icon_attempted: set[str] = set()
+        self._browser_indices_set: set[int] = set()
         self._icon_load_queue: Queue[tuple[int, int, str, tuple[int, int, list[float]] | None]] = Queue()
         self._icon_work_queue: Queue[Any] = Queue()
         self._icon_trace_enabled: bool = True
@@ -211,7 +212,7 @@ class ItemEditorPanel:
             idx = selected if selected is not None else 0
             idx = max(0, min(idx, len(self._results) - 1))
             self._browser.select_row(idx)
-
+            
     def _load_games(self) -> None:
         games = self.catalog.list_games()
         self._game_ids = [g.game_id for g in games]
@@ -232,8 +233,6 @@ class ItemEditorPanel:
             self._set_status("Rebuilding index...")
             self.catalog.select_game(self._selected_game_id)
             self._stop_icon_loader()
-            self._browser_icon_cache.clear()
-            self._browser_icon_attempted.clear()
             self.catalog.load_index(force_rebuild=force_rebuild)
             self._set_status(f"Loaded ITM index for {self._selected_game_id}.")
             self._search("")
@@ -302,49 +301,132 @@ class ItemEditorPanel:
             )
             self._stop_icon_loader()
 
-    def _get_or_load_icon(self, entry: Any) -> tuple[int, int, list[float]] | None:
-        resref = str(getattr(entry, "resref", "") or "").strip().upper()
-        if not resref:
-            return None
-        if resref in self._browser_icon_attempted:
-            return self._browser_icon_cache.get(resref)
-        icon = self.catalog.load_item_icon(entry)
-        self._browser_icon_cache[resref] = icon
-        self._browser_icon_attempted.add(resref)
-        return icon
-
     def _trace_icon(self, message: str) -> None:
         if self._icon_trace_enabled:
             print(f"[IconLoad] {message}")
 
     def _start_icon_loader(self, work_items: list[tuple[int, Any, str]]) -> None:
-        # This is now a synchronous, single-threaded loader for debugging.
-        self._stop_icon_loader()  # Clear any remnants of the threaded loader.
-        if not work_items:
+        """Starts background threads to load all icons in work_items."""
+        self._stop_icon_loader()
+        if not work_items or not self._selected_game_id:
             return
 
-        total = len(self._results)
-        for i, (idx, entry, resref) in enumerate(work_items):
-            self._set_status(f"Loading icon {i + 1}/{total}: {resref}")
+        self._icon_load_token += 1
+        token = self._icon_load_token
+        self._icon_load_stop = threading.Event()
+        stop_event = self._icon_load_stop
+
+        worker_count = 2
+        self._icon_work_queue = Queue()
+        self._icon_load_queue = Queue(maxsize=worker_count * 10)
+
+        def worker() -> None:
             try:
-                icon = self._get_or_load_icon(entry)
-                self._browser.set_grid_icon(idx, icon)
-            except Exception as e:
-                self._trace_icon(f"Failed to load or set icon for {resref}: {e}")
-                traceback.print_exc()
-        self._set_status(f"{len(self._results)} item(s) found.")
+                while not stop_event.is_set():
+                    try:
+                        item = self._icon_work_queue.get(timeout=0.1)
+                    except Empty:
+                        continue
+                    if item is None:
+                        break
+                    try:
+                        idx, entry, resref = item
+                        if stop_event.is_set():
+                            break
+
+                        # Mark as attempted before loading
+                        self._browser_icon_attempted.add(resref)
+                        icon = self.catalog.load_item_icon(entry)
+                        self._browser_icon_cache[resref] = icon
+
+                        if stop_event.is_set():
+                            break
+
+                        while not stop_event.is_set():
+                            try:
+                                self._icon_load_queue.put((token, idx, resref, icon), timeout=0.05)
+                                break
+                            except Full:
+                                pass
+                    except Exception:
+                        formatted_exc = traceback.format_exc()
+                        self._trace_icon(f"worker-outer-exc exc={formatted_exc}")
+                        continue
+            finally:
+                with self._worker_lock:
+                    self._active_workers -= 1
+
+        # Populate the work queue with all items at once
+        for item in work_items:
+            self._icon_work_queue.put(item)
+
+        with self._worker_lock:
+            self._active_workers = worker_count
+
+        for _ in range(worker_count):
+            thread = threading.Thread(target=worker, daemon=True)
+            self._icon_load_threads.append(thread)
+            thread.start()
+
+        self._schedule_icon_pump()
 
     def _stop_icon_loader(self) -> None:
-        # No-op since threading is disabled for debugging.
-        pass
+        if getattr(self, "_icon_load_stop", None) is not None:
+            self._icon_load_stop.set()
+        if hasattr(self, "_icon_work_queue"):
+            for _ in range(len(self._icon_load_threads)):
+                try:
+                    self._icon_work_queue.put(None, block=False)
+                except Full:
+                    pass
+        for thread in self._icon_load_threads:
+            thread.join(timeout=0.5)
+        self._icon_load_threads.clear()
+        self._icon_load_stop = None
+        self._icon_pump_scheduled = False
+        self._icon_load_queue = Queue()
+        self._icon_work_queue = Queue()
+        with self._worker_lock:
+            self._active_workers = 0
 
     def _schedule_icon_pump(self) -> None:
-        # No-op since threading is disabled for debugging.
-        pass
+        if self._icon_pump_scheduled:
+            return
+        self._icon_pump_scheduled = True
+        frame = dpg.get_frame_count() + 1
+        dpg.set_frame_callback(frame, self._pump_icon_queue)
 
     def _pump_icon_queue(self) -> None:
-        # No-op since threading is disabled for debugging.
-        pass
+        self._icon_pump_scheduled = False
+        if self._browser.get_view_mode() != "grid":
+            return
+
+        processed = 0
+        while processed < 8 and not self._icon_load_queue.empty():
+            try:
+                token, idx, resref, icon = self._icon_load_queue.get_nowait()
+            except Empty:
+                break
+
+            if token != self._icon_load_token:
+                continue
+
+            if resref:
+                self._browser_icon_cache[resref] = icon
+            try:
+                self._browser.set_grid_icon(idx, icon)
+                self._browser_indices_set.add(idx)
+            except Exception:
+                formatted_exc = traceback.format_exc()
+                self._trace_icon(f"Failed to set grid icon for idx={idx} resref={resref} exc={formatted_exc}")
+            processed += 1
+
+        with self._worker_lock:
+            thread_alive = self._active_workers > 0
+        if thread_alive or not self._icon_load_queue.empty():
+            self._schedule_icon_pump()
+        else:
+            self._set_status(f"{len(self._results)} item(s) found.")
 
     def _clear_rows(self) -> None:
         # self._stop_icon_loader()
@@ -357,13 +439,19 @@ class ItemEditorPanel:
         if idx < 0 or idx >= len(self._results):
             return
         entry = self._results[idx]
-        try:
-            payload = self.catalog.load_item(entry)
-        except Exception as exc:
-            self._render_error_details(str(exc))
-            return
+        payload = self.catalog.load_item(entry)
+        resref = str(getattr(entry, "resref", "") or "").strip().upper()
+        icon = self._browser_icon_cache.get(resref)
+        
+        if icon is None and resref:
+            try:
+                icon = self.catalog.load_item_icon(entry)
+                if icon:
+                    self._browser_icon_cache[resref] = icon
+            except Exception as e:
+                self._trace_icon(f"On-select icon load failed for {resref}: {e}")
+                icon = None
 
-        icon = self._get_or_load_icon(entry)
         if self._browser.get_view_mode() == "grid":
             try:
                 self._browser.set_grid_icon(idx, icon)
@@ -587,7 +675,6 @@ class ItemEditorPanel:
                 try:
                     resolved = self.catalog.resolve_ids(ids_name, raw_int)
                 except Exception:
-                    traceback.print_exc()
                     resolved = ""
         elif (
             self._is_strref_field(leaf)
@@ -596,7 +683,6 @@ class ItemEditorPanel:
             try:
                 resolved = self.catalog.resolve_strref(value)
             except Exception:
-                traceback.print_exc()
                 resolved = ""
         elif self._is_itm_resref_field(leaf):
             itm_resref = self._normalize_resrefish(value)
@@ -606,7 +692,6 @@ class ItemEditorPanel:
             resolved = itm_resref
             resolved_is_resref = True
             try:
-                traceback.print_exc()
                 bam_icon = self.catalog.load_item_icon_by_itm_resref(itm_resref)
             except Exception:
                 bam_icon = None
@@ -622,7 +707,6 @@ class ItemEditorPanel:
             try:
                 bam_icon, _status = self.catalog.load_bam_icon_by_resref_with_status(bam_resref)
             except Exception:
-                traceback.print_exc()
                 bam_icon = None
         elif leaf.startswith("kit_usability_") and isinstance(value, int):
             offset = 0
@@ -635,14 +719,12 @@ class ItemEditorPanel:
             try:
                 resolved = self.catalog.resolve_kit_usability_mask(value, bit_offset=offset)
             except Exception:
-                traceback.print_exc()
                 resolved = ""
         elif leaf == "opcode" and field_path.startswith("feature_blocks[") and isinstance(value, int):
             try:
                 name, desc = self.catalog.resolve_opcode(value)
                 resolved = self._format_opcode_resolved(name, desc)
             except Exception:
-                traceback.print_exc()
                 resolved = ""
         else:
             enum_cls = self._enum_for_field(field_path)
