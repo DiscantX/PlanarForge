@@ -2,8 +2,17 @@ from __future__ import annotations
 
 import hashlib
 import json
+import threading
 from pathlib import Path
 from typing import Any, Optional
+
+# ---------------------------------------------------------------------------
+# Module-level icon cache (Bug #6 fix)
+# Keyed by (game_id, resref) so the same BAM is decoded exactly once per
+# process lifetime, surviving game switches and refreshes.
+# ---------------------------------------------------------------------------
+_global_icon_cache: dict[tuple[str, str], tuple[int, int, list[float]] | None] = {}
+_global_icon_cache_lock = threading.Lock()
 
 from core.formats.bam import decode_first_frame_rgba
 from core.formats.bmp import decode_bmp_rgba
@@ -48,6 +57,9 @@ class ItmCatalog:
         self._manager: Optional[StringManager] = None
         self._ids_manager: Optional[IdsManager] = None
         self._index: Optional[ResourceIndex] = None
+        # Bug #1 fix: serialise all KeyFile seek+read pairs so background
+        # threads cannot interleave seeks on the same file handle.
+        self._key_lock = threading.Lock()
 
     def list_games(self) -> list[GameInstallation]:
         """Return all discoverable installations."""
@@ -126,14 +138,31 @@ class ItmCatalog:
         if not icon_resref:
             return None
 
+        # Bug #6: check global cache first (keyed by game+resref)
+        game_id = self._selected_game.game_id if self._selected_game else ""
+        cache_key = (game_id, icon_resref)
+        with _global_icon_cache_lock:
+            if cache_key in _global_icon_cache:
+                return _global_icon_cache[cache_key]
+
         try:
-            key_entry = self._key.find(icon_resref, ResType.BAM)
-            if key_entry is None:
-                return None
-            raw = self._key.read_resource(key_entry, game_root=self._selected_game)
-            return decode_first_frame_rgba(raw)
+            # Bug #1: hold the key lock for the entire find+read pair so
+            # background threads cannot interleave seeks on the file handle.
+            with self._key_lock:
+                key_entry = self._key.find(icon_resref, ResType.BAM)
+                if key_entry is None:
+                    with _global_icon_cache_lock:
+                        _global_icon_cache[cache_key] = None
+                    return None
+                raw = self._key.read_resource(key_entry, game_root=self._selected_game)
+            # Decode outside the lock — pure computation, no I/O.
+            result = decode_first_frame_rgba(raw)
         except Exception:
-            return None
+            result = None
+
+        with _global_icon_cache_lock:
+            _global_icon_cache[cache_key] = result
+        return result
 
     def load_item_name_and_icon_by_resref(self, itm_resref: Any) -> tuple[str, tuple[int, int, list[float]] | None]:
         """Resolve ITM name and inventory icon by ITM ResRef."""
@@ -202,9 +231,10 @@ class ItmCatalog:
         else:
             candidates.append(f"C{base}")
         candidates.append(f"#{base}")
-        # ResRef semantics are max 8 chars; include a strict-8 fallback.
         if len(base) > 8:
             candidates.append(base[:8])
+
+        game_id = self._selected_game.game_id if self._selected_game else ""
 
         seen: set[str] = set()
         notes: list[str] = []
@@ -212,28 +242,43 @@ class ItmCatalog:
             if not resref or resref in seen:
                 continue
             seen.add(resref)
-            # Prefer BAM; fallback to BMP for installs/resources that use BMP icons.
+
             for res_type, label, decoder in (
                 (ResType.BAM, "BAM", decode_first_frame_rgba),
                 (ResType.BMP, "BMP", decode_bmp_rgba),
             ):
-                try:
-                    key_entry = self._key.find(resref, res_type)
-                except Exception as exc:
-                    notes.append(f"{label}:{resref} find-error={type(exc).__name__}")
-                    continue
-                if key_entry is None:
-                    continue
+                # Bug #6: check global cache before any I/O
+                cache_key = (game_id, f"{resref}.{label}")
+                with _global_icon_cache_lock:
+                    if cache_key in _global_icon_cache:
+                        cached = _global_icon_cache[cache_key]
+                        if cached is not None:
+                            return cached, f"{label}:{resref} (cached)"
+                        # cached None means we already know it's not there
+                        continue
 
                 try:
-                    payload = self._key.read_resource(key_entry, game_root=self._selected_game)
+                    # Bug #1: hold key lock for find+read pair
+                    with self._key_lock:
+                        key_entry = self._key.find(resref, res_type)
+                        if key_entry is None:
+                            with _global_icon_cache_lock:
+                                _global_icon_cache[cache_key] = None
+                            continue
+                        payload = self._key.read_resource(key_entry, game_root=self._selected_game)
                 except Exception as exc:
                     notes.append(f"{label}:{resref} read-error={type(exc).__name__}")
                     continue
+
                 try:
-                    return decoder(payload), f"{label}:{resref}"
+                    result = decoder(payload)
+                    with _global_icon_cache_lock:
+                        _global_icon_cache[cache_key] = result
+                    return result, f"{label}:{resref}"
                 except Exception as exc:
                     notes.append(f"{label}:{resref} decode-error={type(exc).__name__}")
+                    with _global_icon_cache_lock:
+                        _global_icon_cache[cache_key] = None
 
         if notes:
             return None, notes[0]

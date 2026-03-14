@@ -317,13 +317,21 @@ class ItemEditorPanel:
         self._icon_work_queue = Queue()
         self._icon_load_queue = Queue(maxsize=worker_count * 10)
 
+        # Bug #3 fix: capture both queues as locals so workers keep a stable
+        # reference.  _stop_icon_loader replaces self._icon_work_queue and
+        # self._icon_load_queue with fresh objects; any worker still alive
+        # after the join timeout must not silently switch to the new queues.
+        work_q = self._icon_work_queue
+        result_q = self._icon_load_queue
+
         def worker() -> None:
             try:
                 while not stop_event.is_set():
                     try:
-                        item = self._icon_work_queue.get(timeout=0.1)
+                        item = work_q.get(timeout=0.1)
                     except Empty:
                         continue
+                    # Bug #4 fix: None sentinel signals clean exit after queue drains.
                     if item is None:
                         break
                     try:
@@ -331,31 +339,39 @@ class ItemEditorPanel:
                         if stop_event.is_set():
                             break
 
-                        # Mark as attempted before loading
-                        self._browser_icon_attempted.add(resref)
                         icon = self.catalog.load_item_icon(entry)
+
+                        # Bug #5 fix: write to cache first, then mark as
+                        # attempted.  If _populate_browser races and reads
+                        # _attempted before we set it, the resref goes back
+                        # into to_load — harmless because the catalog's
+                        # global cache makes the second decode instantaneous.
                         self._browser_icon_cache[resref] = icon
+                        self._browser_icon_attempted.add(resref)
 
                         if stop_event.is_set():
                             break
 
                         while not stop_event.is_set():
                             try:
-                                self._icon_load_queue.put((token, idx, resref, icon), timeout=0.05)
+                                result_q.put((token, idx, resref, icon), timeout=0.05)
                                 break
                             except Full:
                                 pass
                     except Exception:
                         formatted_exc = traceback.format_exc()
-                        self._trace_icon(f"worker-outer-exc exc={formatted_exc}")
+                        self._trace_icon(f"worker-exc exc={formatted_exc}")
                         continue
             finally:
                 with self._worker_lock:
                     self._active_workers -= 1
 
-        # Populate the work queue with all items at once
+        # Populate work queue, then push one sentinel per worker so they exit
+        # cleanly once the queue drains (Bug #4 fix).
         for item in work_items:
             self._icon_work_queue.put(item)
+        for _ in range(worker_count):
+            self._icon_work_queue.put(None)
 
         with self._worker_lock:
             self._active_workers = worker_count
@@ -418,12 +434,16 @@ class ItemEditorPanel:
                 self._trace_icon(f"Failed to set grid icon for idx={idx} resref={resref} exc={formatted_exc}")
             processed += 1
 
-        if (self._icon_load_stop and not self._icon_load_stop.is_set()) or not self._icon_load_queue.empty():
+        # Bug #4 fix: keep pumping while workers are still alive OR the result
+        # queue still has items to drain.  Workers now exit naturally via
+        # sentinel, so _active_workers reaching 0 is the reliable "all done"
+        # signal rather than checking the stop event.
+        with self._worker_lock:
+            workers_alive = self._active_workers > 0
+        if workers_alive or not self._icon_load_queue.empty():
             self._schedule_icon_pump()
         else:
-            with self._worker_lock:
-                if self._active_workers == 0:
-                    self._set_status(f"{len(self._results)} item(s) found.")
+            self._set_status(f"{len(self._results)} item(s) found.")
 
     def _clear_rows(self) -> None:
         # self._stop_icon_loader()
@@ -439,15 +459,25 @@ class ItemEditorPanel:
         payload = self.catalog.load_item(entry)
         resref = str(getattr(entry, "resref", "") or "").strip().upper()
         icon = self._browser_icon_cache.get(resref)
-        
+
+        # Bug #2 fix: only attempt a synchronous on-demand load when no
+        # background workers are running.  While workers are active, the same
+        # resref is either being loaded by a worker or will be shortly; a
+        # concurrent main-thread load would race the workers on the shared
+        # KeyFile handle (the root cause of Bug #1).  The pump will update the
+        # grid cell as soon as the worker's result arrives.
         if icon is None and resref:
-            try:
-                icon = self.catalog.load_item_icon(entry)
-                if icon:
-                    self._browser_icon_cache[resref] = icon
-            except Exception as e:
-                self._trace_icon(f"On-select icon load failed for {resref}: {e}")
-                icon = None
+            with self._worker_lock:
+                workers_alive = self._active_workers > 0
+            if not workers_alive:
+                try:
+                    icon = self.catalog.load_item_icon(entry)
+                    if icon:
+                        self._browser_icon_cache[resref] = icon
+                        self._browser_icon_attempted.add(resref)
+                except Exception as e:
+                    self._trace_icon(f"On-select icon load failed for {resref}: {e}")
+                    icon = None
 
         if self._browser.get_view_mode() == "grid":
             try:
