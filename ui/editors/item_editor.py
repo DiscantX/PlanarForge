@@ -205,14 +205,9 @@ class ItemEditorPanel:
     def _on_browser_view_changed(self, _sender: Any, app_data: str) -> None:
         label = str(app_data or "").strip().lower()
         mode = "grid" if label.startswith("icon") else "list"
-        selected = self._browser.get_selected_index()
         self._browser.set_view_mode(mode)
-        self._populate_browser(include_icons=(mode == "grid"))
-        if self._results:
-            idx = selected if selected is not None else 0
-            idx = max(0, min(idx, len(self._results) - 1))
-            self._browser.select_row(idx)
-            
+        self.refresh_results()
+
     def _load_games(self) -> None:
         games = self.catalog.list_games()
         self._game_ids = [g.game_id for g in games]
@@ -233,6 +228,8 @@ class ItemEditorPanel:
             self._set_status("Rebuilding index...")
             self.catalog.select_game(self._selected_game_id)
             self._stop_icon_loader()
+            self._browser_icon_cache.clear()
+            self._browser_icon_attempted.clear()
             self.catalog.load_index(force_rebuild=force_rebuild)
             self._set_status(f"Loaded ITM index for {self._selected_game_id}.")
             self._search("")
@@ -421,12 +418,12 @@ class ItemEditorPanel:
                 self._trace_icon(f"Failed to set grid icon for idx={idx} resref={resref} exc={formatted_exc}")
             processed += 1
 
-        with self._worker_lock:
-            thread_alive = self._active_workers > 0
-        if thread_alive or not self._icon_load_queue.empty():
+        if (self._icon_load_stop and not self._icon_load_stop.is_set()) or not self._icon_load_queue.empty():
             self._schedule_icon_pump()
         else:
-            self._set_status(f"{len(self._results)} item(s) found.")
+            with self._worker_lock:
+                if self._active_workers == 0:
+                    self._set_status(f"{len(self._results)} item(s) found.")
 
     def _clear_rows(self) -> None:
         # self._stop_icon_loader()
